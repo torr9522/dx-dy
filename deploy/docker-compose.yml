@@ -1,0 +1,58 @@
+name: ${DXDY_COMPOSE_PROJECT:-dx-dy}
+
+services:
+  app:
+    image: ${DXDY_IMAGE_REFERENCE:?Set DXDY_IMAGE_REFERENCE to a versioned image or digest}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${DXDY_RUNTIME_ENV:?Set DXDY_RUNTIME_ENV}
+    expose:
+      - "3000"
+    volumes:
+      - ${DXDY_DATA_DIR:?Set DXDY_DATA_DIR}:/data
+      - ${DXDY_BACKUP_DIR:?Set DXDY_BACKUP_DIR}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  caddy:
+    image: ${DXDY_CADDY_IMAGE:-caddy:2.10.2-alpine}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ${DXDY_CADDYFILE:?Set DXDY_CADDYFILE}:/etc/caddy/Caddyfile:ro
+      - ${DXDY_CADDY_DATA:?Set DXDY_CADDY_DATA}:/data
+      - ${DXDY_CADDY_CONFIG:?Set DXDY_CADDY_CONFIG}:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

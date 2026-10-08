@@ -21,7 +21,7 @@ export async function gitleaks() {
       throw new Error("Provide GITLEAKS_BIN version " + toolVersion);
     const dir = path.join(
       os.homedir(),
-      ".cache/private-subscription-manager/tools/gitleaks-" + toolVersion,
+      ".cache/dx-dy/tools/gitleaks-" + toolVersion,
     );
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     binary = path.join(dir, "gitleaks");

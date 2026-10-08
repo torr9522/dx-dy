@@ -25,7 +25,7 @@ const archive = gzipSync(tar, { level: 9 });
 mkdirSync("dist", { recursive: true });
 for (const file of [
   "dist/source.tar.gz",
-  `dist/private-subscription-manager-${version()}-source.tar.gz`,
+  `dist/dx-dy-${version()}-source.tar.gz`,
 ])
   writeFileSync(file, archive, { mode: 0o644 });
 console.log(

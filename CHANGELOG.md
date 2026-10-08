@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-08
+
+### Added
+
+- Added an owner-neutral one-command Docker installation workflow with interactive single/dual-domain setup, secure administrator initialization and Caddy automatic HTTPS.
+- Added the `dx-dy` SSH management menu and non-interactive lifecycle, update, administrator recovery, domain, backup, migration, restore, logs, doctor and uninstall commands.
+- Added an application-owned administrator CLI that reads credentials from stdin, uses the existing Argon2id policy and invalidates active sessions.
+- Added public GitHub CI, multi-architecture GHCR release infrastructure, release manifests and public release checks.
+
+### Changed
+
+- Public product branding is now dx-dy; public deployment defaults contain only reserved example domains and no instance-specific identity.
+- New installations use the dx-dy standard paths while the manager continues to recognize the legacy production path.
+- Releases from 0.1.8 onward use direct annotated `vX.Y.Z` tags without an RC suffix.
+
+### Security
+
+- Sanitized the complete public Git history before first publication while retaining all functional history and annotated historical tags.
+- Password initialization and recovery avoid process arguments; the Web application receives neither host root privileges nor a Docker socket.
+- Production configuration remains external to Git, and root-managed domain changes validate Caddy candidates before activation.
+
+### Compatibility
+
+- Existing database schema, nodes, Collections, subscriptions, Tokens, Universal Base64 output, semantic duplicate protection, `.psmbackup` files and dual-domain behavior remain compatible.
+
 ## [0.1.7-rc.1] - 2026-10-08
 
 ### Fixed

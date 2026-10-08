@@ -21,7 +21,10 @@ const { app, store } = await createApp({
 const server = app.listen(
   Number(process.env.PORT || 3000),
   process.env.HOST || "0.0.0.0",
-  () => console.log(JSON.stringify({ event: "ready", version: "0.1.7" })),
+  () =>
+    console.log(
+      JSON.stringify({ event: "ready", name: "dx-dy", version: "0.1.8" }),
+    ),
 );
 for (const signal of ["SIGTERM", "SIGINT"])
   process.on(signal, () => {

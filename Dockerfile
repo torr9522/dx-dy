@@ -7,6 +7,13 @@ COPY . .
 RUN pnpm build && pnpm prune --prod
 
 FROM node:26.10.0-bookworm-slim
+ARG VERSION=0.1.8
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="dx-dy" \
+      org.opencontainers.image.description="Private Node & Subscription Manager" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$REVISION" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 WORKDIR /app
 ENV NODE_ENV=production DATABASE_PATH=/data/private-subscription-manager.db PORT=3000 HOST=0.0.0.0
 COPY --from=build /app/dist ./dist

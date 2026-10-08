@@ -27,7 +27,7 @@ import {
   snapshot,
   validateDatabase,
 } from "../apps/api/src/database-safety";
-const version = "0.1.7",
+const version = "0.1.8",
   database =
     process.env.DATABASE_PATH || "/data/private-subscription-manager.db";
 const stamp = () =>
@@ -38,12 +38,15 @@ const stamp = () =>
 const command = process.argv[2],
   argument = process.argv[3];
 const defaultName = (extension: string) =>
-  path.resolve(
-    "data/backups",
-    `private-subscription-manager-${version}-${stamp()}.${extension}`,
-  );
+  path.resolve("data/backups", `dx-dy-${version}-${stamp()}.${extension}`);
+let stdinPassword: string | undefined;
 const password = () => {
-  const p = process.env.BACKUP_PASSWORD || "";
+  if (
+    process.env.BACKUP_PASSWORD_STDIN === "true" &&
+    stdinPassword === undefined
+  )
+    stdinPassword = readFileSync(0, "utf8").replace(/[\r\n]+$/, "");
+  const p = stdinPassword ?? process.env.BACKUP_PASSWORD ?? "";
   if (p.length < 16)
     throw new Error("BACKUP_PASSWORD must be at least 16 characters");
   return p;

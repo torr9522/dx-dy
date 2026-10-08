@@ -156,7 +156,7 @@ function App() {
     [profiles, setProfiles] = useState<Profile[]>([]),
     [collections, setCollections] = useState<NodeCollection[]>([]),
     [settings, setSettings] = useState<SettingsData>({
-      site_name: "私人节点库",
+      site_name: "dx-dy",
       admin_base_url: "",
       subscription_base_url: "",
       default_format: "v2ray",
@@ -225,7 +225,7 @@ function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
-  if (boot) return <div className="loading">正在连接私人节点库…</div>;
+  if (boot) return <div className="loading">正在连接 dx-dy…</div>;
   if (!user)
     return (
       <>
@@ -259,7 +259,7 @@ function App() {
           </div>
           <div>
             <strong>{settings.site_name}</strong>
-            <small>PRIVATE SPACE</small>
+            <small>PRIVATE NODE SPACE</small>
           </div>
         </div>
         <div className="nav-label">工作空间</div>
@@ -285,7 +285,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.7</small>
+          <small>dx-dy v0.1.8</small>
         </div>
       </aside>
       <main>
@@ -588,7 +588,7 @@ function Login({
         </button>
         <small>
           <ShieldCheck size={14} />
-          服务器端安全会话 · 私人节点管理
+          服务器端安全会话 · dx-dy
         </small>
         <a href="/source.tar.gz">对应源码 · AGPL-3.0</a>
       </form>
@@ -2216,9 +2216,9 @@ function SettingsPage({
           />
         </Field>
         <div className="notice">
-          用于生成复制链接和二维码。修改不会改变现有
-          Token，但以后生成的链接会使用新域名；请先确保新域名已正确解析并启用
-          HTTPS。客户端中已保存的旧地址不会自动修改。
+          用于生成复制链接和二维码。修改不会改变现有 Token。如果使用 dx-dy 内置
+          Caddy/HTTPS，请通过 SSH 执行 dx-dy domain，使
+          Caddy、证书和应用配置同步更新。 客户端中已保存的旧地址不会自动修改。
         </div>
         <button className="primary">保存设置</button>
       </form>

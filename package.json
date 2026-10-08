@@ -1,6 +1,6 @@
 {
-  "name": "private-subscription-manager",
-  "version": "0.1.7",
+  "name": "dx-dy",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm adapter:build && vitest run",
     "test:e2e": "playwright test",
-    "build": "pnpm adapter:build && vite build --config apps/web/vite.config.ts && esbuild apps/api/src/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs && esbuild scripts/backup.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/backup.mjs && esbuild scripts/database.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/database.mjs && node scripts/source.mjs",
+    "build": "pnpm adapter:build && vite build --config apps/web/vite.config.ts && esbuild apps/api/src/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs && esbuild scripts/backup.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/backup.mjs && esbuild scripts/database.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/database.mjs && esbuild scripts/admin-cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/admin-cli.mjs && esbuild scripts/domain-cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/domain-cli.mjs && node scripts/source.mjs",
+    "admin": "tsx scripts/admin-cli.ts",
     "start": "node dist/server.mjs",
     "backup": "tsx scripts/backup.ts",
     "db:backup": "tsx scripts/database.ts backup",
@@ -27,6 +28,7 @@
     "source:archive": "node scripts/source.mjs",
     "source:verify": "node scripts/verify-source.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs",
     "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {

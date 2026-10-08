@@ -61,8 +61,19 @@ Copy these checks into the release review; do not precheck them from an earlier 
 - [ ] Release commit frozen; tests correspond to that commit
 - [ ] Runtime-changing release deployed/validated from clean committed HEAD
 - [ ] Real Shadowrocket and other required device acceptance before stable
-- [ ] Annotated RC tag, tag object and target recorded
-- [ ] Stable explicitly approved by user before stable tag creation
+- [ ] Annotated direct version tag (0.1.8+) or historical RC tag, tag object and target recorded
+- [ ] Publication coordinates and release metadata are final before tagging
+
+## Public release
+
+- [ ] Private pre-public bundle verified and stored outside the repository
+- [ ] Complete reachable history and local objects contain no production identities
+- [ ] Historical tag names, chronology and annotated type preserved
+- [ ] Public brand, installer, manager, Docker/Caddy templates and docs consistent
+- [ ] ShellCheck and isolated installer/manager tests passed
+- [ ] CI and release workflows use least privilege and never deploy production
+- [ ] Multi-architecture image and release manifest paths are owner-neutral
+- [ ] No database, backup, `.env`, instance key, production log or Playwright secret artifact
 
 ## Remote — not authorized in this baseline
 

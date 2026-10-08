@@ -21,10 +21,11 @@ import { secretScan } from "./secret-scan.mjs";
 import { verifySource } from "./verify-source.mjs";
 
 const full = process.argv.includes("--full");
+const publicMode = process.argv.includes("--public");
 const detached = process.argv.includes("--fresh-child");
-const allowed = new Set(["--full", "--fresh-child"]);
+const allowed = new Set(["--full", "--public", "--fresh-child"]);
 if (process.argv.slice(2).some((a) => !allowed.has(a)))
-  throw new Error("Usage: pnpm release:check [--full]");
+  throw new Error("Usage: pnpm release:check [--full] [--public]");
 if (git("status", "--porcelain"))
   throw new Error(
     "Release gate requires clean committed Git, including untracked source",
@@ -44,15 +45,15 @@ const v = version();
 if (!/^\d+\.[0-9]\.[0-9]$/.test(v))
   throw new Error("Invalid decimal product version");
 for (const [file, text] of [
-  ["README.md", "Private Subscription Manager " + v],
+  ["README.md", "dx-dy " + v],
   ["apps/api/src/app.ts", `version: "${v}"`],
   ["apps/api/src/main.ts", `version: "${v}"`],
-  ["apps/api/src/app.ts", `private-subscription-manager-${v}-source.tar.gz`],
-  ["docker-compose.yml", "private-subscription-manager:" + v],
+  ["apps/api/src/app.ts", `dx-dy-${v}-source.tar.gz`],
+  ["docker-compose.yml", "dx-dy:" + v],
 ])
   if (!readFileSync(file, "utf8").includes(text))
     throw new Error("Version drift in " + file);
-if (!readFileSync("CHANGELOG.md", "utf8").includes("[" + v + "-rc."))
+if (!readFileSync("CHANGELOG.md", "utf8").includes("[" + v + "]"))
   throw new Error("Missing release changelog");
 if (
   !readFileSync("LICENSE", "utf8").includes("GNU AFFERO GENERAL PUBLIC LICENSE")
@@ -96,6 +97,7 @@ if (audit.status !== 0)
 for (const script of ["lint", "typecheck", "test", "build"])
   run("pnpm", [script]);
 await verifySource();
+if (publicMode) run("node", ["scripts/public-release-check.mjs"]);
 if (git("status", "--porcelain"))
   throw new Error(
     "Build modified source or created untracked release artifacts",
@@ -106,7 +108,7 @@ if (full) {
   const temp = mkdtempSync(
     path.join(
       process.env.RELEASE_TMPDIR || os.tmpdir(),
-      "private-subscription-manager-release-check-",
+      "dx-dy-release-check-",
     ),
   );
   const checkout = path.join(temp, "checkout");
@@ -118,13 +120,21 @@ if (full) {
       if (existsSync(path.join(checkout, item)))
         throw new Error("Fresh checkout inherited " + item);
     console.log("Fresh checkout: " + checkout);
-    run("node", ["scripts/release-check.mjs", "--fresh-child"], {
-      cwd: checkout,
-      env: {
-        ...process.env,
-        RELEASE_PNPM_STORE: path.join(temp, "pnpm-store"),
+    run(
+      "node",
+      [
+        "scripts/release-check.mjs",
+        "--fresh-child",
+        ...(publicMode ? ["--public"] : []),
+      ],
+      {
+        cwd: checkout,
+        env: {
+          ...process.env,
+          RELEASE_PNPM_STORE: path.join(temp, "pnpm-store"),
+        },
       },
-    });
+    );
     const hash = (file) =>
       createHash("sha256").update(readFileSync(file)).digest("hex");
     if (

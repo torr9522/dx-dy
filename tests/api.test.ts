@@ -41,9 +41,10 @@ describe("API and domain regression", () => {
     agent.patch(route).set("X-CSRF-Token", csrf).send(body);
   it("health contains no secrets", async () => {
     expect((await request(system.app).get("/health")).body).toEqual({
+      name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.1.7",
+      version: "0.1.8",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {

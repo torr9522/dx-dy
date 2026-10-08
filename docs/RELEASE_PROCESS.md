@@ -8,13 +8,13 @@ Keep the existing `master` single mainline (no Git Flow). The release gate check
 
 ## Version and tags
 
-`package.json.version` is the product version source of truth, currently **0.1.7**. README, `/health`, ready event, source download filename and Compose image version are checked against it by the release gate. Update all copies together.
+`package.json.version` is the product version source of truth, currently **0.1.8**. README, `/health`, ready event, source download filename and Compose image version are checked against it by the release gate. Update all copies together.
 
-The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). This task is `0.1.6 → 0.1.7`; the next actual task is `0.1.8`, not another RC of 0.1.7. MINOR and PATCH are single decimal digits. Release identity remains separate: `vX.Y.Z-rc.N`, normally rc.1 for a new task version. Revalidation within that same task may use another RC; it cannot substitute for the next task's version increment.
+The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). MINOR and PATCH are single decimal digits. Versions 0.1.0 through 0.1.7 retain their historical RC tags. Starting with 0.1.8, a completed release uses one direct annotated unsigned `vX.Y.Z` tag after the full gate and production validation; no new `-rc.N` tags are created.
 
-After each completed task: commit + CHANGELOG + tests + production build + required Docker/deployment validation + **annotated unsigned RC tag** + clean Git. Record both tag object SHA and peeled commit target. Never move an existing published/approved tag. RC1/RC2 identify historical product states; RC3 adds release tooling and does not certify device acceptance.
+After each completed task: commit + CHANGELOG + tests + production build + required Docker/deployment validation + **annotated unsigned direct version tag** + clean Git. Record both tag object SHA and peeled commit target. Never move an existing tag. Publication coordinates and tracked release metadata must be correct before the tag is created.
 
-**Stable tags require explicit user approval** (for example “publish vX.Y.Z” or “create stable tag”). Codex may create RC tags after passing checks; it may not independently create a stable tag, signing key, remote repository, remote configuration, GitHub/GitLab release or push. Annotated unsigned tags are sufficient unless the user supplies a signing policy/key.
+Remote creation, push, GitHub Release and GHCR publication require explicit user approval. Annotated unsigned tags are sufficient unless the user supplies a signing policy/key.
 
 ## One-command local gate
 
@@ -39,7 +39,7 @@ Edit → stage all intended source → `pnpm source:manifest` → commit → run
 
 ## Source archives and fresh installs
 
-`pnpm source:archive` generates `dist/source.tar.gz` and `dist/private-subscription-manager-<version>-source.tar.gz`. `scripts/source-files.json` is the committed Git-tracked inventory. In Git checkouts, generation verifies it exactly matches `git ls-files`. In Docker/Git-free corresponding-source trees, the same committed inventory is used; unlisted files are never archived. Tar ordering, timestamps, file modes, owner/group and gzip encoding are normalized; symlinks and forbidden artifact paths are rejected. Release checks enforce clean committed content before building and confirm it stayed frozen through validation. Verify archives with `pnpm source:verify`; they must include all inventoried files, license, docs, lockfile and migrations and pass a secret scan. The full gate also compares archive hashes across the original checkout and fresh worktree.
+`pnpm source:archive` generates `dist/source.tar.gz` and `dist/dx-dy-<version>-source.tar.gz`. `scripts/source-files.json` is the committed Git-tracked inventory. In Git checkouts, generation verifies it exactly matches `git ls-files`. In Docker/Git-free corresponding-source trees, the same committed inventory is used; unlisted files are never archived. Tar ordering, timestamps, file modes, owner/group and gzip encoding are normalized; symlinks and forbidden artifact paths are rejected. Release checks enforce clean committed content before building and confirm it stayed frozen through validation. Verify archives with `pnpm source:verify`; they must include all inventoried files, license, docs, lockfile and migrations and pass a secret scan. The full gate also compares archive hashes across the original checkout and fresh worktree.
 
 Normal builds do not require an upstream checkout or hidden developer files. `pnpm vendor` is only an intentional adapter refresh, with `SUB_STORE_SOURCE` explicitly pointing to the exact audited upstream commit. The committed vendor closure is sufficient to reproduce builds.
 

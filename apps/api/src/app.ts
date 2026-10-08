@@ -13,6 +13,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { Store, now } from "./db";
 import {
+  adminPasswordSchema,
+  hashAdminPassword,
+  resetAdminPassword,
+} from "./admin-service";
+import { normalizeHttpsOrigin, setSubscriptionBase } from "./domain-service";
+import {
   decryptToken,
   digest,
   encryptToken,
@@ -52,31 +58,11 @@ export function normalizeSubscriptionBase(
   input: string,
   allowInsecureLocalhost = false,
 ) {
-  let url: URL;
   try {
-    url = new URL(input.trim());
+    return normalizeHttpsOrigin(input, allowInsecureLocalhost);
   } catch {
     throw new ApiError(400, "SUBSCRIPTION_BASE_URL", "订阅域名格式不正确");
   }
-  const local =
-    url.hostname === "localhost" ||
-    url.hostname === "127.0.0.1" ||
-    url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !(allowInsecureLocalhost && local))
-    throw new ApiError(400, "SUBSCRIPTION_BASE_URL", "订阅域名必须使用 HTTPS");
-  if (
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  )
-    throw new ApiError(
-      400,
-      "SUBSCRIPTION_BASE_URL",
-      "订阅域名只能包含协议、主机名和可选端口",
-    );
-  return url.origin;
 }
 class ApiError extends Error {
   constructor(
@@ -113,12 +99,7 @@ export async function createApp(options: Options) {
     store.run(
       "INSERT INTO admins VALUES(1,?,?,?,?)",
       options.username || "admin",
-      await argon2.hash(options.initialPassword, {
-        type: argon2.argon2id,
-        memoryCost: 19456,
-        timeCost: 2,
-        parallelism: 1,
-      }),
+      await hashAdminPassword(options.initialPassword),
       now(),
       now(),
     );
@@ -217,7 +198,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.7" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.1.8" });
   });
   app.post(
     "/api/auth/login",
@@ -306,24 +287,12 @@ export async function createApp(options: Options) {
   });
   app.post("/api/auth/password", limiter(10), async (req, res) => {
     const x = z
-      .object({ current: z.string(), password: z.string().min(12).max(200) })
+      .object({ current: z.string(), password: adminPasswordSchema })
       .parse(req.body);
     const admin = store.get("SELECT * FROM admins WHERE id=1");
     if (!(await argon2.verify(String(admin?.password_hash), x.current)))
       return fail(400, "PASSWORD", "当前密码错误");
-    store.transaction(() => {
-      store.run("DELETE FROM admin_sessions");
-    });
-    store.run(
-      "UPDATE admins SET password_hash=?,updated_at=? WHERE id=1",
-      await argon2.hash(x.password, {
-        type: argon2.argon2id,
-        memoryCost: 19456,
-        timeCost: 2,
-        parallelism: 1,
-      }),
-      now(),
-    );
+    await resetAdminPassword(store, x.password);
     res.clearCookie("psm_session", cookie).json({ ok: true });
   });
   app.get("/api/nodes", (_req, res) =>
@@ -784,7 +753,7 @@ export async function createApp(options: Options) {
   const publicSettings = () => {
     const settings = store.settings();
     return {
-      site_name: String(settings.site_name || "私人节点库"),
+      site_name: String(settings.site_name || "dx-dy"),
       admin_base_url: options.adminBase,
       subscription_base_url: String(settings.subscription_base_url),
       default_format: String(settings.default_format || "v2ray"),
@@ -804,23 +773,11 @@ export async function createApp(options: Options) {
       !options.secure,
     );
     const previousHost = new URL(subscriptionBase()).host;
-    const nextHost = new URL(nextBase).host;
-    const storedLegacyHosts = store.settings().subscription_legacy_hosts;
-    const legacyHosts = Array.isArray(storedLegacyHosts)
-      ? storedLegacyHosts.map(String)
-      : [];
-    if (
-      previousHost !== nextHost &&
-      previousHost !== adminHost &&
-      !legacyHosts.includes(previousHost)
-    )
-      legacyHosts.push(previousHost);
     store.transaction(() => {
       store.set("site_name", x.site_name);
       store.set("default_format", x.default_format);
-      store.set("subscription_base_url", nextBase);
-      store.set("subscription_legacy_hosts", legacyHosts);
     });
+    const { nextHost } = setSubscriptionBase(store, nextBase, !options.secure);
     if (previousHost !== nextHost)
       console.info(
         JSON.stringify({
@@ -875,7 +832,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.7-source.tar.gz",
+        "dx-dy-0.1.8-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");
