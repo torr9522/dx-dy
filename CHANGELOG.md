@@ -27,6 +27,10 @@
 
 - Existing database schema, nodes, Collections, subscriptions, Tokens, Universal Base64 output, semantic duplicate protection, `.psmbackup` files and dual-domain behavior remain compatible.
 
+### Validation
+
+- Made isolated installer and manager fixtures portable to non-root CI runners while retaining root requirements outside the explicitly constrained test path.
+
 ## [0.1.7-rc.1] - 2026-10-08
 
 ### Fixed

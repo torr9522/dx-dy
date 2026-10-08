@@ -225,7 +225,7 @@ EOF
 commit_installation() {
   install -d -m 0750 "$CONFIG_DIR" "$INSTALL_ROOT"
   install -d -m 0700 "$DATA_DIR" "$BACKUP_DIR" "$DATA_DIR/caddy-data" "$DATA_DIR/caddy-config"
-  chown 1000:1000 "$DATA_DIR" "$BACKUP_DIR"
+  [[ "$TEST_MODE" == 1 ]] || chown 1000:1000 "$DATA_DIR" "$BACKUP_DIR"
   install -m 0600 "$STAGING/install.conf" "$CONFIG_DIR/install.conf"
   install -m 0600 "$STAGING/runtime.env" "$CONFIG_DIR/runtime.env"
   install -m 0644 "$STAGING/Caddyfile" "$CONFIG_DIR/Caddyfile"
