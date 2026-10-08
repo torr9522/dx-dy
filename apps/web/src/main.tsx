@@ -156,11 +156,11 @@ function App() {
     [editing, setEditing] = useState<NodeRecord | null>(null),
     [profile, setProfile] = useState<Profile | null>(null),
     [newProfile, setNewProfile] = useState(false);
-  const [confirm, setConfirm] = useState<{
-    title: string;
-    text: string;
-    run: () => Promise<void>;
-  } | null>(null);
+  const [confirm, setConfirm] = useState<Confirmation | null>(null);
+  const confirmationFocus = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => {
+    if (confirm) confirmationFocus.current = confirm.returnFocus;
+  }, [confirm]);
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [tag, setTag] = useState(""),
@@ -260,6 +260,7 @@ function App() {
           {nav.map(([key, label, Icon]) => (
             <button
               key={key}
+              data-page={key}
               className={page === key ? "nav active" : "nav"}
               onClick={() => {
                 setPage(key);
@@ -277,7 +278,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.2</small>
+          <small>Private Subscription Manager v0.1.3</small>
         </div>
       </aside>
       <main>
@@ -554,6 +555,14 @@ function App() {
                         copy={copy}
                         notify={notify}
                         compact
+                        deleteAction={
+                          <DeleteSubscriptionAction
+                            profileId={p.id}
+                            name={p.name}
+                            confirm={setConfirm}
+                            onDeleted={refresh}
+                          />
+                        }
                       />
                       <button
                         className="profile-open"
@@ -609,6 +618,13 @@ function App() {
         open={!!confirm}
         onClose={() => setConfirm(null)}
         title={confirm?.title || "确认"}
+        returnFocus={() => {
+          if (confirmationFocus.current) confirmationFocus.current();
+          else
+            document
+              .querySelector<HTMLButtonElement>("button.nav.active")
+              ?.focus();
+        }}
       >
         <p>{confirm?.text}</p>
         <div className="modal-actions">
@@ -620,7 +636,7 @@ function App() {
               action(async () => {
                 await confirm?.run();
                 setConfirm(null);
-                notify("操作已完成");
+                notify(confirm?.successMessage || "操作已完成");
               })
             }
           >
@@ -1007,9 +1023,14 @@ function ImportDialog({
     </Modal>
   );
 }
-type ConfirmSetter = (
-  v: { title: string; text: string; run: () => Promise<void> } | null,
-) => void;
+type Confirmation = {
+  title: string;
+  text: string;
+  run: () => Promise<void>;
+  returnFocus?: () => void;
+  successMessage?: string;
+};
+type ConfirmSetter = (v: Confirmation | null) => void;
 function NodeDrawer({
   node,
   onClose,
@@ -1556,18 +1577,63 @@ function SortableNode({
     </div>
   );
 }
+function DeleteSubscriptionAction({
+  profileId,
+  name,
+  confirm,
+  onDeleted,
+}: {
+  profileId: number;
+  name: string;
+  confirm: ConfirmSetter;
+  onDeleted: () => Promise<void>;
+}) {
+  const button = useRef<HTMLButtonElement>(null);
+  return (
+    <button
+      ref={button}
+      className="danger-text subscription-delete"
+      aria-label="删除订阅"
+      title="删除订阅"
+      onClick={() =>
+        confirm({
+          title: "删除订阅",
+          text: `即将删除订阅“${name}”。删除后当前订阅链接立即失效；仅删除 Subscription Profile 和关联关系，全局节点本身不会被删除。`,
+          successMessage: "订阅已删除",
+          returnFocus: () => {
+            if (button.current?.isConnected) button.current.focus();
+            else
+              document
+                .querySelector<HTMLButtonElement>(
+                  'button[data-page="subscriptions"]',
+                )
+                ?.focus();
+          },
+          run: async () => {
+            await api(`/subscriptions/${profileId}`, "DELETE", {});
+            await onDeleted();
+          },
+        })
+      }
+    >
+      删除订阅
+    </button>
+  );
+}
 function SubscriptionActions({
   profileId,
   name,
   copy,
   notify,
   compact = false,
+  deleteAction,
 }: {
   profileId: number;
   name: string;
   copy: (s: string) => Promise<void>;
   notify: (s: string) => void;
   compact?: boolean;
+  deleteAction?: React.ReactNode;
 }) {
   const previewButton = useRef<HTMLButtonElement>(null),
     qrButton = useRef<HTMLButtonElement>(null);
@@ -1615,20 +1681,22 @@ function SubscriptionActions({
           <Copy size={15} />
           {compact ? "复制订阅" : "复制订阅链接"}
         </button>
-        <button
-          ref={previewButton}
-          disabled={busy}
-          title="预览通用订阅"
-          aria-label="预览"
-          onClick={() =>
-            work(async () =>
-              setOutput(await api(`/subscriptions/${profileId}/preview`)),
-            )
-          }
-        >
-          <ExternalLink size={15} />
-          预览
-        </button>
+        {!compact && (
+          <button
+            ref={previewButton}
+            disabled={busy}
+            title="预览通用订阅"
+            aria-label="预览"
+            onClick={() =>
+              work(async () =>
+                setOutput(await api(`/subscriptions/${profileId}/preview`)),
+              )
+            }
+          >
+            <ExternalLink size={15} />
+            预览
+          </button>
+        )}
         <button
           ref={qrButton}
           disabled={busy}
@@ -1644,6 +1712,7 @@ function SubscriptionActions({
         >
           二维码
         </button>
+        {compact && deleteAction}
       </div>
       <Modal
         open={!!output}
@@ -1924,22 +1993,15 @@ function ProfileDetail({
           >
             重新生成 Token
           </button>
-          <button
-            className="danger-text"
-            onClick={() =>
-              confirm({
-                title: "删除订阅",
-                text: "订阅链接立即失效；全局节点不会删除。",
-                run: async () => {
-                  await api(`/subscriptions/${profile.id}`, "DELETE", {});
-                  await onSaved();
-                  onBack();
-                },
-              })
-            }
-          >
-            删除订阅
-          </button>
+          <DeleteSubscriptionAction
+            profileId={profile.id}
+            name={profile.name}
+            confirm={confirm}
+            onDeleted={async () => {
+              await onSaved();
+              onBack();
+            }}
+          />
         </div>
       </section>
     </>

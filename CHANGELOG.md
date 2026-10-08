@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.1.3-rc.1] - 2026-10-08
+
+### Changed
+- Replaced the subscription-card preview shortcut with a direct delete action; card actions are ordered Copy Subscription → QR Code → Delete Subscription.
+- Kept universal subscription preview in the management page and preserved management navigation.
+- Shared the deletion action and existing confirmation dialog between cards and management, explicitly naming the profile and explaining immediate link revocation and global-node preservation.
+- Added balanced three-column shortcuts, destructive styling and focus restoration after cancellation or deletion.
+
+### Validation
+- Added desktop/mobile deletion flows for empty, mixed and disabled profiles, cancellation, immediate list updates, detail preview and shared-node preservation.
+- Added API regression checks for empty/disabled deletion and pivot cleanup without global-node deletion.
+- Passed 77 unit/integration tests and 4 Playwright workflows, including 1280px, 390px and 320px card layouts.
+
 ## [0.1.2-rc.1] - 2026-10-08
 
 ### Changed

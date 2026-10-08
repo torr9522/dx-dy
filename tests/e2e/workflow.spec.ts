@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { vless, vmess } from "../fixtures";
 import QRCode from "qrcode";
-for (const width of [1280, 390]) {
+for (const width of [1280, 390, 320]) {
   test(`subscription card quick actions at ${width}px`, async ({
     page,
     context,
@@ -24,19 +24,29 @@ for (const width of [1280, 390]) {
       })
     ).json();
     const links: string[] = [];
-    const profileIds: number[] = [];
+    const keeper = await (
+      await context.request.post("/api/subscriptions", {
+        headers,
+        data: { name: `Shared keeper ${width}` },
+      })
+    ).json();
+    await context.request.put(`/api/subscriptions/${keeper.id}/nodes`, {
+      headers,
+      data: { node_ids: imported.map((n: { id: number }) => n.id) },
+    });
+    const globalNodes = await (await context.request.get("/api/nodes")).json();
     for (const [label, count] of [
       ["Empty", 0],
       ["Mixed", 2],
+      ["Disabled", 2],
     ] as const) {
       const name = `${label} quick ${width}`;
       const p = await (
         await context.request.post("/api/subscriptions", {
           headers,
-          data: { name },
+          data: { name, enabled: label !== "Disabled" },
         })
       ).json();
-      profileIds.push(p.id);
       if (count)
         await context.request.put(`/api/subscriptions/${p.id}/nodes`, {
           headers,
@@ -46,10 +56,18 @@ for (const width of [1280, 390]) {
       await page.getByRole("button", { name: "订阅", exact: true }).click();
       const card = page.locator(".profile-card").filter({ hasText: name });
       await expect(card).toBeVisible();
-      for (const action of ["复制订阅链接", "预览", "二维码", "管理订阅"])
+      for (const action of ["复制订阅链接", "二维码", "删除订阅", "管理订阅"])
         await expect(
           card.getByRole("button", { name: action, exact: true }),
         ).toBeVisible();
+      await expect(
+        card.getByRole("button", { name: "预览", exact: true }),
+      ).toHaveCount(0);
+      await expect(card.getByRole("group").getByRole("button")).toHaveText([
+        "复制订阅",
+        "二维码",
+        "删除订阅",
+      ]);
       await card
         .getByRole("button", { name: "复制订阅链接", exact: true })
         .click();
@@ -64,13 +82,49 @@ for (const width of [1280, 390]) {
       ).url;
       expect(url).toBe(expectedUrl);
       links.push(url);
-      const body = await (await context.request.get(url)).text();
-      expect(
-        count
-          ? Buffer.from(body, "base64").toString("utf8").split("\n").length
-          : body,
-      ).toBe(count || "");
-      const preview = card.getByRole("button", { name: "预览", exact: true });
+      const response = await context.request.get(url);
+      const body = await response.text();
+      if (label === "Disabled") expect(response.status()).toBe(404);
+      else
+        expect(
+          count
+            ? Buffer.from(body, "base64").toString("utf8").split("\n").length
+            : body,
+        ).toBe(count || "");
+      await card.getByRole("button", { name: "二维码", exact: true }).click();
+      await expect(
+        page.getByRole("dialog").getByRole("link", { name: "订阅链接" }),
+      ).toHaveAttribute("href", url);
+      await expect(
+        page.getByRole("img", { name: "订阅二维码" }),
+      ).toHaveAttribute("src", /^data:image\/png;base64,/);
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      await expect(
+        card.getByRole("button", { name: "二维码", exact: true }),
+      ).toBeFocused();
+      const box = await card.boundingBox();
+      expect(box).not.toBeNull();
+      for (const button of await card.getByRole("button").all()) {
+        const b = await button.boundingBox();
+        expect(b).not.toBeNull();
+        expect(b!.x).toBeGreaterThanOrEqual(box!.x);
+        expect(b!.x + b!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
+        expect(b!.height).toBeGreaterThanOrEqual(36);
+      }
+      const quick = await card.getByRole("group").getByRole("button").all();
+      const boxes = await Promise.all(quick.map((b) => b.boundingBox()));
+      expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x);
+      expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x);
+      expect(boxes[0]!.y).toBe(boxes[2]!.y);
+      await page.screenshot({
+        path: `test-results/subscriptions-${label}-${width}.png`,
+        fullPage: true,
+      });
+      await card.getByRole("button", { name: "管理订阅", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "订阅分发" }),
+      ).toBeVisible();
+      const preview = page.getByRole("button", { name: "预览", exact: true });
       await preview.focus();
       await page.keyboard.press("Enter");
       await expect(
@@ -89,36 +143,55 @@ for (const width of [1280, 390]) {
       }
       await page.getByRole("button", { name: "关闭", exact: true }).click();
       await expect(preview).toBeFocused();
-      await card.getByRole("button", { name: "二维码", exact: true }).click();
-      await expect(
-        page.getByRole("dialog").getByRole("link", { name: "订阅链接" }),
-      ).toHaveAttribute("href", url);
-      await expect(
-        page.getByRole("img", { name: "订阅二维码" }),
-      ).toHaveAttribute("src", /^data:image\/png;base64,/);
-      await page.getByRole("button", { name: "关闭", exact: true }).click();
-      const box = await card.boundingBox();
-      expect(box).not.toBeNull();
-      for (const button of await card.getByRole("button").all()) {
-        const b = await button.boundingBox();
-        expect(b).not.toBeNull();
-        expect(b!.x).toBeGreaterThanOrEqual(box!.x);
-        expect(b!.x + b!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
-        expect(b!.height).toBeGreaterThanOrEqual(36);
-      }
-      await page.screenshot({
-        path: `test-results/subscriptions-${label}-${width}.png`,
-        fullPage: true,
-      });
-      await card.getByRole("button", { name: "管理订阅", exact: true }).click();
-      await expect(
-        page.getByRole("heading", { name: "订阅分发" }),
-      ).toBeVisible();
       await page.getByRole("button", { name: "← 返回订阅列表" }).click();
+      const deletion = card.getByRole("button", {
+        name: "删除订阅",
+        exact: true,
+      });
+      await deletion.focus();
+      await page.keyboard.press("Enter");
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toContainText(name);
+      await expect(dialog).toContainText("当前订阅链接立即失效");
+      await expect(dialog).toContainText("全局节点本身不会被删除");
+      await page.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(deletion).toBeFocused();
+      await expect(card).toBeVisible();
+      expect(
+        (await (await context.request.get("/api/subscriptions")).json()).some(
+          (s: { id: number }) => s.id === p.id,
+        ),
+      ).toBeTruthy();
+      await deletion.click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "确认", exact: true })
+        .click();
+      await expect(card).toHaveCount(0);
+      await expect(page.locator(".toast")).toContainText("订阅已删除");
+      await expect(
+        page.getByRole("button", { name: "订阅", exact: true }),
+      ).toBeFocused();
+      const remaining = await (
+        await context.request.get("/api/subscriptions")
+      ).json();
+      expect(remaining.some((s: { id: number }) => s.id === p.id)).toBeFalsy();
+      expect(
+        remaining.find((s: { id: number }) => s.id === keeper.id).node_ids,
+      ).toEqual(imported.map((n: { id: number }) => n.id));
+      expect(await (await context.request.get("/api/nodes")).json()).toEqual(
+        globalNodes,
+      );
+      expect((await context.request.get(url)).status()).toBe(404);
+      await page.getByRole("button", { name: "节点库", exact: true }).click();
+      for (const node of imported)
+        await expect(page.locator("table")).toContainText(node.name);
+      await page.getByRole("button", { name: "订阅", exact: true }).click();
     }
     expect(links[0]).not.toBe(links[1]);
-    for (const id of profileIds)
-      await context.request.delete(`/api/subscriptions/${id}`, { headers });
+    await context.request.delete(`/api/subscriptions/${keeper.id}`, {
+      headers,
+    });
     for (const node of imported)
       await context.request.delete(`/api/nodes/${node.id}`, {
         headers,

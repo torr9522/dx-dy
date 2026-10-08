@@ -41,7 +41,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.2",
+      version: "0.1.3",
     });
   });
   it("unauthorized admin request fails", async () => {
@@ -415,14 +415,46 @@ describe("API and domain regression", () => {
     expect(system.store.authorized(second)).toHaveLength(1);
   });
   it("delete subscription revokes token without deleting global nodes", async () => {
+    const globalNodes = system.store.all("SELECT * FROM nodes ORDER BY id");
     await agent
       .delete(`/api/subscriptions/${profile}`)
-      .set("X-CSRF-Token", csrf);
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
     expect((await request(system.app).get(new URL(url).pathname)).status).toBe(
       404,
     );
     expect(system.store.nodes()).toHaveLength(1);
+    expect(system.store.all("SELECT * FROM nodes ORDER BY id")).toEqual(
+      globalNodes,
+    );
+    expect(
+      system.store.get(
+        "SELECT COUNT(*) n FROM subscription_nodes WHERE subscription_id=?",
+        profile,
+      )?.n,
+    ).toBe(0);
+    expect(system.store.authorized(second)).toHaveLength(1);
   });
+  for (const enabled of [true, false])
+    it(`delete empty subscription (enabled=${enabled}) preserves global nodes`, async () => {
+      const globalNodes = system.store.nodes();
+      const p = await post("/api/subscriptions", {
+        name: "Synthetic empty deletion",
+        enabled,
+      });
+      const path = new URL(
+        (await agent.get(`/api/subscriptions/${p.body.id}/url`)).body.url,
+      ).pathname;
+      await agent
+        .delete(`/api/subscriptions/${p.body.id}`)
+        .set("X-CSRF-Token", csrf)
+        .expect(200);
+      expect(
+        system.store.get("SELECT id FROM subscriptions WHERE id=?", p.body.id),
+      ).toBeUndefined();
+      expect(system.store.nodes()).toEqual(globalNodes);
+      expect((await request(system.app).get(path)).status).toBe(404);
+    });
   it("security headers and administrator settings", async () => {
     const h = await agent.get("/api/settings");
     expect(h.headers["referrer-policy"]).toBe("no-referrer");

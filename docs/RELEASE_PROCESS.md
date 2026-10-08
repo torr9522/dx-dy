@@ -8,9 +8,9 @@ Keep the existing `master` single mainline (no Git Flow). The release gate check
 
 ## Version and tags
 
-`package.json.version` is the product version source of truth, currently **0.1.2**. README, `/health`, ready event, source download filename and Compose image version are checked against it by the release gate. Update all copies together.
+`package.json.version` is the product version source of truth, currently **0.1.3**. README, `/health`, ready event, source download filename and Compose image version are checked against it by the release gate. Update all copies together.
 
-The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). This task is `0.1.1 → 0.1.2`; the next actual task is `0.1.3`, not another RC of 0.1.2. MINOR and PATCH are single decimal digits. Release identity remains separate: `vX.Y.Z-rc.N`, normally rc.1 for a new task version. Revalidation within that same task may use another RC; it cannot substitute for the next task's version increment.
+The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). This task is `0.1.2 → 0.1.3`; the next actual task is `0.1.4`, not another RC of 0.1.3. MINOR and PATCH are single decimal digits. Release identity remains separate: `vX.Y.Z-rc.N`, normally rc.1 for a new task version. Revalidation within that same task may use another RC; it cannot substitute for the next task's version increment.
 
 After each completed task: commit + CHANGELOG + tests + production build + required Docker/deployment validation + **annotated unsigned RC tag** + clean Git. Record both tag object SHA and peeled commit target. Never move an existing published/approved tag. RC1/RC2 identify historical product states; RC3 adds release tooling and does not certify device acceptance.
 

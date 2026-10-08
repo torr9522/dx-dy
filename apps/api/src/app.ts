@@ -137,7 +137,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.2" });
+    res.json({ status: "ok", database: "ok", version: "0.1.3" });
   });
   app.post(
     "/api/auth/login",
@@ -534,7 +534,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.2-source.tar.gz",
+        "private-subscription-manager-0.1.3-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");
