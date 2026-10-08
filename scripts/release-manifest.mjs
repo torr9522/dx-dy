@@ -68,6 +68,7 @@ const manifest = {
   },
   source_sha256: hashes[`dx-dy-${version}-source.tar.gz`],
   installer_sha256: hashes["install.sh"],
+  manager_asset: "dx-dy",
   manager_sha256: hashes["dx-dy"],
   minimum_schema: "001_initial.sql",
   current_schema: "002_node_collections.sql",

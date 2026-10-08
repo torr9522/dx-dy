@@ -177,7 +177,9 @@ configure_ufw() {
 fetch_asset() {
   local name="$1" target="$2" base="${DXDY_RELEASE_BASE_URL:-https://github.com/$DXDY_REPOSITORY/releases/download/v$DXDY_VERSION}"
   if [[ -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" ]]; then cp "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" "$target"
-  else curl -fsSL --proto '=https' --tlsv1.2 "${base%/}/$(basename "$name")" -o "$target"; fi
+  elif ! curl -fsSL --proto '=https' --tlsv1.2 "${base%/}/$(basename "$name")" -o "$target"; then
+    die "Failed to download release asset: $name"
+  fi
 }
 
 prepare_test_artifact() {
@@ -192,8 +194,10 @@ prepare_test_artifact() {
 }
 
 download_release() {
-  local artifact="dx-dy-$DXDY_VERSION-linux-$ARCH.tar.gz" expected actual
-  if [[ "$TEST_MODE" == 1 && -z "${DXDY_TEST_REAL_ARTIFACT:-}" ]]; then prepare_test_artifact
+  local artifact="dx-dy-$DXDY_VERSION-linux-$ARCH.tar.gz" manager_asset expected actual
+  if [[ "$TEST_MODE" == 1 && -z "${DXDY_TEST_REAL_ARTIFACT:-}" ]]; then
+    prepare_test_artifact
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$STAGING/dx-dy-manager"
   else
     fetch_asset release-manifest.json "$STAGING/release-manifest.json"
     jq -e --arg v "$DXDY_VERSION" --arg a "$ARCH" '.version==$v and .release_model=="native-systemd" and (.architectures|index($a))' "$STAGING/release-manifest.json" >/dev/null || die "Release manifest validation failed."
@@ -201,7 +205,14 @@ download_release() {
     expected="$(jq -er --arg n "$artifact" '.artifacts[] | select(.name==$n) | .sha256' "$STAGING/release-manifest.json")"
     actual="$(sha256sum "$STAGING/artifact.tar.gz" | cut -d' ' -f1)"
     [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] || die "Native artifact checksum failed."
+    manager_asset="$(jq -er '.manager_asset' "$STAGING/release-manifest.json")"
+    [[ "$manager_asset" == "dx-dy" ]] || die "Release manifest manager asset is invalid."
+    fetch_asset "$manager_asset" "$STAGING/dx-dy-manager"
+    expected="$(jq -er '.manager_sha256' "$STAGING/release-manifest.json")"
+    actual="$(sha256sum "$STAGING/dx-dy-manager" | cut -d' ' -f1)"
+    [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] || die "Manager checksum failed."
   fi
+  bash -n "$STAGING/dx-dy-manager" || die "Manager shell syntax validation failed."
   mkdir "$STAGING/extract"
   tar -xzf "$STAGING/artifact.tar.gz" -C "$STAGING/extract"
   RELEASE_SOURCE="$STAGING/extract/dx-dy-$DXDY_VERSION-linux-$ARCH"
@@ -284,12 +295,15 @@ install_caddy_fragment() {
 }
 
 commit_installation() {
-  local release="$INSTALL_ROOT/releases/$DXDY_VERSION"
+  local release="$INSTALL_ROOT/releases/$DXDY_VERSION" manager_temp="${MANAGER_PATH}.new.$$"
   install -d -m 0755 "$INSTALL_ROOT/releases" "$SYSTEMD_DIR"; install -d -m 0700 "$CONFIG_DIR"; install -d -m 0750 "$DATA_DIR" "$BACKUP_DIR"
   rm -rf -- "$release"; cp -a "$RELEASE_SOURCE" "$release"
   ln -sfn "releases/$DXDY_VERSION" "$INSTALL_ROOT/current.next"; mv -Tf "$INSTALL_ROOT/current.next" "$INSTALL_ROOT/current"
   install -m 0600 "$STAGING/install.conf" "$CONFIG_DIR/install.conf"; install -m 0600 "$STAGING/dx-dy.env" "$CONFIG_DIR/dx-dy.env"
-  install -m 0644 "$release/dx-dy.service" "$SYSTEMD_DIR/dx-dy.service"; install -D -m 0755 "${DXDY_MANAGER_SOURCE:-$SCRIPT_DIR/ops/dx-dy}" "$MANAGER_PATH"
+  install -m 0644 "$release/dx-dy.service" "$SYSTEMD_DIR/dx-dy.service"
+  install -D -m 0755 "$STAGING/dx-dy-manager" "$manager_temp"
+  if [[ "$TEST_MODE" != 1 ]]; then chown root:root "$manager_temp"; fi
+  mv -Tf "$manager_temp" "$MANAGER_PATH"
   install_caddy_fragment
   if [[ "$TEST_MODE" != 1 ]]; then
     chown -R root:root "$release"; chmod -R a-w "$release"

@@ -27,7 +27,7 @@ bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/ins
 bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/install.sh) --help
 ```
 
-要求：root、已指向服务器的域名、Debian 12 或 Ubuntu 22.04/24.04，以及 amd64 或 arm64。安装器按架构下载校验过的 GitHub Release artifact，内含固定 Node.js runtime；服务器不需要预装 Node.js、npm、pnpm、Docker、Docker Compose、containerd 或 Caddy。
+要求：root、已指向服务器的域名、Debian 12 或 Ubuntu 22.04/24.04，以及 amd64 或 arm64。安装器按架构下载校验过的 GitHub Release artifact，并按 manifest SHA-256 校验独立的 `dx-dy` manager asset；它不依赖 Git checkout 或相邻源码目录。Artifact 内含固定 Node.js runtime，服务器不需要预装 Node.js、npm、pnpm、Docker、Docker Compose、containerd 或 Caddy。
 
 安装器会安装宿主 Caddy，询问管理域名、可选独立订阅域名和管理员凭据，然后创建：
 

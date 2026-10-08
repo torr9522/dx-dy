@@ -61,6 +61,12 @@ if (
   throw new Error("Final public repository coordinate is missing");
 if (/<OWNER>|YOUR_GITHUB_USERNAME|yourname\/dx-dy/.test(readme + installer))
   throw new Error("Placeholder repository coordinate remains");
+if (
+  installer.includes("$SCRIPT_DIR/ops/dx-dy") ||
+  !installer.includes("manager_sha256") ||
+  !installer.includes("Manager checksum failed")
+)
+  throw new Error("Public installer manager delivery is not release-native");
 const agentGuide = readFileSync("AGENTS.md", "utf8");
 const baseline = readFileSync("docs/CURRENT_BASELINE.md", "utf8");
 const capabilities = readFileSync("docs/CAPABILITY_TREE.md", "utf8");

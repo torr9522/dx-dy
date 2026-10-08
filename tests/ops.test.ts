@@ -64,6 +64,130 @@ function freshInstall(
   return root;
 }
 
+function singleFileFixture(
+  managerDelivery: "asset" | "corrupt" | "fail" = "asset",
+) {
+  const root = temp();
+  const assets = path.join(root, "assets");
+  const packageRoot = path.join(root, "package", "dx-dy-0.2.0-linux-amd64");
+  const script = path.join(root, "install.sh");
+  const password = path.join(root, "password");
+  const bin = path.join(root, "bin");
+  const installedManager = path.join(root, "usr/local/bin/dx-dy");
+  const manager = "#!/usr/bin/env bash\nprintf 'release-manager\\n'\n";
+  mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
+  mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
+  mkdirSync(assets);
+  mkdirSync(bin);
+  executable(path.join(packageRoot, "runtime/bin/node"), "exit 0");
+  writeFileSync(path.join(packageRoot, "app/dist/server.mjs"), "");
+  writeFileSync(
+    path.join(packageRoot, "dx-dy.service"),
+    "[Service]\nUser=dx-dy\nExecStart=/opt/dx-dy/current/runtime/bin/node /opt/dx-dy/current/app/dist/server.mjs\n",
+  );
+  writeFileSync(
+    path.join(packageRoot, "Caddyfile.single"),
+    "__ADMIN_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n",
+  );
+  writeFileSync(
+    path.join(packageRoot, "Caddyfile.dual"),
+    "__ADMIN_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n__SUBSCRIPTION_DOMAIN__ { respond 404 }\n",
+  );
+  writeFileSync(
+    path.join(packageRoot, "RELEASE.json"),
+    '{"version":"0.2.0","release_model":"native-systemd","architecture":"amd64"}\n',
+  );
+  const artifact = "dx-dy-0.2.0-linux-amd64.tar.gz";
+  expect(
+    spawnSync("tar", [
+      "-czf",
+      path.join(assets, artifact),
+      "-C",
+      path.dirname(packageRoot),
+      path.basename(packageRoot),
+    ]).status,
+  ).toBe(0);
+  const hash = (content: string | Buffer) =>
+    createHash("sha256").update(content).digest("hex");
+  writeFileSync(
+    path.join(assets, "release-manifest.json"),
+    JSON.stringify({
+      version: "0.2.0",
+      release_model: "native-systemd",
+      architectures: ["amd64", "arm64"],
+      artifacts: [
+        {
+          name: artifact,
+          architecture: "amd64",
+          sha256: hash(readFileSync(path.join(assets, artifact))),
+        },
+      ],
+      manager_asset: "dx-dy",
+      manager_sha256: hash(manager),
+    }),
+  );
+  if (managerDelivery === "asset")
+    writeFileSync(path.join(assets, "dx-dy"), manager);
+  else {
+    executable(
+      path.join(bin, "curl"),
+      `target=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == -o ]]; then target="$2"; shift 2; else shift; fi
+done
+mkdir -p "$(dirname "$DXDY_EXISTING_MANAGER")"
+printf '#!/bin/sh\\necho existing-manager\\n' >"$DXDY_EXISTING_MANAGER"
+if [[ "$DXDY_CURL_BEHAVIOR" == fail ]]; then exit 22; fi
+printf '#!/bin/sh\\necho corrupted-manager\\n' >"$target"`,
+    );
+  }
+  writeFileSync(script, readFileSync("install.sh"));
+  chmodSync(script, 0o755);
+  writeFileSync(path.join(root, "os-release"), 'ID=debian\nVERSION_ID="12"\n');
+  writeFileSync(password, "Synthetic-installer-password-123!\n", {
+    mode: 0o600,
+  });
+  return {
+    root,
+    assets,
+    script,
+    password,
+    bin,
+    installedManager,
+    manager,
+    managerDelivery,
+  };
+}
+
+function runSingleFile(
+  fixture: ReturnType<typeof singleFileFixture>,
+  processSubstitution = false,
+) {
+  const args = processSubstitution
+    ? ["-c", 'bash <(/bin/cat "$1")', "dx-dy-installer", fixture.script]
+    : [fixture.script];
+  return spawnSync("bash", args, {
+    cwd: fixture.root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+      DXDY_TEST_MODE: "1",
+      DXDY_TEST_REAL_ARTIFACT: "1",
+      DXDY_ROOT_PREFIX: fixture.root,
+      DXDY_OS_RELEASE_FILE: path.join(fixture.root, "os-release"),
+      DXDY_ARCH: "amd64",
+      DXDY_ASSET_DIR: fixture.assets,
+      DXDY_ADMIN_DOMAIN: "panel.example.com",
+      DXDY_SUBSCRIPTION_DOMAIN: "panel.example.com",
+      DXDY_ADMIN_USERNAME: "operator",
+      DXDY_ADMIN_PASSWORD_FILE: fixture.password,
+      DXDY_CURL_BEHAVIOR: fixture.managerDelivery,
+      DXDY_EXISTING_MANAGER: fixture.installedManager,
+    },
+  });
+}
+
 describe("native installer", () => {
   it.each([
     ["debian", "12", "amd64"],
@@ -129,6 +253,43 @@ describe("native installer", () => {
     const installer = readFileSync("install.sh", "utf8");
     expect(installer).not.toMatch(/ghcr\.io|podman|nerdctl/);
     expect(installer).not.toContain("install docker");
+  });
+
+  it.each([
+    ["isolated single file", false],
+    ["process substitution", true],
+  ])(
+    "installs the verified release manager from %s",
+    (_label, processSubstitution) => {
+      const fixture = singleFileFixture();
+      const result = runSingleFile(fixture, processSubstitution);
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(readFileSync(fixture.installedManager, "utf8")).toBe(
+        fixture.manager,
+      );
+      expect(lstatSync(fixture.installedManager).mode & 0o777).toBe(0o755);
+    },
+  );
+
+  it("rejects a corrupted manager without replacing an existing manager", () => {
+    const fixture = singleFileFixture("corrupt");
+    const result = runSingleFile(fixture, true);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Manager checksum failed");
+    expect(readFileSync(fixture.installedManager, "utf8")).toContain(
+      "existing-manager",
+    );
+  });
+
+  it("fails safely when the manager download fails", () => {
+    const fixture = singleFileFixture("fail");
+    const result = runSingleFile(fixture, true);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Failed to download release asset: dx-dy");
+    expect(readFileSync(fixture.installedManager, "utf8")).toContain(
+      "existing-manager",
+    );
   });
 
   it("migrates a detected 0.1.8 Compose install after portable and full backups", () => {

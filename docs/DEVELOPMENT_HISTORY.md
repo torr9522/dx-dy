@@ -81,5 +81,7 @@ state-changing preflight step, with non-root and command-sentinel regression
 coverage. Replaced branch-name assumptions in CI with event/ref-aware policy:
 master pushes and pull requests are validated from their GitHub context, while
 direct version tags are validated in detached HEAD and must target the current
-`origin/master` commit. Runtime architecture, schema, backup formats and
-business behavior are unchanged.
+`origin/master` commit. The public single-file installer now obtains its manager
+from the GitHub Release manifest, verifies its SHA-256 and shell syntax, and
+installs it atomically without a source checkout. Runtime architecture, schema,
+backup formats and business behavior are unchanged.

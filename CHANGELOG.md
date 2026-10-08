@@ -8,6 +8,7 @@
 
 - Made installer `-h`, `--help` and `--version` pure query paths that run before root, platform, network, package, Caddy, systemd, account, domain and secret setup. Unknown options now fail before installation preflight.
 - Made release validation aware of master pushes, pull requests and detached tag checkouts. Direct release tags must match the product version and target the current `origin/master` commit.
+- Made the single-file public installer download the manager from the same GitHub Release, verify its manifest SHA-256 and shell syntax, then install it atomically without relying on an adjacent source checkout.
 
 ### Compatibility
 

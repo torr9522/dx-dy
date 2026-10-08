@@ -4,6 +4,8 @@
 
 Supported hosts are Debian 12 and Ubuntu 22.04/24.04 on amd64/arm64. Run the root README command as root. The installer verifies OS/architecture/network/disk/ports, downloads the matching GitHub Release artifact and SHA-256, installs host dependencies and official Caddy, and never installs Node or a container runtime.
 
+The root manager is a separate `dx-dy` Release asset. The single-file installer downloads it into private staging, verifies `manager_asset` and `manager_sha256` from `release-manifest.json`, checks shell syntax, and only then atomically renames it into `/usr/local/bin/dx-dy`. It never assumes that `install.sh` is beside a Git checkout or an `ops/` directory.
+
 The wizard accepts hostnames only, supports single/dual-domain mode, initializes one administrator through stdin and generates a protected `APP_MASTER_KEY`. The application account is a non-login `dx-dy` system user.
 
 ## Layout And Permissions
