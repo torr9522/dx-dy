@@ -84,7 +84,7 @@ export class Store {
   run(sql: string, ...params: (string | number | null)[]) {
     return this.db.prepare(sql).run(...params);
   }
-  node(row: Row): NodeRecord {
+  node(row: Row, collectionIds?: number[]): NodeRecord {
     const envelope = envelopeSchema.parse({
       ...row,
       normalized_config: JSON.parse(String(row.normalized_config)),
@@ -103,16 +103,28 @@ export class Store {
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       references: Number(row.references || 0),
-      collection_ids: this.all(
-        "SELECT collection_id FROM node_collection_members WHERE node_id=? ORDER BY collection_id",
-        Number(row.id),
-      ).map((r) => Number(r.collection_id)),
+      collection_ids:
+        collectionIds ??
+        this.all(
+          "SELECT collection_id FROM node_collection_members WHERE node_id=? ORDER BY collection_id",
+          Number(row.id),
+        ).map((r) => Number(r.collection_id)),
     };
   }
   nodes(): NodeRecord[] {
+    const memberships = new Map<number, number[]>();
+    for (const row of this.all(
+      "SELECT node_id,collection_id FROM node_collection_members ORDER BY node_id,collection_id",
+    )) {
+      const nodeId = Number(row.node_id);
+      memberships.set(nodeId, [
+        ...(memberships.get(nodeId) || []),
+        Number(row.collection_id),
+      ]);
+    }
     return this.all(
       'SELECT n.*, (SELECT COUNT(*) FROM subscription_nodes sn WHERE sn.node_id=n.id) AS "references" FROM nodes n ORDER BY n.id DESC',
-    ).map((r) => this.node(r));
+    ).map((r) => this.node(r, memberships.get(Number(r.id)) || []));
   }
   findNode(id: number) {
     const r = this.get(
@@ -136,13 +148,30 @@ export class Store {
   }
   setCollections(nodeId: number, ids: number[]) {
     this.run("DELETE FROM node_collection_members WHERE node_id=?", nodeId);
-    for (const collectionId of ids)
-      this.run(
-        "INSERT INTO node_collection_members VALUES(?,?,?)",
-        collectionId,
-        nodeId,
-        now(),
-      );
+    this.addCollectionMembers(ids, [nodeId]);
+  }
+  addCollectionMembers(collectionIds: number[], nodeIds: number[]) {
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO node_collection_members VALUES(?,?,?)",
+    );
+    const createdAt = now();
+    for (const collectionId of collectionIds)
+      for (const nodeId of nodeIds) insert.run(collectionId, nodeId, createdAt);
+  }
+  removeCollectionMembers(collectionIds: number[], nodeIds: number[]) {
+    const remove = this.db.prepare(
+      "DELETE FROM node_collection_members WHERE collection_id=? AND node_id=?",
+    );
+    for (const collectionId of collectionIds)
+      for (const nodeId of nodeIds) remove.run(collectionId, nodeId);
+  }
+  replaceCollectionMembers(collectionIds: number[], nodeIds: number[]) {
+    const placeholders = nodeIds.map(() => "?").join(",");
+    this.run(
+      `DELETE FROM node_collection_members WHERE node_id IN (${placeholders})`,
+      ...nodeIds,
+    );
+    this.addCollectionMembers(collectionIds, nodeIds);
   }
   addNode(e: Envelope, remark = "", tags: string[] = [], enabled = true) {
     const t = now();
@@ -227,7 +256,7 @@ export class Store {
     return this.all(
       "SELECT n.* FROM subscription_nodes sn JOIN nodes n ON n.id=sn.node_id WHERE sn.subscription_id=? AND n.enabled=1 ORDER BY sn.position",
       id,
-    ).map((r) => this.node(r));
+    ).map((r) => this.node(r, []));
   }
   settings() {
     return Object.fromEntries(

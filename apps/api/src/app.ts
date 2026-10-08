@@ -213,7 +213,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.4" });
+    res.json({ status: "ok", database: "ok", version: "0.1.5" });
   });
   app.post(
     "/api/auth/login",
@@ -418,6 +418,77 @@ export async function createApp(options: Options) {
       return fail(404, "NOT_FOUND", "集合不存在");
     store.run("DELETE FROM node_collections WHERE id=?", collectionId);
     res.json({ ok: true });
+  });
+  const membershipSchema = z.object({
+    node_ids: z
+      .array(z.number().int().positive())
+      .min(1)
+      .max(500)
+      .refine((values) => new Set(values).size === values.length),
+  });
+  const requireCollectionAndNodes = (
+    collectionId: number,
+    nodeIds: number[],
+  ) => {
+    if (!store.get("SELECT id FROM node_collections WHERE id=?", collectionId))
+      return fail(404, "NOT_FOUND", "节点集合不存在");
+    const placeholders = nodeIds.map(() => "?").join(",");
+    const count = Number(
+      store.get(
+        `SELECT COUNT(*) AS count FROM nodes WHERE id IN (${placeholders})`,
+        ...nodeIds,
+      )?.count,
+    );
+    if (count !== nodeIds.length)
+      return fail(400, "NODE_IDS", "包含不存在的节点");
+  };
+  app.post("/api/collections/:id/nodes", (req, res) => {
+    const collectionId = id(req),
+      { node_ids } = membershipSchema.parse(req.body);
+    requireCollectionAndNodes(collectionId, node_ids);
+    store.transaction(() =>
+      store.addCollectionMembers([collectionId], node_ids),
+    );
+    res.json({ collection_id: collectionId, node_ids });
+  });
+  app.delete("/api/collections/:id/nodes", (req, res) => {
+    const collectionId = id(req),
+      { node_ids } = membershipSchema.parse(req.body);
+    requireCollectionAndNodes(collectionId, node_ids);
+    store.transaction(() =>
+      store.removeCollectionMembers([collectionId], node_ids),
+    );
+    res.json({ collection_id: collectionId, node_ids });
+  });
+  app.put("/api/collection-memberships", (req, res) => {
+    const { action, collection_ids, node_ids } = z
+      .object({
+        action: z.enum(["add", "remove", "set"]),
+        collection_ids: z
+          .array(z.number().int().positive())
+          .max(100)
+          .refine((values) => new Set(values).size === values.length),
+        node_ids: membershipSchema.shape.node_ids,
+      })
+      .parse(req.body);
+    requireCollections(collection_ids);
+    const placeholders = node_ids.map(() => "?").join(",");
+    const count = Number(
+      store.get(
+        `SELECT COUNT(*) AS count FROM nodes WHERE id IN (${placeholders})`,
+        ...node_ids,
+      )?.count,
+    );
+    if (count !== node_ids.length)
+      return fail(400, "NODE_IDS", "包含不存在的节点");
+    store.transaction(() => {
+      if (action === "add")
+        store.addCollectionMembers(collection_ids, node_ids);
+      else if (action === "remove")
+        store.removeCollectionMembers(collection_ids, node_ids);
+      else store.replaceCollectionMembers(collection_ids, node_ids);
+    });
+    res.json({ action, collection_ids, node_ids });
   });
   app.post("/api/nodes/preview", (req, res) => {
     const { text } = z
@@ -740,7 +811,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.4-source.tar.gz",
+        "private-subscription-manager-0.1.5-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

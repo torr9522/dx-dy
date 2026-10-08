@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.1.5-rc.1] - 2026-10-08
+
+### Added
+
+- Added searchable, filterable multi-node selection directly inside each Node Collection.
+- Added transactional and idempotent bulk membership operations for adding or removing nodes from one or more Collections.
+- Added Collection membership chips, single-node quick membership controls, Collection member search and batch removal.
+
+### Changed
+
+- Reworked Node Library navigation to separate the global “All Nodes” master pool from Node Collection management views.
+- Reworked the subscription node selector to distinguish the global library from Collection candidate filters and search within the active source.
+- Removed per-node membership queries from Node Library loading by returning the complete node-to-Collection mapping in one query.
+
+### Safety
+
+- Collection membership changes never modify `subscription_nodes`, node records, Tokens or canonical subscription bodies.
+- Removing a node from a Collection never deletes the global node; deleting a Collection never changes an existing subscription.
+- Collection membership remains an administrator organization tool with no automatic subscription behavior.
+
+### Validation
+
+- Added transactional rollback, idempotency, authentication, membership count and canonical-body regression coverage.
+- Added desktop/mobile Playwright coverage for empty Collections, searchable multi-add, Collection removal, global bulk actions and cross-source subscription selection.
+- Confirmed the existing `002_node_collections.sql` schema fully supports this release; no database migration was added.
+
 ## [0.1.4-rc.1] - 2026-10-08
 
 ### Added

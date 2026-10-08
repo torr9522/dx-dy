@@ -9,6 +9,7 @@ import {
 } from "../apps/api/src/security";
 import { vless, vmess, fixtures } from "./fixtures";
 import { parseNode, generateURI } from "../packages/proxy-adapter";
+import type { NodeRecord } from "../packages/shared/schema";
 const password = "Synthetic-admin-password-123!";
 const options: Options = {
   database: ":memory:",
@@ -42,7 +43,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.4",
+      version: "0.1.5",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -159,6 +160,164 @@ describe("API and domain regression", () => {
       .set("X-CSRF-Token", csrf)
       .send({ confirm: true })
       .expect(200);
+  });
+  it("bulk collection membership is transactional, idempotent and feed-neutral", async () => {
+    const imported = (
+      await post("/api/nodes/import", {
+        items: fixtures.slice(1, 4).map(([name, uri]) => ({
+          uri,
+          name: `Bulk ${name}`,
+        })),
+      })
+    ).body as NodeRecord[];
+    const profile = (
+      await post("/api/subscriptions", { name: "Bulk boundary" })
+    ).body;
+    await agent
+      .put(`/api/subscriptions/${profile.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: imported.slice(0, 2).map((node) => node.id) })
+      .expect(200);
+    const collection = (
+      await post("/api/collections", { name: "Bulk G", remark: "empty" })
+    ).body;
+    const secondCollection = (
+      await post("/api/collections", { name: "Bulk A", remark: "second" })
+    ).body;
+    expect(collection.node_count).toBe(0);
+    const subscriptionUrl = (
+      await agent.get(`/api/subscriptions/${profile.id}/url`)
+    ).body.url;
+    const subscriptionPath = new URL(subscriptionUrl).pathname;
+    const baselineBody = (await request(system.app).get(subscriptionPath)).text;
+    const baselineSubscription = system.store.profile(
+      system.store.get("SELECT * FROM subscriptions WHERE id=?", profile.id)!,
+    );
+    const baselineNodes = imported.map((node) =>
+      system.store.findNode(node.id),
+    );
+
+    await agent
+      .post(`/api/collections/${collection.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: [imported[0].id] })
+      .expect(200);
+    await agent
+      .post(`/api/collections/${collection.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: [imported[0].id] })
+      .expect(200);
+    expect(
+      system.store.get(
+        "SELECT COUNT(*) count FROM node_collection_members WHERE collection_id=?",
+        collection.id,
+      )?.count,
+    ).toBe(1);
+    await agent
+      .put("/api/collection-memberships")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        action: "add",
+        collection_ids: [collection.id, secondCollection.id],
+        node_ids: imported.map((node) => node.id),
+      })
+      .expect(200);
+    expect(
+      system.store.collections().find((item) => item.id === collection.id)
+        ?.node_count,
+    ).toBe(3);
+    const beforeInvalid = system.store.all(
+      "SELECT collection_id,node_id FROM node_collection_members ORDER BY collection_id,node_id",
+    );
+    await agent
+      .put("/api/collection-memberships")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        action: "remove",
+        collection_ids: [collection.id],
+        node_ids: [imported[0].id, 999999],
+      })
+      .expect(400);
+    expect(
+      system.store.all(
+        "SELECT collection_id,node_id FROM node_collection_members ORDER BY collection_id,node_id",
+      ),
+    ).toEqual(beforeInvalid);
+    await agent
+      .patch(`/api/collections/${collection.id}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ name: "Bulk G renamed", remark: "same members" })
+      .expect(200);
+    expect(
+      system.store.collections().find((item) => item.id === collection.id)
+        ?.node_count,
+    ).toBe(3);
+    await agent
+      .put("/api/collection-memberships")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        action: "remove",
+        collection_ids: [collection.id],
+        node_ids: imported.slice(0, 2).map((node) => node.id),
+      })
+      .expect(200);
+    await agent
+      .delete(`/api/collections/${collection.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: [imported[0].id] })
+      .expect(200);
+    await agent
+      .put("/api/collection-memberships")
+      .set("X-CSRF-Token", csrf)
+      .send({
+        action: "set",
+        collection_ids: [],
+        node_ids: [imported[2].id],
+      })
+      .expect(200);
+    expect(system.store.findNode(imported[2].id)?.collection_ids).toEqual([]);
+    await agent
+      .delete(`/api/collections/${collection.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+    await agent
+      .delete(`/api/collections/${secondCollection.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+
+    expect(
+      system.store.profile(
+        system.store.get("SELECT * FROM subscriptions WHERE id=?", profile.id)!,
+      ),
+    ).toEqual(baselineSubscription);
+    expect((await request(system.app).get(subscriptionPath)).text).toBe(
+      baselineBody,
+    );
+    expect(imported.map((node) => system.store.findNode(node.id))).toEqual(
+      baselineNodes,
+    );
+    await request(system.app)
+      .put("/api/collection-memberships")
+      .send({ action: "add", collection_ids: [1], node_ids: [1] })
+      .expect(401);
+    await agent
+      .put("/api/collection-memberships")
+      .send({
+        action: "add",
+        collection_ids: [collection.id],
+        node_ids: [imported[0].id],
+      })
+      .expect(403);
+    await agent
+      .delete(`/api/subscriptions/${profile.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+    for (const node of imported)
+      await agent
+        .delete(`/api/nodes/${node.id}`)
+        .set("X-CSRF-Token", csrf)
+        .send({ confirm: true })
+        .expect(200);
   });
   it("separate subscription base controls URLs and subscription host hides admin", async () => {
     const isolated = await createApp({

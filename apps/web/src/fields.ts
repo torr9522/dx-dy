@@ -41,7 +41,7 @@ export function nodeMatches(
 ) {
   return (
     (!search ||
-      `${n.name} ${n.normalized_config.server}`
+      `${n.name} ${n.normalized_config.server} ${n.protocol} ${n.tags.join(" ")}`
         .toLowerCase()
         .includes(search.toLowerCase())) &&
     (!protocol || n.protocol === protocol) &&

@@ -23,6 +23,8 @@ describe("frontend editor and filters", () => {
       enabled: true,
     };
     expect(nodeMatches(n, "example", "vless", "home", "enabled")).toBe(true);
+    expect(nodeMatches(n, "home", "", "", "")).toBe(true);
+    expect(nodeMatches(n, "VLESS", "", "", "")).toBe(true);
     expect(nodeMatches(n, "", "vmess", "", "")).toBe(false);
     expect(nodeMatches(n, "", "", "work", "")).toBe(false);
     expect(nodeMatches(n, "", "", "", "disabled")).toBe(false);

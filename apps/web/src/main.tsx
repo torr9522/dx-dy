@@ -37,7 +37,6 @@ import {
   ChevronUp,
   ChevronDown,
   ExternalLink,
-  Pencil,
 } from "lucide-react";
 import QRCode from "qrcode";
 import type {
@@ -49,6 +48,7 @@ import type {
 } from "../../../packages/shared/schema";
 import { api, setCsrf } from "./api";
 import { getField, setField, nodeMatches } from "./fields";
+import { NodeLibrary } from "./NodeLibrary";
 import "./style.css";
 type SettingsData = {
   site_name: string;
@@ -161,19 +161,11 @@ function App() {
     [editing, setEditing] = useState<NodeRecord | null>(null),
     [profile, setProfile] = useState<Profile | null>(null),
     [newProfile, setNewProfile] = useState(false);
-  const [activeCollection, setActiveCollection] = useState<number | null>(null),
-    [collectionEditor, setCollectionEditor] = useState<
-      NodeCollection | "new" | null
-    >(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const confirmationFocus = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
     if (confirm) confirmationFocus.current = confirm.returnFocus;
   }, [confirm]);
-  const [search, setSearch] = useState(""),
-    [filter, setFilter] = useState(""),
-    [tag, setTag] = useState(""),
-    [status, setStatus] = useState("");
   const notify = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(""), 4500);
@@ -226,13 +218,6 @@ function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
-  useEffect(() => {
-    if (
-      activeCollection !== null &&
-      !collections.some((collection) => collection.id === activeCollection)
-    )
-      setActiveCollection(null);
-  }, [activeCollection, collections]);
   if (boot) return <div className="loading">正在连接私人节点库…</div>;
   if (!user)
     return (
@@ -252,12 +237,6 @@ function App() {
         )}
       </>
     );
-  const filtered = nodes.filter(
-    (n) =>
-      nodeMatches(n, search, filter, tag, status) &&
-      (activeCollection === null ||
-        n.collection_ids.includes(activeCollection)),
-  );
   const nav = [
     ["dashboard", "Dashboard", LayoutDashboard],
     ["nodes", "节点库", Network],
@@ -299,7 +278,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.4</small>
+          <small>Private Subscription Manager v0.1.5</small>
         </div>
       </aside>
       <main>
@@ -374,210 +353,15 @@ function App() {
             <Dashboard nodes={nodes} profiles={profiles} go={setPage} />
           )}
           {page === "nodes" && (
-            <section className="card">
-              <div className="collection-nav" aria-label="节点集合导航">
-                <button
-                  className={activeCollection === null ? "active" : ""}
-                  onClick={() => setActiveCollection(null)}
-                >
-                  全部节点 <span>{nodes.length}</span>
-                </button>
-                {collections.map((c, i) => (
-                  <div className="collection-nav-item" key={c.id}>
-                    <button
-                      className={activeCollection === c.id ? "active" : ""}
-                      onClick={() => setActiveCollection(c.id)}
-                    >
-                      {c.name} <span>{c.node_count}</span>
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`编辑集合 ${c.name}`}
-                      onClick={() => setCollectionEditor(c)}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label={`上移集合 ${c.name}`}
-                      disabled={!i}
-                      onClick={async () => {
-                        const ids = collections.map((x) => x.id);
-                        [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]];
-                        await api("/collections/order", "PUT", { ids });
-                        await refresh();
-                      }}
-                    >
-                      <ChevronUp size={14} />
-                    </button>
-                  </div>
-                ))}
-                <button onClick={() => setCollectionEditor("new")}>
-                  <Plus size={14} />
-                  新建集合
-                </button>
-              </div>
-              <div className="toolbar">
-                <div className="search">
-                  <Search size={16} />
-                  <input
-                    aria-label="搜索节点"
-                    placeholder="搜索名称或服务器…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
-                <select
-                  aria-label="协议筛选"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                >
-                  <option value="">所有协议</option>
-                  {protocols.map((p) => (
-                    <option key={p} value={p}>
-                      {labelProtocol(p)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="标签筛选"
-                  value={tag}
-                  onChange={(e) => setTag(e.target.value)}
-                >
-                  <option value="">所有标签</option>
-                  {[...new Set(nodes.flatMap((n) => n.tags))].map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-                <select
-                  aria-label="状态筛选"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                >
-                  <option value="">所有状态</option>
-                  <option value="enabled">启用</option>
-                  <option value="disabled">禁用</option>
-                </select>
-                <small>{filtered.length} 个节点</small>
-              </div>
-              {!filtered.length ? (
-                <Empty text="暂无节点" />
-              ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>名称 / 协议</th>
-                        <th>服务器</th>
-                        <th>安全 / 传输</th>
-                        <th>标签</th>
-                        <th>状态</th>
-                        <th>更新时间</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map((n) => (
-                        <tr key={n.id}>
-                          <td>
-                            <button
-                              className="text-button node-title"
-                              onClick={() => setEditing(n)}
-                            >
-                              {n.name}
-                            </button>
-                            <div>
-                              <span className={"badge " + n.protocol}>
-                                {labelProtocol(n.protocol)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="mono">
-                            {n.normalized_config.server}:
-                            {n.normalized_config.port}
-                          </td>
-                          <td>
-                            {security(n.normalized_config)}
-                            <small className="block">
-                              {n.normalized_config.network || "tcp"}
-                            </small>
-                          </td>
-                          <td>
-                            {n.tags.map((t) => (
-                              <span className="tag" key={t}>
-                                {t}
-                              </span>
-                            ))}
-                          </td>
-                          <td>
-                            <span
-                              className={n.enabled ? "state enabled" : "state"}
-                            >
-                              {n.enabled ? "启用" : "禁用"}
-                            </span>
-                          </td>
-                          <td>
-                            <small>{date(n.updated_at)}</small>
-                          </td>
-                          <td>
-                            <div className="row-actions">
-                              <button onClick={() => setEditing(n)}>
-                                编辑
-                              </button>
-                              <button
-                                aria-label={"复制 " + n.name}
-                                onClick={() =>
-                                  action(async () => {
-                                    const { uri } = await api<{ uri: string }>(
-                                      `/nodes/${n.id}/uri`,
-                                    );
-                                    await copy(uri);
-                                  })
-                                }
-                              >
-                                <Copy size={15} />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  action(async () => {
-                                    await api(`/nodes/${n.id}`, "PATCH", {
-                                      normalized_config: n.normalized_config,
-                                      remark: n.remark,
-                                      tags: n.tags,
-                                      enabled: !n.enabled,
-                                    });
-                                    await refresh();
-                                  })
-                                }
-                              >
-                                {n.enabled ? "禁用" : "启用"}
-                              </button>
-                              <button
-                                className="danger-text"
-                                onClick={() =>
-                                  setConfirm({
-                                    title: "删除节点",
-                                    text: `「${n.name}」被 ${n.references} 个订阅引用。删除后会从这些订阅中移除，此操作无法撤销。`,
-                                    run: async () => {
-                                      await api(`/nodes/${n.id}`, "DELETE", {
-                                        confirm: true,
-                                      });
-                                      await refresh();
-                                    },
-                                  })
-                                }
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
+            <NodeLibrary
+              nodes={nodes}
+              collections={collections}
+              refresh={refresh}
+              notify={notify}
+              copy={copy}
+              edit={setEditing}
+              confirm={setConfirm}
+            />
           )}
           {page === "subscriptions" &&
             (profile ? (
@@ -680,17 +464,6 @@ function App() {
         saved={refresh}
         notify={notify}
       />
-      {collectionEditor && (
-        <CollectionEditor
-          collection={collectionEditor === "new" ? null : collectionEditor}
-          close={() => setCollectionEditor(null)}
-          saved={async () => {
-            setCollectionEditor(null);
-            await refresh();
-          }}
-          confirm={setConfirm}
-        />
-      )}
       <Modal
         open={!!confirm}
         onClose={() => setConfirm(null)}
@@ -940,84 +713,6 @@ function CollectionPicker({
         <span className="muted">尚无节点集合</span>
       )}
     </fieldset>
-  );
-}
-function CollectionEditor({
-  collection,
-  close,
-  saved,
-  confirm,
-}: {
-  collection: NodeCollection | null;
-  close: () => void;
-  saved: () => Promise<void>;
-  confirm: ConfirmSetter;
-}) {
-  const [name, setName] = useState(collection?.name || ""),
-    [remark, setRemark] = useState(collection?.remark || ""),
-    [busy, setBusy] = useState(false);
-  return (
-    <Modal
-      open
-      onClose={close}
-      title={collection ? "编辑节点集合" : "新建节点集合"}
-      description="集合用于管理和筛选，不会自动改变订阅。"
-    >
-      <Field label="集合名称">
-        <input
-          aria-label="集合名称"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoFocus
-        />
-      </Field>
-      <Field label="备注">
-        <textarea
-          aria-label="集合备注"
-          value={remark}
-          onChange={(e) => setRemark(e.target.value)}
-        />
-      </Field>
-      <div className="modal-actions">
-        {collection && (
-          <button
-            className="danger-text"
-            onClick={() =>
-              confirm({
-                title: "删除节点集合",
-                text: `只删除集合“${collection.name}”及其节点关联；不会删除任何全局节点，也不会影响已有订阅。`,
-                successMessage: "节点集合已删除",
-                run: async () => {
-                  await api(`/collections/${collection.id}`, "DELETE", {});
-                  await saved();
-                },
-              })
-            }
-          >
-            删除集合
-          </button>
-        )}
-        <button
-          disabled={busy || !name.trim()}
-          className="primary"
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await api(
-                collection ? `/collections/${collection.id}` : "/collections",
-                collection ? "PATCH" : "POST",
-                { name, remark },
-              );
-              await saved();
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          保存集合
-        </button>
-      </div>
-    </Modal>
   );
 }
 function ImportDialog({
@@ -1990,6 +1685,7 @@ function ProfileDetail({
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [tag, setTag] = useState(""),
+    [status, setStatus] = useState(""),
     [collectionId, setCollectionId] = useState<number | null>(null),
     [busy, setBusy] = useState(false);
   const sensors = useSensors(
@@ -2011,6 +1707,14 @@ function ProfileDetail({
   const selected = ids
     .map((id) => nodes.find((n) => n.id === id))
     .filter((n): n is NodeRecord => !!n);
+  const sourceNodes =
+    collectionId === null
+      ? nodes
+      : nodes.filter((node) => node.collection_ids.includes(collectionId));
+  const candidateNodes = sourceNodes.filter((node) =>
+    nodeMatches(node, search, filter, tag, status),
+  );
+  const selectedCollection = collections.find((c) => c.id === collectionId);
   const move = (from: number, to: number) => {
     if (to >= 0 && to < ids.length) setIds(arrayMove(ids, from, to));
   };
@@ -2069,28 +1773,56 @@ function ProfileDetail({
       <div className="assignment-grid">
         <section className="card section-pad">
           <h2>选择节点</h2>
-          <p className="muted">全局节点可同时加入多个订阅</p>
-          <input
-            aria-label="搜索可选节点"
-            placeholder="搜索节点…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="row-actions">
-            <select
-              aria-label="选择器集合"
-              value={collectionId ?? ""}
-              onChange={(e) =>
-                setCollectionId(e.target.value ? Number(e.target.value) : null)
+          <p className="muted">
+            来源只筛选候选节点；订阅仍由明确勾选的节点决定
+          </p>
+          <div className="subscription-source" aria-label="节点来源">
+            <div className="source-master">
+              <small>节点库</small>
+              <button
+                className={collectionId === null ? "active" : ""}
+                onClick={() => {
+                  setCollectionId(null);
+                  setSearch("");
+                }}
+              >
+                <span>全部节点</span>
+                <b>{nodes.length}</b>
+              </button>
+            </div>
+            <div className="source-collections">
+              <small>节点集合</small>
+              <div>
+                {collections.map((c) => (
+                  <button
+                    key={c.id}
+                    className={collectionId === c.id ? "active" : ""}
+                    onClick={() => {
+                      setCollectionId(c.id);
+                      setSearch("");
+                    }}
+                  >
+                    <span>{c.name}</span>
+                    <b>{c.node_count}</b>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <label className="search subscription-search">
+            <Search size={16} />
+            <input
+              aria-label="搜索可选节点"
+              placeholder={
+                selectedCollection
+                  ? `搜索 ${selectedCollection.name} 中节点…`
+                  : "搜索全部节点…"
               }
-            >
-              <option value="">全部集合</option>
-              {collections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+          <div className="row-actions selector-filters">
             <select
               aria-label="选择器协议"
               value={filter}
@@ -2113,39 +1845,61 @@ function ProfileDetail({
                 <option key={t}>{t}</option>
               ))}
             </select>
+            <select
+              aria-label="选择器状态"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="">所有状态</option>
+              <option value="enabled">启用</option>
+              <option value="disabled">禁用</option>
+            </select>
+            <small>
+              {candidateNodes.length === sourceNodes.length
+                ? `${sourceNodes.length} 个候选节点`
+                : `${candidateNodes.length} / ${sourceNodes.length} 个候选节点`}
+            </small>
           </div>
           <div className="node-picker">
-            {nodes
-              .filter(
-                (n) =>
-                  nodeMatches(n, search, filter, tag, "") &&
-                  (collectionId === null ||
-                    n.collection_ids.includes(collectionId)),
-              )
-              .map((n) => (
-                <label key={n.id} className="picker-node">
-                  <input
-                    type="checkbox"
-                    checked={ids.includes(n.id)}
-                    onChange={(e) =>
-                      setIds(
-                        e.target.checked
-                          ? [...ids, n.id]
-                          : ids.filter((id) => id !== n.id),
-                      )
-                    }
-                  />
-                  <div>
-                    <strong>{n.name}</strong>
-                    <small>
-                      {labelProtocol(n.protocol)} · {n.normalized_config.server}
-                    </small>
-                  </div>
-                  <span className={n.enabled ? "state enabled" : "state"}>
-                    {n.enabled ? "启用" : "禁用"}
-                  </span>
-                </label>
-              ))}
+            {candidateNodes.map((n) => (
+              <label key={n.id} className="picker-node">
+                <input
+                  type="checkbox"
+                  checked={ids.includes(n.id)}
+                  onChange={(e) =>
+                    setIds(
+                      e.target.checked
+                        ? [...ids, n.id]
+                        : ids.filter((id) => id !== n.id),
+                    )
+                  }
+                />
+                <div>
+                  <strong>{n.name}</strong>
+                  <small>
+                    {labelProtocol(n.protocol)} · {n.normalized_config.server}
+                  </small>
+                </div>
+                <span className={n.enabled ? "state enabled" : "state"}>
+                  {n.enabled ? "启用" : "禁用"}
+                </span>
+              </label>
+            ))}
+            {!candidateNodes.length && (
+              <div className="selector-empty">
+                <Network size={28} />
+                <strong>
+                  {selectedCollection && !sourceNodes.length
+                    ? `${selectedCollection.name} 暂无节点`
+                    : "没有匹配的节点"}
+                </strong>
+                <small>
+                  {selectedCollection && !sourceNodes.length
+                    ? `你可以先到节点库 → ${selectedCollection.name} → 从节点库添加节点。`
+                    : "调整搜索或筛选条件后重试。"}
+                </small>
+              </div>
+            )}
           </div>
         </section>
         <section className="card section-pad">

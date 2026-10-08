@@ -373,9 +373,23 @@ test("node collections organize nodes without becoming subscription authority", 
       },
     })
   ).json();
+  for (const [index, node] of imported.entries()) {
+    const full = (await (await context.request.get(`/api/nodes`)).json()).find(
+      (item: { id: number }) => item.id === node.id,
+    );
+    await context.request.patch(`/api/nodes/${node.id}`, {
+      headers,
+      data: {
+        normalized_config: full.normalized_config,
+        remark: full.remark,
+        tags: [index ? "日本" : "美国", index ? "测试" : "AI"],
+        enabled: true,
+      },
+    });
+  }
   await page.reload();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
-  for (const name of ["我个人", "朋友1"]) {
+  for (const name of ["E2E-G", "E2E-A"]) {
     await page.getByRole("button", { name: "新建集合" }).click();
     await page.getByLabel("集合名称").fill(name);
     await page.getByLabel("集合备注").fill("E2E collection");
@@ -384,37 +398,64 @@ test("node collections organize nodes without becoming subscription authority", 
       page.getByRole("button", { name: new RegExp(name) }).first(),
     ).toBeVisible();
   }
-  await page
-    .getByRole("button", { name: "Collection VLESS", exact: true })
-    .click();
-  await page.getByRole("checkbox", { name: "我个人", exact: true }).check();
-  await page.getByRole("checkbox", { name: "朋友1", exact: true }).check();
-  await page.getByLabel("标签（逗号分隔）").fill("美国, AI");
-  await page.getByRole("button", { name: "保存更改" }).click();
-  await page
-    .getByRole("button", { name: "Collection VMess", exact: true })
-    .click();
-  await page.getByRole("checkbox", { name: "我个人", exact: true }).check();
-  await page.getByLabel("标签（逗号分隔）").fill("日本");
-  await page.getByRole("button", { name: "保存更改" }).click();
-  await page.getByRole("button", { name: /朋友1 1/ }).click();
+  await expect(page.getByText("节点库", { exact: true }).last()).toBeVisible();
+  await expect(page.getByText("节点集合", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /E2E-G 0/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "E2E-G 还没有节点" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "从节点库添加节点" }).last().click();
+  await page.getByLabel("搜索节点库", { exact: true }).fill("Collection");
+  await page.getByLabel("搜索节点库协议").selectOption("vless");
+  await page.getByLabel("搜索节点库标签").selectOption("AI");
+  await page.getByRole("checkbox", { name: "添加 Collection VLESS" }).check();
+  await page.getByLabel("搜索节点库协议").selectOption("");
+  await page.getByLabel("搜索节点库标签").selectOption("");
+  await page.getByRole("checkbox", { name: "添加 Collection VMess" }).check();
+  await page.getByRole("button", { name: "添加 2 个节点" }).click();
+  await expect(page.getByRole("button", { name: /E2E-G 2/ })).toBeVisible();
+  await page.getByLabel("搜索 E2E-G 中节点", { exact: true }).fill("VLESS");
   await expect(
     page.getByRole("button", { name: "Collection VLESS", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Collection VMess", { exact: true })).toHaveCount(
-    0,
-  );
-  await page.getByLabel("标签筛选").selectOption("AI");
+  await page.getByRole("button", { name: "从 E2E-G 移除" }).click();
+  await page.getByRole("button", { name: /全部节点/ }).click();
   await expect(
     page.getByRole("button", { name: "Collection VLESS", exact: true }),
   ).toBeVisible();
-  await page.getByLabel("标签筛选").selectOption("");
+  await page.getByRole("checkbox", { name: "选择 Collection VLESS" }).check();
+  await page.getByRole("checkbox", { name: "选择 Collection VMess" }).check();
+  await page.getByRole("button", { name: "加入集合", exact: true }).click();
+  await page.getByRole("checkbox", { name: /E2E-A/ }).check();
+  await page
+    .getByRole("button", { name: "加入集合", exact: true })
+    .last()
+    .click();
+  await expect(
+    page.locator(".collection-chips").filter({ hasText: "E2E-A" }),
+  ).toHaveCount(2);
+  await page.getByRole("checkbox", { name: "选择 Collection VLESS" }).check();
+  await page.getByRole("checkbox", { name: "选择 Collection VMess" }).check();
+  await page.getByRole("button", { name: "移出集合", exact: true }).click();
+  await page.getByRole("checkbox", { name: /E2E-A/ }).check();
+  await page
+    .getByRole("button", { name: "移出集合", exact: true })
+    .last()
+    .click();
+  await expect(
+    page.locator(".collection-chips").filter({ hasText: "E2E-A" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /E2E-G 1/ }).click();
+  await page.getByRole("button", { name: "从节点库添加节点" }).click();
+  await expect(page.getByText("已在 E2E-G 中")).toBeVisible();
+  await page.getByRole("checkbox", { name: "添加 Collection VLESS" }).check();
+  await page.getByRole("button", { name: "添加 1 个节点" }).click();
   await page.screenshot({
     path: "test-results/collections-desktop.png",
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator(".collection-nav")).toBeVisible();
+  await expect(page.locator(".collection-sidebar")).toBeVisible();
   await page.screenshot({
     path: "test-results/collections-mobile.png",
     fullPage: true,
@@ -433,31 +474,69 @@ test("node collections organize nodes without becoming subscription authority", 
     .filter({ hasText: profile.name })
     .getByRole("button", { name: "管理订阅" })
     .click();
-  await page.getByLabel("选择器集合").selectOption({ label: "朋友1" });
+  await expect(page.getByLabel("节点来源").getByText("节点库")).toBeVisible();
+  await expect(page.getByLabel("节点来源").getByText("节点集合")).toBeVisible();
+  await page
+    .getByLabel("节点来源")
+    .getByRole("button", { name: /全部节点/ })
+    .click();
+  await page.getByLabel("搜索可选节点").fill("Collection VLESS");
   await page.getByRole("checkbox", { name: /^Collection VLESS / }).check();
-  await page.getByLabel("选择器集合").selectOption({ label: "我个人" });
+  await page
+    .getByLabel("节点来源")
+    .getByRole("button", { name: /E2E-G/ })
+    .click();
+  await page.getByLabel("搜索可选节点").fill("Collection VMess");
   await page.getByRole("checkbox", { name: /^Collection VMess / }).check();
+  await page
+    .getByLabel("节点来源")
+    .getByRole("button", { name: /全部节点/ })
+    .click();
+  await page.getByLabel("搜索可选节点").fill("Collection VLESS");
   await expect(
     page.getByRole("checkbox", { name: /^Collection VLESS / }),
   ).toBeChecked();
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
+  const canonicalUrl = (
+    await (
+      await context.request.get(`/api/subscriptions/${profile.id}/url`)
+    ).json()
+  ).url;
+  const canonicalBody = await (await context.request.get(canonicalUrl)).text();
   const collections = await (
     await context.request.get("/api/collections")
   ).json();
-  const personal = collections.find(
-      (c: { name: string }) => c.name === "我个人",
+  const collectionG = collections.find(
+      (c: { name: string }) => c.name === "E2E-G",
     ),
-    friend = collections.find((c: { name: string }) => c.name === "朋友1");
-  await context.request.delete(`/api/collections/${friend.id}`, { headers });
+    collectionA = collections.find((c: { name: string }) => c.name === "E2E-A");
+  await context.request.delete(`/api/collections/${collectionG.id}/nodes`, {
+    headers,
+    data: { node_ids: [imported[1].id] },
+  });
   expect(
     (await (await context.request.get(`/api/subscriptions`)).json()).find(
       (s: { id: number }) => s.id === profile.id,
     ).node_ids,
   ).toEqual(imported.map((n: { id: number }) => n.id));
+  expect(await (await context.request.get(canonicalUrl)).text()).toBe(
+    canonicalBody,
+  );
+  await context.request.delete(`/api/collections/${collectionG.id}`, {
+    headers,
+  });
+  expect(
+    (await (await context.request.get(`/api/subscriptions`)).json()).find(
+      (s: { id: number }) => s.id === profile.id,
+    ).node_ids,
+  ).toEqual(imported.map((n: { id: number }) => n.id));
+  expect(await (await context.request.get(canonicalUrl)).text()).toBe(
+    canonicalBody,
+  );
   await page.reload();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page
-    .getByRole("button", { name: new RegExp(`编辑集合 ${personal.name}`) })
+    .getByRole("button", { name: new RegExp(`编辑集合 ${collectionA.name}`) })
     .click();
   await page.getByRole("button", { name: "删除集合" }).click();
   await expect(page.getByRole("dialog")).toContainText("不会影响已有订阅");
