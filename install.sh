@@ -258,12 +258,13 @@ install_caddy_fragment() {
 commit_installation() {
   local release="$INSTALL_ROOT/releases/$DXDY_VERSION"
   install -d -m 0755 "$INSTALL_ROOT/releases" "$SYSTEMD_DIR"; install -d -m 0700 "$CONFIG_DIR"; install -d -m 0750 "$DATA_DIR" "$BACKUP_DIR"
-  rm -rf -- "$release"; cp -a "$RELEASE_SOURCE" "$release"; chown -R root:root "$release" 2>/dev/null || true; chmod -R a-w "$release" 2>/dev/null || true
+  rm -rf -- "$release"; cp -a "$RELEASE_SOURCE" "$release"
   ln -sfn "releases/$DXDY_VERSION" "$INSTALL_ROOT/current.next"; mv -Tf "$INSTALL_ROOT/current.next" "$INSTALL_ROOT/current"
   install -m 0600 "$STAGING/install.conf" "$CONFIG_DIR/install.conf"; install -m 0600 "$STAGING/dx-dy.env" "$CONFIG_DIR/dx-dy.env"
   install -m 0644 "$release/dx-dy.service" "$SYSTEMD_DIR/dx-dy.service"; install -D -m 0755 "${DXDY_MANAGER_SOURCE:-$SCRIPT_DIR/ops/dx-dy}" "$MANAGER_PATH"
   install_caddy_fragment
   if [[ "$TEST_MODE" != 1 ]]; then
+    chown -R root:root "$release"; chmod -R a-w "$release"
     getent group dx-dy >/dev/null || groupadd --system dx-dy
     id dx-dy >/dev/null 2>&1 || useradd --system --gid dx-dy --home-dir /var/lib/dx-dy --shell /usr/sbin/nologin dx-dy
     chown -R dx-dy:dx-dy "$DATA_DIR" "$BACKUP_DIR"; chmod 0600 "$CONFIG_DIR/dx-dy.env" "$CONFIG_DIR/install.conf"
