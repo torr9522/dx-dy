@@ -1,6 +1,131 @@
 import { test, expect } from "@playwright/test";
 import { vless, vmess } from "../fixtures";
 import QRCode from "qrcode";
+for (const width of [1280, 390]) {
+  test(`subscription card quick actions at ${width}px`, async ({
+    page,
+    context,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/");
+    await page
+      .getByLabel("密码", { exact: true })
+      .fill("Synthetic-e2e-password-123!");
+    await page.getByRole("button", { name: "安全登录" }).click();
+    await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+    const csrf = (await (await context.request.get("/api/auth/me")).json())
+      .csrf;
+    const headers = { "X-CSRF-Token": csrf };
+    const imported = await (
+      await context.request.post("/api/nodes/import", {
+        headers,
+        data: { items: [{ uri: vless }, { uri: vmess }] },
+      })
+    ).json();
+    const links: string[] = [];
+    const profileIds: number[] = [];
+    for (const [label, count] of [
+      ["Empty", 0],
+      ["Mixed", 2],
+    ] as const) {
+      const name = `${label} quick ${width}`;
+      const p = await (
+        await context.request.post("/api/subscriptions", {
+          headers,
+          data: { name },
+        })
+      ).json();
+      profileIds.push(p.id);
+      if (count)
+        await context.request.put(`/api/subscriptions/${p.id}/nodes`, {
+          headers,
+          data: { node_ids: imported.map((n: { id: number }) => n.id) },
+        });
+      await page.reload();
+      await page.getByRole("button", { name: "订阅", exact: true }).click();
+      const card = page.locator(".profile-card").filter({ hasText: name });
+      await expect(card).toBeVisible();
+      for (const action of ["复制订阅链接", "预览", "二维码", "管理订阅"])
+        await expect(
+          card.getByRole("button", { name: action, exact: true }),
+        ).toBeVisible();
+      await card
+        .getByRole("button", { name: "复制订阅链接", exact: true })
+        .click();
+      await expect(page.locator(".toast")).toContainText("已复制");
+      const url = await page.evaluate(() => navigator.clipboard.readText());
+      expect(new URL(url).search).toBe("");
+      expect(new URL(url).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{43}$/);
+      const expectedUrl = (
+        await (
+          await context.request.get(`/api/subscriptions/${p.id}/url`)
+        ).json()
+      ).url;
+      expect(url).toBe(expectedUrl);
+      links.push(url);
+      const body = await (await context.request.get(url)).text();
+      expect(
+        count
+          ? Buffer.from(body, "base64").toString("utf8").split("\n").length
+          : body,
+      ).toBe(count || "");
+      const preview = card.getByRole("button", { name: "预览", exact: true });
+      await preview.focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("heading", { name: "通用订阅预览" }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(`节点数量：${count}`, { exact: true }),
+      ).toBeVisible();
+      if (!count) {
+        await page
+          .getByText("高级：查看解码后的 URI（含凭据）", { exact: true })
+          .click();
+        await expect(
+          page.getByText("（空订阅）", { exact: true }),
+        ).toBeVisible();
+      }
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      await expect(preview).toBeFocused();
+      await card.getByRole("button", { name: "二维码", exact: true }).click();
+      await expect(
+        page.getByRole("dialog").getByRole("link", { name: "订阅链接" }),
+      ).toHaveAttribute("href", url);
+      await expect(
+        page.getByRole("img", { name: "订阅二维码" }),
+      ).toHaveAttribute("src", /^data:image\/png;base64,/);
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      const box = await card.boundingBox();
+      expect(box).not.toBeNull();
+      for (const button of await card.getByRole("button").all()) {
+        const b = await button.boundingBox();
+        expect(b).not.toBeNull();
+        expect(b!.x).toBeGreaterThanOrEqual(box!.x);
+        expect(b!.x + b!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
+        expect(b!.height).toBeGreaterThanOrEqual(36);
+      }
+      await page.screenshot({
+        path: `test-results/subscriptions-${label}-${width}.png`,
+        fullPage: true,
+      });
+      await card.getByRole("button", { name: "管理订阅", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "订阅分发" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "← 返回订阅列表" }).click();
+    }
+    expect(links[0]).not.toBe(links[1]);
+    for (const id of profileIds)
+      await context.request.delete(`/api/subscriptions/${id}`, { headers });
+    for (const node of imported)
+      await context.request.delete(`/api/nodes/${node.id}`, {
+        headers,
+        data: { confirm: true },
+      });
+  });
+}
 test("complete browser workflow with synthetic nodes", async ({
   page,
   context,

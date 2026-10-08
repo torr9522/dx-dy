@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.1.2-rc.1] - 2026-10-08
+
+### Changed
+- Added copy, universal preview and QR quick actions directly to subscription list cards, including empty profiles.
+- Reused the same action/dialog component in list cards and the existing management page; canonical URLs are fetched on demand to avoid stale links after rotation.
+- Preserved management navigation and added compact responsive button groups with accessible labels and keyboard focus.
+
+### Validation
+- Added desktop/mobile Playwright coverage for list actions, empty/mixed profiles, canonical links, dialogs, management navigation and button containment.
+- Passed 75 unit/integration tests and all 3 Playwright flows, lint, typecheck and production build.
+- Shadowrocket device acceptance was confirmed PASS by the user before this UI task; no protocol or subscription format changes were made.
+
 ## [0.1.1-rc.1] - 2026-10-08
 
 ### Changed

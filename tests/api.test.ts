@@ -41,7 +41,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.1",
+      version: "0.1.2",
     });
   });
   it("unauthorized admin request fails", async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -87,6 +87,7 @@ function Modal({
   title,
   description,
   drawer = false,
+  returnFocus,
   children,
 }: React.PropsWithChildren<{
   open: boolean;
@@ -94,12 +95,23 @@ function Modal({
   title: string;
   description?: string;
   drawer?: boolean;
+  returnFocus?: () => void;
 }>) {
   return (
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="overlay" />
-        <Dialog.Content className={drawer ? "modal drawer" : "modal"}>
+        <Dialog.Content
+          className={drawer ? "modal drawer" : "modal"}
+          onCloseAutoFocus={
+            returnFocus
+              ? (event) => {
+                  event.preventDefault();
+                  returnFocus();
+                }
+              : undefined
+          }
+        >
           <div className="modal-head">
             <div>
               <Dialog.Title>{title}</Dialog.Title>
@@ -265,7 +277,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1</small>
+          <small>Private Subscription Manager v0.1.2</small>
         </div>
       </aside>
       <main>
@@ -536,6 +548,13 @@ function App() {
                         {p.node_ids.length} 个节点
                         <span>{date(p.updated_at)}</span>
                       </div>
+                      <SubscriptionActions
+                        profileId={p.id}
+                        name={p.name}
+                        copy={copy}
+                        notify={notify}
+                        compact
+                      />
                       <button
                         className="profile-open"
                         onClick={() => setProfile(p)}
@@ -1537,6 +1556,130 @@ function SortableNode({
     </div>
   );
 }
+function SubscriptionActions({
+  profileId,
+  name,
+  copy,
+  notify,
+  compact = false,
+}: {
+  profileId: number;
+  name: string;
+  copy: (s: string) => Promise<void>;
+  notify: (s: string) => void;
+  compact?: boolean;
+}) {
+  const previewButton = useRef<HTMLButtonElement>(null),
+    qrButton = useRef<HTMLButtonElement>(null);
+  const [url, setUrl] = useState(""),
+    [qr, setQr] = useState(""),
+    [qrOpen, setQrOpen] = useState(false),
+    [busy, setBusy] = useState(false),
+    [output, setOutput] = useState<{
+      decoded: string;
+      nodes: { name: string; protocol: string }[];
+    } | null>(null);
+  const work = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Fetch on every action so rotations/settings changes cannot leave a stale cached URL.
+  const currentUrl = async () => {
+    const result = await api<{ url: string }>(
+      `/subscriptions/${profileId}/url`,
+    );
+    setUrl(result.url);
+    return result.url;
+  };
+  return (
+    <>
+      <div
+        className={
+          compact ? "subscription-actions compact" : "subscription-actions"
+        }
+        role="group"
+        aria-label={name + "订阅快捷操作"}
+      >
+        <button
+          disabled={busy}
+          title="复制订阅链接"
+          aria-label="复制订阅链接"
+          onClick={() => work(async () => copy(await currentUrl()))}
+        >
+          <Copy size={15} />
+          {compact ? "复制订阅" : "复制订阅链接"}
+        </button>
+        <button
+          ref={previewButton}
+          disabled={busy}
+          title="预览通用订阅"
+          aria-label="预览"
+          onClick={() =>
+            work(async () =>
+              setOutput(await api(`/subscriptions/${profileId}/preview`)),
+            )
+          }
+        >
+          <ExternalLink size={15} />
+          预览
+        </button>
+        <button
+          ref={qrButton}
+          disabled={busy}
+          title="显示订阅二维码"
+          aria-label="二维码"
+          onClick={() =>
+            work(async () => {
+              const link = await currentUrl();
+              setQr(await QRCode.toDataURL(link, { width: 300, margin: 2 }));
+              setQrOpen(true);
+            })
+          }
+        >
+          二维码
+        </button>
+      </div>
+      <Modal
+        open={!!output}
+        returnFocus={() => previewButton.current?.focus()}
+        onClose={() => setOutput(null)}
+        title="通用订阅预览"
+        description="含敏感节点凭据，仅管理员可见。"
+      >
+        <p>节点数量：{output?.nodes.length ?? 0}</p>
+        <ol aria-label="订阅节点顺序">
+          {output?.nodes.map((node, i) => (
+            <li key={i}>
+              {node.protocol.toUpperCase()} · {node.name}
+            </li>
+          ))}
+        </ol>
+        <details>
+          <summary>高级：查看解码后的 URI（含凭据）</summary>
+          <pre className="output">{output?.decoded || "（空订阅）"}</pre>
+        </details>
+      </Modal>
+      <Modal
+        open={qrOpen}
+        returnFocus={() => qrButton.current?.focus()}
+        onClose={() => setQrOpen(false)}
+        title="订阅二维码"
+        description="扫码获取订阅凭证，请勿公开截图。"
+      >
+        <img className="qr" src={qr} alt="订阅二维码" />
+        <a href={url} className="mono" rel="noreferrer">
+          订阅链接
+        </a>
+      </Modal>
+    </>
+  );
+}
 function ProfileDetail({
   initial,
   nodes,
@@ -1559,15 +1702,6 @@ function ProfileDetail({
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [tag, setTag] = useState(""),
-    [url, setUrl] = useState(""),
-    [qr, setQr] = useState(""),
-    [output, setOutput] = useState<{
-      body: string;
-      decoded: string;
-      mode: string;
-      nodes: { name: string; protocol: string }[];
-    } | null>(null),
-    [qrOpen, setQrOpen] = useState(false),
     [busy, setBusy] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1575,13 +1709,6 @@ function ProfileDetail({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const loadUrl = async () => {
-    const u = await api<{ url: string }>(`/subscriptions/${profile.id}/url`);
-    setUrl(u.url);
-  };
-  useEffect(() => {
-    loadUrl().catch((e) => notify(e.message));
-  }, []);
   const work = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -1769,41 +1896,17 @@ function ProfileDetail({
         <div className="subscription-links">
           <p className="muted">
             适用于 Shadowrocket、v2rayN、v2rayNG 及其他支持标准 Base64 URI
-            Subscription 的客户端。Shadowrocket 真机验收待完成。
+            Subscription 的客户端。
           </p>
           <div className="link-row">
             <strong>通用订阅</strong>
             <span className="mono muted">/s/••••••••</span>
-            <button disabled={!url} onClick={() => work(() => copy(url))}>
-              <Copy size={15} />
-              复制订阅链接
-            </button>
-            <button
-              onClick={() =>
-                work(async () => {
-                  setOutput(await api(`/subscriptions/${profile.id}/preview`));
-                })
-              }
-            >
-              <ExternalLink size={15} />
-              预览
-            </button>
-            <button
-              disabled={!url}
-              onClick={() =>
-                work(async () => {
-                  setQr(
-                    await QRCode.toDataURL(url, {
-                      width: 300,
-                      margin: 2,
-                    }),
-                  );
-                  setQrOpen(true);
-                })
-              }
-            >
-              二维码
-            </button>
+            <SubscriptionActions
+              profileId={profile.id}
+              name={profile.name}
+              copy={copy}
+              notify={notify}
+            />
           </div>
         </div>
         <div className="modal-actions">
@@ -1814,7 +1917,6 @@ function ProfileDetail({
                 text: "旧链接将立即失效。所有客户端需重新添加新的订阅链接。",
                 run: async () => {
                   await api(`/subscriptions/${profile.id}/rotate`, "POST", {});
-                  await loadUrl();
                   await onSaved();
                 },
               })
@@ -1840,36 +1942,6 @@ function ProfileDetail({
           </button>
         </div>
       </section>
-      <Modal
-        open={!!output}
-        onClose={() => setOutput(null)}
-        title="通用订阅预览"
-        description="含敏感节点凭据，仅管理员可见。"
-      >
-        <p>节点数量：{output?.nodes.length ?? 0}</p>
-        <ol aria-label="订阅节点顺序">
-          {output?.nodes.map((node, i) => (
-            <li key={i}>
-              {node.protocol.toUpperCase()} · {node.name}
-            </li>
-          ))}
-        </ol>
-        <details>
-          <summary>高级：查看解码后的 URI（含凭据）</summary>
-          <pre className="output">{output?.decoded || "（空订阅）"}</pre>
-        </details>
-      </Modal>
-      <Modal
-        open={qrOpen}
-        onClose={() => setQrOpen(false)}
-        title="订阅二维码"
-        description="扫码获取订阅凭证，请勿公开截图。"
-      >
-        <img className="qr" src={qr} alt="订阅二维码" />
-        <a href={url} className="mono" rel="noreferrer">
-          订阅链接
-        </a>
-      </Modal>
     </>
   );
 }
