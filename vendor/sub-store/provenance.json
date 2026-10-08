@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/sub-store-org/Sub-Store",
+  "commit": "a3e61061e50b40e5c5938969aab915d05d8d7069",
+  "files": [
+    "core/proxy-utils/parsers",
+    "core/proxy-utils/preprocessors",
+    "core/proxy-utils/producers/uri.js",
+    "core/proxy-utils/producers/shadowrocket.js",
+    "core/proxy-utils/producers/utils.js",
+    "core/proxy-utils/transport-path.js",
+    "core/proxy-utils/xhttp-utils.js",
+    "core/proxy-utils/ech-utils.js",
+    "core/proxy-utils/vmess-security.js",
+    "utils/index.js",
+    "utils/yaml.js"
+  ],
+  "modifications": "None. Runtime import is replaced at build time with a local silent diagnostic shim. Only URI parser entry points and selected producers are called."
+}

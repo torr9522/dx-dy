@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+logs/
+secrets/
+*.sqlite*
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+packages/proxy-adapter/generated/
+temporary-nodes*
