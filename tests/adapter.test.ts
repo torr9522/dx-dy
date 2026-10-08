@@ -9,6 +9,27 @@ import {
 import { fixtures, vless, vmess, uuid } from "./fixtures";
 import { parse as parseYaml } from "yaml";
 describe("protocol adapter", () => {
+  it("VMess unknown query survives edit and second parse", () => {
+    const e = parseNode(vmess + "?foo=1&foo=2");
+    e.normalized_config.port = 8443;
+    const out = generateURI(e);
+    expect(out).toContain("?foo=1&foo=2");
+    expect(parseNode(out).normalized_config.port).toBe(8443);
+  });
+  it("within-batch duplicates are flagged without dropping either line", () => {
+    const p = preview(vless + "\n" + vless);
+    expect(p).toHaveLength(2);
+    expect(p[1].duplicate).toBe(true);
+  });
+  it("name alone is not node identity but unknown parameters distinguish assets", () => {
+    const e = parseNode(vless);
+    expect(
+      preview(vless.replace("#日本%20测试", "#Renamed"), [e])[0].duplicate,
+    ).toBe(true);
+    expect(
+      preview(vless.replace("#", "&vendor=different#"), [e])[0].duplicate,
+    ).toBe(false);
+  });
   for (const [name, uri] of fixtures)
     it(name + " semantic round trip", () => {
       const e = parseNode(uri),

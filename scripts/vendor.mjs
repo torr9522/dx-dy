@@ -8,7 +8,7 @@ if(execFileSync('git',['-C',root,'rev-parse','HEAD'],{encoding:'utf8'}).trim()!=
 const files=['core/proxy-utils/parsers','core/proxy-utils/preprocessors','core/proxy-utils/producers/uri.js','core/proxy-utils/producers/shadowrocket.js','core/proxy-utils/producers/utils.js','core/proxy-utils/transport-path.js','core/proxy-utils/xhttp-utils.js','core/proxy-utils/ech-utils.js','core/proxy-utils/vmess-security.js','utils/index.js','utils/yaml.js'];
 for(const f of files){const dest=path.join('vendor/sub-store/src',f);mkdirSync(path.dirname(dest),{recursive:true});cpSync(path.join(root,'backend/src',f),dest,{recursive:true});}
 cpSync(path.join(root,'LICENSE'),'vendor/sub-store/LICENSE');
-writeFileSync('vendor/sub-store/provenance.json',JSON.stringify({repository:'https://github.com/sub-store-org/Sub-Store',commit:expected,files,modifications:'None. Runtime import is replaced at build time with a local silent diagnostic shim. Only URI parser entry points and selected producers are called.'},null,2)+'\n');
+writeFileSync('vendor/sub-store/provenance.json',JSON.stringify({repository:'https://github.com/sub-store-org/Sub-Store',commit:expected,files,modifications:'Copied modules are unchanged. Extracted lastParse/formatTransportPath from core/proxy-utils/index.js into normalize.js; X509 fingerprint uses Node crypto and local CA-file access is disabled. Runtime imports are replaced at build time with a silent diagnostic shim. Only URI parsers and selected producers are called.'},null,2)+'\n');
 // Preserve upstream's finishing normalizer without its server/runtime closure.
 const source=readFileSync(path.join(root,'backend/src/core/proxy-utils/index.js'),'utf8');
 const start=source.indexOf('function lastParse(proxy)');

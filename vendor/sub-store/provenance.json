@@ -14,5 +14,5 @@
     "utils/index.js",
     "utils/yaml.js"
   ],
-  "modifications": "None. Runtime import is replaced at build time with a local silent diagnostic shim. Only URI parser entry points and selected producers are called."
+  "modifications": "Copied modules are unchanged. Extracted lastParse/formatTransportPath from core/proxy-utils/index.js into normalize.js; X509 fingerprint uses Node crypto and local CA-file access is disabled. Runtime imports are replaced at build time with a silent diagnostic shim. Only URI parsers and selected producers are called."
 }

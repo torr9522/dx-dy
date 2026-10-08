@@ -62,9 +62,10 @@ export function parseNode(input: string): Envelope {
     if (normalized_config.type === "vmess") {
       try {
         const obj = JSON.parse(
-          Buffer.from(original_uri.slice(8).split("#")[0], "base64").toString(
-            "utf8",
-          ),
+          Buffer.from(
+            original_uri.slice(8).split("#")[0].split("?")[0],
+            "base64",
+          ).toString("utf8"),
         ) as Record<string, Json>;
         for (const [k, v] of Object.entries(obj))
           if (!vmessOwned.has(k)) vmessExtra[k] = v;
@@ -120,7 +121,17 @@ export function generateURI(node: Envelope): string {
       Buffer.from(generated.slice(8), "base64").toString("utf8"),
     ) as Record<string, Json>;
     const merged = { ...node.unknown_params.vmessExtra, ...current };
-    return "vmess://" + Buffer.from(JSON.stringify(merged)).toString("base64");
+    const extras = node.unknown_params.query.filter(
+      (e) => !e.owned && !ownedKeys.has(e.decodedKey.toLowerCase()),
+    );
+    const suffix = extras
+      .map((e) => `${e.rawKey}${e.hasEquals ? "=" + e.rawValue : ""}`)
+      .join("&");
+    return (
+      "vmess://" +
+      Buffer.from(JSON.stringify(merged)).toString("base64") +
+      (suffix ? "?" + suffix : "")
+    );
   }
   const [base, fragment = ""] = generated.split("#");
   const generatedEntries = queryEntries(generated);
@@ -185,11 +196,13 @@ export function generateShadowrocket(nodes: Envelope[]): {
 }
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function fingerprints(e: Envelope) {
+  const config: Record<string, unknown> = { ...e.normalized_config };
+  delete config.name;
   return {
     raw: hash(e.original_uri),
     semantic: hash(
       JSON.stringify({
-        config: e.normalized_config,
+        config,
         unknown: e.unknown_params.query.filter((q) => !q.owned),
         vmess: e.unknown_params.vmessExtra,
       }),
@@ -197,6 +210,7 @@ export function fingerprints(e: Envelope) {
   };
 }
 export function preview(text: string, existing: Envelope[] = []) {
+  const seen = [...existing];
   return text
     .split(/\r?\n/)
     .map((line, index) => ({ line: line.trim(), index }))
@@ -205,10 +219,11 @@ export function preview(text: string, existing: Envelope[] = []) {
       try {
         const envelope = parseNode(line),
           fp = fingerprints(envelope);
-        const duplicate = existing.some((e) => {
+        const duplicate = seen.some((e) => {
           const p = fingerprints(e);
           return p.raw === fp.raw || p.semantic === fp.semantic;
         });
+        seen.push(envelope);
         return {
           index,
           status:
