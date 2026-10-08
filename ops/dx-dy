@@ -242,7 +242,9 @@ cmd_update() {
   fetch_update_asset "$base" dx-dy "$temp/dx-dy"; expected="$(jq -er '.manager_sha256' "$temp/manifest.json")"; actual="$(sha256sum "$temp/dx-dy"|cut -d' ' -f1)"; [[ "$expected" == "$actual" ]] || die "Manager checksum failed."
   backup="$(backup_target db)"; run_cli database.mjs backup "$backup" >/dev/null
   old_release="$(readlink -f "$CURRENT_LINK")"; new_release="$DXDY_INSTALL_ROOT/releases/$latest"; rm -rf -- "$new_release"; mkdir -p "$temp/extract"; tar -xzf "$temp/$artifact" -C "$temp/extract"; cp -a "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH" "$new_release"
-  chown -R root:root "$new_release" 2>/dev/null || true; chmod -R a-w "$new_release" 2>/dev/null || true
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then
+    chown -R root:root "$new_release"; chmod -R a-w "$new_release"
+  fi
   systemctl stop "$SERVICE"; ln -sfn "releases/$latest" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
   set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_release"; set_config_value "$CONFIG_FILE" DXDY_VERSION "$latest"
   install -m 0644 "$new_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload; systemctl start "$SERVICE" || result=$?
