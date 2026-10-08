@@ -21,9 +21,9 @@ const required = [
   "THIRD_PARTY_NOTICES.md",
   "install.sh",
   "ops/dx-dy",
-  "deploy/docker-compose.yml",
-  "deploy/Caddyfile.single",
-  "deploy/Caddyfile.dual",
+  "deploy/native/dx-dy.service",
+  "deploy/native/Caddyfile.single",
+  "deploy/native/Caddyfile.dual",
   ".github/workflows/ci.yml",
   ".github/workflows/release.yml",
   "docs/README.md",
@@ -45,9 +45,9 @@ for (const file of required)
   if (!existsSync(file))
     throw new Error("Missing public release asset: " + file);
 const metadata = JSON.parse(readFileSync("package.json", "utf8"));
-if (metadata.name !== "dx-dy" || metadata.version !== "0.1.8")
+if (metadata.name !== "dx-dy" || metadata.version !== "0.1.9")
   throw new Error("Public brand/version mismatch");
-if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.1.8"))
+if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.1.9"))
   throw new Error("README public identity mismatch");
 const publicRepository = "torr9522/dx-dy";
 const readme = readFileSync("README.md", "utf8");
@@ -73,7 +73,11 @@ for (const [label, content, terms] of [
   [
     "current baseline",
     baseline,
-    ["001_initial.sql", "002_node_collections.sql", "Migration in 0.1.8: **NONE**"],
+    [
+      "001_initial.sql",
+      "002_node_collections.sql",
+      "Migration in 0.1.9: **NONE**",
+    ],
   ],
   [
     "capability tree",
@@ -85,7 +89,8 @@ for (const [label, content, terms] of [
     if (!content.includes(term))
       throw new Error(`Incomplete ${label}: missing ${term}`);
 const knowledgeDocs = required.filter(
-  (file) => file === "AGENTS.md" || file === "README.md" || file.endsWith(".md"),
+  (file) =>
+    file === "AGENTS.md" || file === "README.md" || file.endsWith(".md"),
 );
 for (const file of knowledgeDocs) {
   const content = readFileSync(file, "utf8");
@@ -115,64 +120,54 @@ for (const workflow of [
 const releaseWorkflow = readFileSync(".github/workflows/release.yml", "utf8");
 if (/\bssh\b|production/i.test(releaseWorkflow))
   throw new Error("Release workflow must not deploy production");
-const compose = readFileSync("deploy/docker-compose.yml", "utf8");
-if (/docker\.sock|privileged\s*:\s*true/i.test(compose))
-  throw new Error("Public Compose grants unsafe privileges");
+if (
+  /ghcr|docker\/login-action|build-push-action|packages:\s*write/i.test(
+    releaseWorkflow,
+  )
+)
+  throw new Error("Native release workflow must not publish or require GHCR");
 execFileSync("shellcheck", ["-x", "install.sh", "ops/dx-dy"], {
   stdio: "inherit",
 });
-
-const temp = mkdtempSync(path.join(os.tmpdir(), "dxdy-public-gate-"));
+const unit = readFileSync("deploy/native/dx-dy.service", "utf8");
+for (const term of [
+  "User=dx-dy",
+  "EnvironmentFile=/etc/dx-dy/dx-dy.env",
+  "ExecStart=/opt/dx-dy/current/runtime/bin/node",
+  "Restart=on-failure",
+  "NoNewPrivileges=true",
+])
+  if (!unit.includes(term)) throw new Error(`Incomplete systemd unit: ${term}`);
+const unitTemp = mkdtempSync(path.join(os.tmpdir(), "dxdy-systemd-"));
 try {
-  const runtime = path.join(temp, "runtime.env");
-  writeFileSync(runtime, "APP_MASTER_KEY=" + "0".repeat(64) + "\n", {
-    mode: 0o600,
-  });
-  const env = {
-    ...process.env,
-    DXDY_COMPOSE_PROJECT: "dx-dy-gate",
-    DXDY_IMAGE_REFERENCE: "example.invalid/dx-dy:0.1.8",
-    DXDY_RUNTIME_ENV: runtime,
-    DXDY_DATA_DIR: path.join(temp, "data"),
-    DXDY_BACKUP_DIR: path.join(temp, "backups"),
-    DXDY_CADDYFILE: path.resolve("deploy/Caddyfile.single"),
-    DXDY_CADDY_DATA: path.join(temp, "caddy-data"),
-    DXDY_CADDY_CONFIG: path.join(temp, "caddy-config"),
-  };
-  execFileSync(
-    "docker",
-    ["compose", "-f", "deploy/docker-compose.yml", "config", "--quiet"],
-    {
-      env,
-      stdio: "inherit",
-    },
+  const candidate = path.join(unitTemp, "dx-dy.service");
+  writeFileSync(
+    candidate,
+    unit
+      .replace("User=dx-dy", "User=root")
+      .replace("Group=dx-dy", "Group=root")
+      .replace(/^ExecStart=.*$/m, "ExecStart=/bin/true"),
   );
-  for (const mode of ["single", "dual"]) {
-    const candidate = path.join(temp, `Caddyfile.${mode}`);
-    writeFileSync(
-      candidate,
-      readFileSync(`deploy/Caddyfile.${mode}`, "utf8")
-        .replaceAll("__ADMIN_DOMAIN__", "panel.example.com")
-        .replaceAll("__SUBSCRIPTION_DOMAIN__", "sub.example.com"),
-    );
-    execFileSync(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "-v",
-        `${candidate}:/etc/caddy/Caddyfile:ro`,
-        "caddy:2.10.2-alpine",
-        "caddy",
-        "validate",
-        "--config",
-        "/etc/caddy/Caddyfile",
-      ],
-      { stdio: "inherit" },
-    );
-  }
+  execFileSync("systemd-analyze", ["verify", candidate], {
+    stdio: "inherit",
+  });
 } finally {
-  rmSync(temp, { recursive: true, force: true });
+  rmSync(unitTemp, { recursive: true, force: true });
+}
+for (const mode of ["single", "dual"]) {
+  const caddy = readFileSync(`deploy/native/Caddyfile.${mode}`, "utf8");
+  if (
+    !caddy.includes("127.0.0.1:__INTERNAL_PORT__") ||
+    caddy.includes("app:3000")
+  )
+    throw new Error(`Invalid native Caddy template: ${mode}`);
+}
+for (const file of ["install.sh", "ops/dx-dy"]) {
+  const content = readFileSync(file, "utf8");
+  if (/podman|nerdctl|ghcr\.io/i.test(content))
+    throw new Error(
+      `Native entrypoint has a container runtime dependency: ${file}`,
+    );
 }
 
 const identityFile = process.env.DXDY_PRIVATE_IDENTITIES_FILE;

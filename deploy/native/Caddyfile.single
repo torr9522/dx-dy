@@ -1,0 +1,8 @@
+__ADMIN_DOMAIN__ {
+	log {
+		output discard
+	}
+	@compressible not path /s/*
+	encode @compressible zstd gzip
+	reverse_proxy 127.0.0.1:__INTERNAL_PORT__
+}

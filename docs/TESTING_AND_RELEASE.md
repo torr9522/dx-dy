@@ -15,41 +15,35 @@ pnpm secret:scan
 pnpm release:check --full --public
 ```
 
-- Unit/integration: adapter round trips, API/security, SQLite migration,
-  backup/restore, frontend selection logic and installer/manager fixtures.
-- Playwright: complete desktop/mobile workflows; use 390px and 320px checks for
-  compact controls.
-- Docker: no-cache image build, isolated health, migration, backup, restart and
-  persistence.
-- Fresh checkout: frozen install, lint, typecheck, tests, build and source hash
-  reproducibility from a detached worktree.
-- Deployment: only explicit staging validation; GitHub Actions never SSH to it.
+- Unit/integration: protocol adapter, API/security, SQLite migration, backup/restore, selection and installer/manager fixtures.
+- Playwright: complete desktop/mobile workflows at normal, 390px and 320px widths.
+- Native artifacts: amd64/arm64 layout, target production dependencies, bundled Node launch, release metadata and checksums.
+- systemd/Caddy: required unit hardening, ExecStart/environment/account paths, single/dual localhost proxy templates and change rollback.
+- Fresh checkout: frozen dependency install, quality/build/source reproducibility, then native artifact builds.
+- Staging: only explicit test/staging validation; GitHub Actions never SSH to a server.
+
+Installer fixtures cover Debian 12, Ubuntu 22.04/24.04 and both architectures. They assert the fresh path contains no GHCR, Podman or Nerdctl dependency and creates native paths. A clean real Debian 12 host remains the final physical acceptance environment.
+
+## Native Dependency Audit
+
+The runtime uses Node `26.10.0`. SQLite is built-in `node:sqlite`. The only production native addon is `argon2@0.45.1`, loaded through `node-gyp-build`; official linux-x64 and linux-arm64 glibc prebuilds are selected in target-specific production dependency deployments. Tailwind, Lightning CSS and Rolldown native modules are build-time dependencies and are not required by the running server.
+
+Official Node Linux binaries require at most GLIBC 2.28 and the selected Argon2 glibc prebuilds require at most GLIBC 2.34, within Debian 12 and Ubuntu 22.04/24.04. Each artifact is built and executed on its native architecture runner; target addons are prebuilt and the package is trimmed to that architecture rather than linked against runner libraries.
 
 ## Public Gate
 
-The public gate checks brand/version, mandatory public files, executable shell
-entrypoints, ShellCheck, workflow YAML, safe Compose privileges, Caddy single/
-dual validation, forbidden artifacts and an optional all-object known-identity
-list stored outside the repository. The complete gate also runs Gitleaks against
-tracked/untracked candidates, refs, tag messages, all objects and source archive.
-
-No `.env`, DB, WAL/SHM, `.psmbackup`, instance key, browser secret artifact,
-runtime log, private bundle or mapping may be tracked or released.
+The gate checks brand/version, required files, executable shell entrypoints, ShellCheck, workflow YAML, native systemd/Caddy invariants, forbidden artifacts, source archives, Gitleaks and an optional private all-object identity list stored outside the repository. No `.env`, DB/WAL/SHM, `.psmbackup`, credentials, logs, private bundle or mapping may be tracked or released.
 
 ## Release Policy
 
-Historical 0.1.0-0.1.7 RC tags remain annotated. From 0.1.8 onward:
+Historical 0.1.0-0.1.7 RC tags remain. From 0.1.8 onward:
 
-1. update version/changelog/docs and focused tests;
+1. update version, CHANGELOG, docs and tests;
 2. stage intended files and run `pnpm source:manifest`;
 3. commit and obtain a clean tree;
-4. run E2E, full/public gate and staging regression as applicable;
-5. create annotated unsigned `vX.Y.Z` and scan refs again;
-6. push only the current branch, wait for CI, then push reviewed tags;
-7. verify the tag Release, assets, manifest and anonymous multi-arch GHCR pull.
+4. run Playwright, full/public gate and staging regression when available;
+5. create an annotated unsigned `vX.Y.Z` and rescan all refs;
+6. push only `master`, wait for CI, then push the reviewed tag;
+7. verify the stable GitHub Release and anonymous downloads of installer, manager, manifest, checksums, source and both native artifacts.
 
-Tag workflow permissions are limited to `contents: write` and `packages: write`.
-CI uses `contents: read`. Neither workflow has deployment credentials.
-
-Once published, any code fix advances to the next decimal version. Do not move a
-public tag. See [RELEASE_PROCESS.md](RELEASE_PROCESS.md) for operational detail.
+Release workflow permissions are `contents: read` for builders and `contents: write` only for publication. It has no packages permission, deployment secret or GHCR step. Any fix after public `v0.1.9` becomes `0.2.0`.

@@ -76,22 +76,23 @@ and final renderer share the same implementation; historical pivots remain.
 
 ## 11. Caddy Provides Automatic HTTPS
 
-**Context:** Public installs need TLS and host routing. **Decision:** A Caddy
-container owns ports 80/443, ACME and proxying. **Why:** A small declarative
+**Context:** Public installs need TLS and host routing. **Decision:** The host
+Caddy service owns ports 80/443, ACME and proxying. **Why:** A small declarative
 surface handles renewal and dual hosts. **Consequences:** DNS/ports must be
 correct; no certbot, acme.sh or Nginx is installed.
 
-## 12. The Web Container Does Not Manage Infrastructure
+## 12. The Web Process Does Not Manage Infrastructure
 
-**Context:** Caddy/domain mutation needs host privilege. **Decision:** Never give
-the app Docker socket, privileged mode or writable root config. **Why:** An admin
+**Context:** Caddy/domain mutation needs host privilege. **Decision:** Run the
+app as `dx-dy`, localhost-only, without systemd/Caddy control or writable root
+config. **Why:** An admin
 web compromise must not become host control. **Consequences:** Web settings can
 change canonical URL only; root infrastructure uses SSH.
 
 ## 13. `dx-dy` Is The Privileged Operations Layer
 
 **Context:** Administrators need safe lifecycle and recovery workflows.
-**Decision:** A root-owned shell manager coordinates Docker/Caddy while invoking
+**Decision:** A root-owned shell manager coordinates systemd/Caddy while invoking
 application CLIs for business mutations. **Why:** Keeps hash/database policy in
 the app and privilege outside it. **Consequences:** Passwords use hidden stdin,
 not argv or direct SQL.
@@ -110,3 +111,13 @@ password; DB-only backup still needs the matching key.
 completed releases use annotated unsigned `vX.Y.Z` directly. **Why:** The public
 release process has one full gate. **Consequences:** Historical RC tags remain;
 no new RC tags or moved public tags.
+
+## 16. Native Versioned Releases From 0.1.9
+
+**Context:** End users should not administer a container platform to run one
+private service. **Decision:** GitHub Release distributes separate amd64/arm64
+artifacts with a bundled Node runtime; systemd and host Caddy own lifecycle and
+TLS. **Why:** This removes Docker, Compose and GHCR from the user runtime while
+keeping builds reproducible. **Consequences:** Native dependencies are resolved
+per architecture, mutable data/config remain outside `/opt`, and updates use an
+atomic `current` symlink plus a WAL-safe rollback backup.

@@ -1,0 +1,19 @@
+__ADMIN_DOMAIN__ {
+	log {
+		output discard
+	}
+	@compressible not path /s/*
+	encode @compressible zstd gzip
+	reverse_proxy 127.0.0.1:__INTERNAL_PORT__
+}
+
+__SUBSCRIPTION_DOMAIN__ {
+	log {
+		output discard
+	}
+	@subscription path /s/* /health
+	handle @subscription {
+		reverse_proxy 127.0.0.1:__INTERNAL_PORT__
+	}
+	respond 404
+}

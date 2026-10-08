@@ -38,17 +38,17 @@ Copy these checks into the release review; do not precheck them from an earlier 
 - [ ] No database, `.psmbackup` or instance-key artifact is tracked or archived
 - [ ] Newer-schema startup rejection and failed-migration rollback tested
 
-## Docker
+## Native artifacts
 
-- [ ] No-cache build
-- [ ] Isolated healthcheck/migration test
-- [ ] Restart and persistence
+- [ ] amd64 and arm64 target-specific production dependency builds
+- [ ] Bundled Node runtime starts and loads production native addons
+- [ ] Artifact layout, release metadata, checksums, update and rollback
 
 ## Fresh checkout
 
 - [ ] Fresh detached worktree contains no env/database/dependencies/build artifacts
 - [ ] Frozen install, lint, typecheck, tests, build
-- [ ] Docker build from that checkout's tracked source
+- [ ] Native artifacts built from that checkout's tracked source
 
 ## License
 
@@ -69,13 +69,13 @@ Copy these checks into the release review; do not precheck them from an earlier 
 - [ ] Private pre-public bundle verified and stored outside the repository
 - [ ] Complete reachable history and local objects contain no private deployment identities
 - [ ] Historical tag names, chronology and annotated type preserved
-- [ ] Public brand, installer, manager, Docker/Caddy templates and docs consistent
+- [ ] Public brand, installer, manager, systemd/Caddy templates and docs consistent
 - [ ] ShellCheck and isolated installer/manager tests passed
 - [ ] CI and release workflows use least privilege and never deploy a server
 - [ ] Public user URLs use the final repository coordinate; Actions remain repository-dynamic
 - [ ] No database, backup, `.env`, instance key, deployment log or Playwright secret artifact
 
-## Remote — not authorized in this baseline
+## Remote publication
 
 - [ ] User explicitly approved push and chosen tags
 - [ ] Remote URL verified

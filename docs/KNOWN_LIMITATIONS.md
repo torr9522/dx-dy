@@ -17,8 +17,11 @@
 - Built-in Caddy mode requires available ports 80/443 and externally correct DNS
   and cloud firewall rules. The installer never kills conflicting services.
 - Physical fresh-VM and client behavior still require environment-specific
-  acceptance; containerized/preflight tests do not replace those checks.
-- Update and installation require a reachable GitHub stable Release and public
-  GHCR package; offline installation is not provided.
-- There is no automatic downgrade. Restore and update rollbacks use backups and
-  the previously pinned image/configuration.
+  acceptance; fixtures and CI runners do not replace those checks.
+- Update and installation require reachable public GitHub Release assets;
+  offline installation is not provided. GHCR is not required.
+- Automatic rollback covers a failed update start/health check by restoring the
+  previous release link and pre-update DB. An arbitrary user-requested downgrade
+  command is not provided.
+- Existing unrelated Caddy configurations are preserved and imported, but
+  unusual custom package/layout configurations may require manual integration.

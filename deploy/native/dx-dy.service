@@ -1,0 +1,30 @@
+[Unit]
+Description=dx-dy Private Node and Subscription Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dx-dy
+Group=dx-dy
+WorkingDirectory=/opt/dx-dy/current/app
+EnvironmentFile=/etc/dx-dy/dx-dy.env
+ExecStart=/opt/dx-dy/current/runtime/bin/node /opt/dx-dy/current/app/dist/server.mjs
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+ReadWritePaths=/var/lib/dx-dy /var/backups/dx-dy
+
+[Install]
+WantedBy=multi-user.target

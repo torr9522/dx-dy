@@ -15,7 +15,6 @@ import {
   run,
   version,
   verifyInventory,
-  quote,
 } from "./release-utils.mjs";
 import { secretScan } from "./secret-scan.mjs";
 import { verifySource } from "./verify-source.mjs";
@@ -49,7 +48,8 @@ for (const [file, text] of [
   ["apps/api/src/app.ts", `version: "${v}"`],
   ["apps/api/src/main.ts", `version: "${v}"`],
   ["apps/api/src/app.ts", `dx-dy-${v}-source.tar.gz`],
-  ["docker-compose.yml", "dx-dy:" + v],
+  ["deploy/native/install.conf.example", "DXDY_VERSION=" + v],
+  ["deploy/native/dx-dy.service", "User=dx-dy"],
 ])
   if (!readFileSync(file, "utf8").includes(text))
     throw new Error("Version drift in " + file);
@@ -144,51 +144,9 @@ if (full) {
       throw new Error(
         "Source archive differs between working tree and fresh checkout",
       );
-    const sshHost = process.env.RELEASE_DOCKER_SSH;
-    if (sshHost && !/^[A-Za-z0-9_.@:-]+$/.test(sshHost))
-      throw new Error("Invalid build host");
-    const ssh = (cmd, options = {}) => {
-      const password = process.env.RELEASE_SSH_PASSWORD;
-      const binary = password ? "sshpass" : "ssh";
-      const args = [...(password ? ["-e", "ssh"] : []), sshHost, cmd];
-      return execFileSync(binary, args, {
-        env: { ...process.env, ...(password ? { SSHPASS: password } : {}) },
-        ...options,
-      });
-    };
-    if (sshHost) {
-      // Temporary isolated build only. Never read/write deployment .env or use Compose.
-      const remote = ssh("mktemp -d /tmp/psm-release-build-XXXXXX", {
-        encoding: "utf8",
-      }).trim();
-      if (!/^\/tmp\/psm-release-build-[A-Za-z0-9]+$/.test(remote))
-        throw new Error("Unsafe remote temp directory");
-      try {
-        const archive = execFileSync(
-          "git",
-          ["archive", "--format=tar", "HEAD"],
-          { cwd: checkout, maxBuffer: 20 * 1024 * 1024 },
-        );
-        ssh(`tar -xf - -C ${quote(remote)}`, {
-          input: archive,
-          stdio: ["pipe", "inherit", "inherit"],
-        });
-        const commit = git("rev-parse", "HEAD");
-        ssh(
-          `docker run --rm -v ${quote(remote + ":" + remote)} -w ${quote(remote)} -v /usr/bin/docker:/usr/bin/docker:ro -v /var/run/docker.sock:/var/run/docker.sock node:26.10.0-bookworm-slim node scripts/docker-release-check.mjs ${quote(commit)}`,
-          { stdio: "inherit" },
-        );
-      } finally {
-        ssh(`rm -rf -- ${quote(remote)}`, { stdio: "inherit" });
-      }
-    } else {
-      run("docker", ["info"], { stdio: "ignore" });
-      run(
-        "node",
-        ["scripts/docker-release-check.mjs", git("rev-parse", "HEAD")],
-        { cwd: checkout },
-      );
-    }
+    for (const architecture of ["amd64", "arm64"])
+      run("node", ["scripts/build-native-artifact.mjs", architecture]);
+    run("node", ["scripts/native-release-check.mjs"]);
   } finally {
     if (added)
       run("git", ["worktree", "remove", "--force", checkout], { cwd: root });
@@ -202,6 +160,6 @@ if (git("rev-parse", "HEAD") !== releaseHead || git("status", "--porcelain"))
 console.log(
   "LOCAL RELEASE GATE: PASS" +
     (full
-      ? " (full: fresh checkout + no-cache Docker + isolated runtime smoke)"
+      ? " (full: fresh checkout + amd64/arm64 native artifacts + runtime smoke)"
       : ""),
 );

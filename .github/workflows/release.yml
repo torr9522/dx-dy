@@ -6,12 +6,18 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-24.04
+  native:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,40 +33,51 @@ jobs:
         run: |
           test "${GITHUB_REF_NAME}" = "v$(node -p 'require("./package.json").version')"
           case "${GITHUB_REF_NAME}" in *-rc.*) exit 1;; esac
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Build native artifact
+        env:
+          RELEASE_GIT_COMMIT: ${{ github.sha }}
+        run: node scripts/build-native-artifact.mjs "${{ matrix.arch }}"
+      - name: Verify bundled runtime and native addon
+        run: node scripts/native-release-check.mjs "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.arch }}
+          path: dist/native/dx-dy-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: native
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.10.0
+          cache: pnpm
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint && pnpm typecheck && pnpm test && pnpm build
       - run: shellcheck -x install.sh ops/dx-dy
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/download-artifact@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: metadata
-        name: Resolve lowercase image name
-        run: |
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-      - id: image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.version }}
-            ${{ steps.metadata.outputs.image }}:latest
-          labels: |
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.revision=${{ github.sha }}
-      - name: Prepare release assets
+          pattern: native-*
+          path: dist/native
+          merge-multiple: true
+      - run: node scripts/native-release-check.mjs
+      - name: Prepare native release assets
         env:
           RELEASE_GIT_COMMIT: ${{ github.sha }}
           RELEASE_REPOSITORY: ${{ github.repository }}
-          RELEASE_DOCKER_IMAGE: ${{ steps.metadata.outputs.image }}
-          RELEASE_DOCKER_DIGEST: ${{ steps.image.outputs.digest }}
         run: node scripts/release-manifest.mjs
       - name: Publish GitHub Release
         env:

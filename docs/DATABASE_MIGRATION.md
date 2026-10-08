@@ -2,7 +2,7 @@
 
 ## Storage contract
 
-The canonical container database path is `/data/private-subscription-manager.db` in every deployment mode. SQLite runs in WAL mode, so never copy the live database file with `cp` and never treat `-wal` or `-shm` as backup artifacts.
+The canonical native database path is `/var/lib/dx-dy/dx-dy.db`. SQLite runs in WAL mode, so never copy the live database file with `cp` and never treat `-wal` or `-shm` as backup artifacts. Historical 0.1.8 containers used `/data/private-subscription-manager.db`.
 
 The application applies numbered migrations in order and records them in `schema_migrations`. Before an existing database is migrated, it creates a consistent `backups/pre-migration-*.sqlite` snapshot. A failed migration rolls back and startup stops. A database containing a migration unknown to the running application is rejected with `Database schema is newer than this application version.` Downgrades are not attempted.
 
@@ -11,7 +11,7 @@ The application applies numbered migrations in order and records them in `schema
 Use a database backup for routine data recovery when the matching external `APP_MASTER_KEY` is already protected separately:
 
 ```sh
-pnpm db:backup -- ./dx-dy-0.1.8-YYYYMMDD-HHMMSS.db
+pnpm db:backup -- ./dx-dy-0.1.9-YYYYMMDD-HHMMSS.db
 ```
 
 The command uses the SQLite Backup API, validates `integrity_check` and `foreign_key_check`, produces one independent SQLite file, and removes active administrator sessions. Nodes, normalized/original data, sidecars, Tags, Collections, memberships, subscriptions, ordered `subscription_nodes`, settings, Token hashes/ciphertexts, administrators and migration history remain in the snapshot.
@@ -24,7 +24,7 @@ Use a full migration backup when moving to another server and preserving all exi
 
 ```sh
 read -rsp 'Backup password: ' BACKUP_PASSWORD; export BACKUP_PASSWORD
-pnpm migration:export -- ./dx-dy-0.1.8-YYYYMMDD-HHMMSS.psmbackup
+pnpm migration:export -- ./dx-dy-0.1.9-YYYYMMDD-HHMMSS.psmbackup
 unset BACKUP_PASSWORD
 ```
 
@@ -34,26 +34,26 @@ The package is a full credential backup. Loss exposes no plaintext key, but an a
 
 ## Restore
 
-Stop all application writers before restore. The CLI also takes a kernel `flock` and refuses to replace a database while the application holds the lock.
+Stop all application writers before restore. Normal operators use `dx-dy restore`, which coordinates systemd and the bundled runtime. The CLI also takes a kernel `flock` and refuses to replace a database while the application holds the lock.
 
 ```sh
-docker compose stop app
+systemctl stop dx-dy
 
 # DB-only restore: APP_MASTER_KEY in .env must match the backup.
-DATABASE_PATH=/data/private-subscription-manager.db \
+DATABASE_PATH=/var/lib/dx-dy/dx-dy.db \
 pnpm db:restore -- ./backup.db
 
 # Full instance restore: updates only APP_MASTER_KEY in the protected env file.
 read -rsp 'Backup password: ' BACKUP_PASSWORD; export BACKUP_PASSWORD
-DATABASE_PATH=/data/private-subscription-manager.db \
-INSTANCE_ENV_FILE=.env \
+DATABASE_PATH=/var/lib/dx-dy/dx-dy.db \
+INSTANCE_ENV_FILE=/etc/dx-dy/dx-dy.env \
 pnpm db:restore -- ./backup.psmbackup
 unset BACKUP_PASSWORD
 
-docker compose up -d
+systemctl start dx-dy
 ```
 
-Set `DATABASE_PATH` to the actual mounted data path when running the host CLI. For a Docker-only restore, mount the bundle and protected `.env` into a one-shot container while the service is stopped:
+The following one-shot container example applies only to historical 0.1.8 recovery; do not use it for a new installation:
 
 ```sh
 docker compose stop app

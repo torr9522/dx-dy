@@ -1,73 +1,50 @@
 # Installation And Operations
 
-## Supported Fresh Installs
+## Fresh Installation
 
-- Debian 12
-- Ubuntu 22.04 LTS and 24.04 LTS
-- amd64/x86_64 and arm64/aarch64
+Supported hosts are Debian 12 and Ubuntu 22.04/24.04 on amd64/arm64. Run the root README command as root. The installer verifies OS/architecture/network/disk/ports, downloads the matching GitHub Release artifact and SHA-256, installs host dependencies and official Caddy, and never installs Node or a container runtime.
 
-Other systems are unsupported/best effort. The installer requires root, checks
-network/disk/ports/existing installs and bootstraps Docker Engine, Compose v2,
-curl, CA certificates, OpenSSL, archive and DNS/network tools. Host Node.js,
-pnpm, npm and Caddy are not required.
+The wizard accepts hostnames only, supports single/dual-domain mode, initializes one administrator through stdin and generates a protected `APP_MASTER_KEY`. The application account is a non-login `dx-dy` system user.
 
-The public Release command for `torr9522/dx-dy` is documented in the root
-README. The wizard accepts
-hostnames only, reports A/AAAA results, supports optional UFW rules with consent,
-initializes an administrator and creates a protected random `APP_MASTER_KEY`.
-An automatically generated admin password is displayed once; the master key is
-never displayed.
+## Layout And Permissions
 
-## Domain Modes
+| Purpose               | Path / ownership                                      |
+| --------------------- | ----------------------------------------------------- |
+| Versioned program     | `/opt/dx-dy/releases/<version>`, root-owned/read-only |
+| Atomic active version | `/opt/dx-dy/current` symlink                          |
+| Secrets               | `/etc/dx-dy/dx-dy.env`, root `0600`                   |
+| Installation metadata | `/etc/dx-dy/install.conf`, root `0600`                |
+| Database              | `/var/lib/dx-dy/dx-dy.db`, service-user writable      |
+| Backups               | `/var/backups/dx-dy`, service-user writable           |
+| Unit                  | `/etc/systemd/system/dx-dy.service`                   |
+| Manager               | `/usr/local/bin/dx-dy`, root-owned executable         |
 
-- Single domain: one host serves UI/API, `/s/*`, `/health` and source.
-- Dual domain: the admin host retains all features and legacy `/s/*`; the
-  subscription host allows only `/s/*` and `/health` and returns 404 elsewhere.
+## Caddy And Domains
 
-Caddy owns ports 80/443, HTTP redirects, ACME and renewal. If DNS is pending,
-Caddy retries; the installer does not loop forever or destroy state. Domain
-changes use `dx-dy domain`: a candidate is rendered and validated before config,
-runtime origin, app and Caddy are coordinated, with rollback on failure.
-
-## Filesystem Layout
-
-| Purpose | Fresh-install path |
-| --- | --- |
-| Compose/templates | `/opt/dx-dy` |
-| Root configuration/secrets | `/etc/dx-dy` |
-| SQLite/Caddy state | `/var/lib/dx-dy` |
-| Backups | `/var/backups/dx-dy` |
-| Manager | `/usr/local/bin/dx-dy` |
-
-Secret configuration is mode `0600`; data/backup directories are protected. The
-manager also detects the historical `/opt/private-subscription-manager` layout.
-It does not relocate a legacy database merely for branding.
+Caddy owns HTTP/HTTPS, ACME and renewal. dx-dy adds `/etc/caddy/dx-dy.caddy` and one import line to the standard Caddyfile. Existing non-dx-dy content is backed up and retained. Single domain exposes all routes; a separate subscription host exposes only `/s/*` and `/health`. Domain changes render and validate a candidate before reload and restore old files on failure.
 
 ## Manager
-
-Run `dx-dy` for the menu or use:
 
 ```sh
 dx-dy status
 dx-dy start|stop|restart
 dx-dy update
-dx-dy admin reset-password
-dx-dy admin change-username
+dx-dy admin reset-password|change-username
 dx-dy domain
 dx-dy backup db|full
-dx-dy restore /absolute/backup/path
-dx-dy logs app 200
+dx-dy restore /var/backups/dx-dy/file
+dx-dy logs app|caddy|all|follow 200
 dx-dy doctor
+dx-dy cleanup-legacy
 dx-dy uninstall
 ```
 
-`status` reports app/Caddy/health/URLs/ports/database/backups/project/image without
-secrets. `doctor` checks Docker, Compose, containers, health, DNS/TLS, ports,
-database integrity/foreign keys, disk and backup directory. Logs are bounded by
-default. Uninstall preserves data by default; full deletion lists targets and
-requires the exact word `DELETE`.
+`stop` stops only the application. Logs use `journalctl`. Doctor checks systemd, services, health, SQLite integrity/FKs, DNS/TLS, localhost binding, permissions, symlink/release metadata and disk. Default uninstall removes program/service/manager but preserves config, database and backups; full purge requires `DELETE`. Caddy is never uninstalled automatically.
 
-Updates query the configured GitHub repository, require a checksum-verified
-manifest and digest-pinned image, back up first and roll configuration back after
-failed health. Fresh installs default to `torr9522/dx-dy`; forks may override
-the repository coordinate and Release base URL.
+## Update And Rollback
+
+Update reads the latest public manifest, chooses the installed architecture, verifies SHA-256, creates a WAL-safe DB backup, extracts a new version directory, stops the app and atomically switches `current`. Failed start/health restores the old link and DB backup. Current, previous and a small recent set are retained.
+
+## Docker 0.1.8 Migration
+
+The installer recognizes the 0.1.8 standard Compose layout. Migration requires a password file for a Full Migration backup, creates both portable and encrypted backups, retains domains/key/database, stops only the legacy dx-dy app/Caddy, starts native services and restores the old stack on failure. Docker Engine, compose files, images and configuration remain for rollback until explicit `dx-dy cleanup-legacy` acceptance.

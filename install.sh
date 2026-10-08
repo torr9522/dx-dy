@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_VERSION="0.1.8"
+readonly DXDY_VERSION="0.1.9"
 readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -12,13 +12,14 @@ INSTALL_ROOT="$ROOT_PREFIX/opt/dx-dy"
 DATA_DIR="$ROOT_PREFIX/var/lib/dx-dy"
 BACKUP_DIR="$ROOT_PREFIX/var/backups/dx-dy"
 MANAGER_PATH="$ROOT_PREFIX/usr/local/bin/dx-dy"
+SYSTEMD_DIR="$ROOT_PREFIX/etc/systemd/system"
+CADDY_DIR="$ROOT_PREFIX/etc/caddy"
+CADDY_IMPORT="$CADDY_DIR/dx-dy.caddy"
 STAGING=""
-GENERATED_PASSWORD="0"
+LEGACY_MODE=0
+LEGACY_RUNNING=0
+GENERATED_PASSWORD=0
 DXDY_REPOSITORY="${DXDY_REPOSITORY:-$DXDY_DEFAULT_REPOSITORY}"
-if [[ -z "${DXDY_RELEASE_BASE_URL:-}" && "$TEST_MODE" != 1 && \
-  ! -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/deploy/docker-compose.yml" ]]; then
-  DXDY_RELEASE_BASE_URL="https://github.com/$DXDY_REPOSITORY/releases/latest/download"
-fi
 
 cleanup() { [[ -z "$STAGING" ]] || rm -rf -- "$STAGING"; }
 trap cleanup EXIT
@@ -29,8 +30,7 @@ valid_hostname() {
   [[ ${#1} -le 253 && "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
 }
 require_root() {
-  [[ "$TEST_MODE" == 1 || ${EUID:-$(id -u)} -eq 0 ]] ||
-    die "Please run as root or sudo."
+  [[ "$TEST_MODE" == 1 || ${EUID:-$(id -u)} -eq 0 ]] || die "Please run as root or sudo."
 }
 
 detect_platform() {
@@ -47,45 +47,67 @@ detect_platform() {
     aarch64|arm64) ARCH="arm64" ;;
     *) die "Unsupported architecture. Supported: amd64 and arm64." ;;
   esac
-  OS_ID="$ID"
 }
 
 install_dependencies() {
   [[ "$TEST_MODE" == 1 ]] && return
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl gnupg jq openssl tar gzip coreutils iproute2 dnsutils
-  if ! have docker; then
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL "https://download.docker.com/linux/$OS_ID/gpg" -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    local codename
-    codename="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")"
-    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
-      "$ARCH" "$OS_ID" "$codename" >/etc/apt/sources.list.d/docker.list
+  apt-get install -y ca-certificates curl gnupg jq openssl tar gzip xz-utils coreutils util-linux iproute2 dnsutils
+  if ! have caddy; then
+    install -d -m 0755 /usr/share/keyrings
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt -o /etc/apt/sources.list.d/caddy-stable.list
     apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt-get install -y caddy
   fi
-  systemctl enable --now docker
-  docker compose version >/dev/null || die "Docker Compose v2 is unavailable."
+  if ! have systemctl || ! have caddy; then die "systemd and Caddy are required."; fi
+}
+
+legacy_compose() {
+  docker compose --project-name dx-dy --env-file "$CONFIG_DIR/install.conf" -f "$INSTALL_ROOT/docker-compose.yml" "$@"
+}
+
+detect_existing() {
+  if [[ -f "$CONFIG_DIR/install.conf" ]]; then
+    if grep -q '^DXDY_RELEASE_MODEL=native-systemd$' "$CONFIG_DIR/install.conf"; then die $'dx-dy native is already installed.\nUse: dx-dy update'; fi
+    if [[ -f "$INSTALL_ROOT/docker-compose.yml" ]] && have docker; then
+      LEGACY_MODE=1
+      if legacy_compose ps -q app 2>/dev/null | grep -q .; then LEGACY_RUNNING=1; fi
+    else die "An unrecognized dx-dy installation already exists."; fi
+  elif [[ -e "$MANAGER_PATH" ]]; then die "A dx-dy manager already exists without an installation record."; fi
 }
 
 check_port() {
   local port="$1" owner
   owner="$(ss -H -ltnp "sport = :$port" 2>/dev/null || true)"
-  [[ -z "$owner" ]] || die "TCP port $port is already occupied: $owner"
+  if [[ -n "$owner" && "$owner" != *caddy* ]]; then
+    die "TCP port $port is already occupied by a non-Caddy service: $owner"
+  fi
+}
+
+select_internal_port() {
+  INTERNAL_PORT="${DXDY_INTERNAL_PORT:-3000}"
+  [[ "$INTERNAL_PORT" =~ ^[0-9]+$ && "$INTERNAL_PORT" -ge 1024 && "$INTERNAL_PORT" -le 65535 ]] || die "Invalid internal port."
+  if [[ "$TEST_MODE" != 1 ]] && ss -H -ltn "sport = :$INTERNAL_PORT" 2>/dev/null | grep -q .; then
+    local candidate
+    for candidate in $(seq 3001 3099); do
+      if ! ss -H -ltn "sport = :$candidate" 2>/dev/null | grep -q .; then INTERNAL_PORT="$candidate"; return; fi
+    done
+    die "No free internal port was found in 3000-3099."
+  fi
 }
 
 preflight() {
-  [[ ! -e "$CONFIG_DIR/install.conf" && ! -e "$MANAGER_PATH" ]] ||
-    die $'dx-dy is already installed.\nUse: dx-dy update\nOr run: dx-dy'
+  detect_existing
   [[ "$TEST_MODE" == 1 ]] || {
     curl -fsSI --max-time 15 https://github.com >/dev/null || die "Network connectivity check failed."
-    check_port 80; check_port 443
+    if [[ "$LEGACY_MODE" != 1 ]]; then check_port 80; check_port 443; fi
     local free_kb
     free_kb="$(df -Pk /opt | awk 'NR==2{print $4}')"
     [[ ${free_kb:-0} -ge 2097152 ]] || die "At least 2 GiB free disk space is required."
   }
+  select_internal_port
 }
 
 prompt_hostname() {
@@ -106,13 +128,8 @@ dns_report() {
 prompt_password() {
   local first second
   read -r -s -p "Administrator password (Enter to generate): " first; printf '\n'
-  if [[ -z "$first" ]]; then
-    first="$(openssl rand -base64 30 | tr -d '\n')"
-    GENERATED_PASSWORD="1"
-  else
-    read -r -s -p "Confirm administrator password: " second; printf '\n'
-    [[ "$first" == "$second" ]] || die "Passwords do not match."
-  fi
+  if [[ -z "$first" ]]; then first="$(openssl rand -base64 30 | tr -d '\n')"; GENERATED_PASSWORD=1
+  else read -r -s -p "Confirm administrator password: " second; printf '\n'; [[ "$first" == "$second" ]] || die "Passwords do not match."; fi
   [[ ${#first} -ge 12 ]] || die "Password must be at least 12 characters."
   ADMIN_PASSWORD="$first"
 }
@@ -130,162 +147,183 @@ configure_ufw() {
 }
 
 fetch_asset() {
-  local name="$1" target="$2"
-  if [[ -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" ]]; then
-    cp "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" "$target"
-  else
-    [[ -n "${DXDY_RELEASE_BASE_URL:-}" ]] || die "Release asset URL is unavailable."
-    curl -fsSL --proto '=https' --tlsv1.2 "${DXDY_RELEASE_BASE_URL%/}/$(basename "$name")" -o "$target"
-  fi
+  local name="$1" target="$2" base="${DXDY_RELEASE_BASE_URL:-https://github.com/$DXDY_REPOSITORY/releases/download/v$DXDY_VERSION}"
+  if [[ -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" ]]; then cp "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" "$target"
+  else curl -fsSL --proto '=https' --tlsv1.2 "${base%/}/$(basename "$name")" -o "$target"; fi
 }
 
-resolve_image() {
-  if [[ -n "${DXDY_IMAGE_REFERENCE:-}" ]]; then
-    DXDY_IMAGE_DIGEST="${DXDY_IMAGE_REFERENCE##*@}"
-  elif [[ -n "${DXDY_RELEASE_BASE_URL:-}" ]]; then
-    curl -fsSL --proto '=https' --tlsv1.2 "${DXDY_RELEASE_BASE_URL%/}/release-manifest.json" -o "$STAGING/release-manifest.json"
-    DXDY_IMAGE_REFERENCE="$(jq -er --arg version "$DXDY_VERSION" 'select(.version == $version) | .docker_image + "@" + .docker_image_digest' "$STAGING/release-manifest.json")" ||
-      die "Release manifest validation failed."
-    DXDY_IMAGE_DIGEST="${DXDY_IMAGE_REFERENCE##*@}"
-    DXDY_REPOSITORY="${DXDY_REPOSITORY:-$(jq -er '.repository' "$STAGING/release-manifest.json")}" ||
-      die "Release repository coordinate is missing."
-  elif [[ "$TEST_MODE" == 1 ]]; then
-    DXDY_IMAGE_REFERENCE="ghcr.io/example/dx-dy:0.1.8@sha256:$(printf '0%.0s' {1..64})"
-    DXDY_IMAGE_DIGEST="${DXDY_IMAGE_REFERENCE##*@}"
-  else
-    die "A verified release manifest or DXDY_IMAGE_REFERENCE is required."
-  fi
-  [[ "$DXDY_IMAGE_REFERENCE" =~ @sha256:[a-f0-9]{64}$ ]] ||
-    die "DXDY_IMAGE_REFERENCE must be pinned by sha256 digest."
+prepare_test_artifact() {
+  local root="$STAGING/fake/dx-dy-$DXDY_VERSION-linux-$ARCH"
+  mkdir -p "$root/app/dist" "$root/app/migrations" "$root/runtime/bin"
+  printf '#!/bin/sh\nexit 0\n' >"$root/runtime/bin/node"; chmod 755 "$root/runtime/bin/node"
+  : >"$root/app/dist/server.mjs"; : >"$root/app/dist/admin-cli.mjs"; : >"$root/app/dist/database.mjs"; : >"$root/app/dist/domain-cli.mjs"
+  cp migrations/*.sql "$root/app/migrations/"
+  cp deploy/native/dx-dy.service deploy/native/Caddyfile.single deploy/native/Caddyfile.dual "$root/"
+  printf '{"version":"%s","release_model":"native-systemd","architecture":"%s"}\n' "$DXDY_VERSION" "$ARCH" >"$root/RELEASE.json"
+  tar -czf "$STAGING/artifact.tar.gz" -C "$STAGING/fake" "$(basename "$root")"
 }
 
-verify_release_assets() {
-  [[ -f "$STAGING/release-manifest.json" ]] || return 0
-  local file field expected actual
-  while read -r file field; do
-    expected="$(jq -er ".$field" "$STAGING/release-manifest.json")"
-    actual="$(sha256sum "$STAGING/$file" | cut -d' ' -f1)"
-    [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] ||
-      die "Release asset checksum failed: $file"
-  done <<'EOF'
-dx-dy manager_sha256
-docker-compose.yml compose_sha256
-Caddyfile.single caddy_single_sha256
-Caddyfile.dual caddy_dual_sha256
-EOF
+download_release() {
+  local artifact="dx-dy-$DXDY_VERSION-linux-$ARCH.tar.gz" expected actual
+  if [[ "$TEST_MODE" == 1 && -z "${DXDY_TEST_REAL_ARTIFACT:-}" ]]; then prepare_test_artifact
+  else
+    fetch_asset release-manifest.json "$STAGING/release-manifest.json"
+    jq -e --arg v "$DXDY_VERSION" --arg a "$ARCH" '.version==$v and .release_model=="native-systemd" and (.architectures|index($a))' "$STAGING/release-manifest.json" >/dev/null || die "Release manifest validation failed."
+    fetch_asset "$artifact" "$STAGING/artifact.tar.gz"
+    expected="$(jq -er --arg n "$artifact" '.artifacts[] | select(.name==$n) | .sha256' "$STAGING/release-manifest.json")"
+    actual="$(sha256sum "$STAGING/artifact.tar.gz" | cut -d' ' -f1)"
+    [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] || die "Native artifact checksum failed."
+  fi
+  mkdir "$STAGING/extract"
+  tar -xzf "$STAGING/artifact.tar.gz" -C "$STAGING/extract"
+  RELEASE_SOURCE="$STAGING/extract/dx-dy-$DXDY_VERSION-linux-$ARCH"
+  [[ -x "$RELEASE_SOURCE/runtime/bin/node" && -f "$RELEASE_SOURCE/app/dist/server.mjs" ]] || die "Native artifact layout is invalid."
 }
 
 render_caddy() {
   local template
-  if [[ "$ADMIN_DOMAIN" == "$SUBSCRIPTION_DOMAIN" ]]; then template="$STAGING/Caddyfile.single"; else template="$STAGING/Caddyfile.dual"; fi
-  sed -e "s/__ADMIN_DOMAIN__/$ADMIN_DOMAIN/g" -e "s/__SUBSCRIPTION_DOMAIN__/$SUBSCRIPTION_DOMAIN/g" \
-    "$template" >"$STAGING/Caddyfile"
+  if [[ "$ADMIN_DOMAIN" == "$SUBSCRIPTION_DOMAIN" ]]; then template="$RELEASE_SOURCE/Caddyfile.single"; else template="$RELEASE_SOURCE/Caddyfile.dual"; fi
+  sed -e "s/__ADMIN_DOMAIN__/$ADMIN_DOMAIN/g" -e "s/__SUBSCRIPTION_DOMAIN__/$SUBSCRIPTION_DOMAIN/g" -e "s/__INTERNAL_PORT__/$INTERNAL_PORT/g" "$template" >"$STAGING/dx-dy.caddy"
 }
 
-generate_configuration() {
-  local master_key
-  master_key="$(openssl rand -hex 32)"
+write_config() {
+  local master_key="${LEGACY_MASTER_KEY:-$(openssl rand -hex 32)}"
   umask 077
   cat >"$STAGING/install.conf" <<EOF
 DXDY_VERSION=$DXDY_VERSION
-DXDY_REPOSITORY=${DXDY_REPOSITORY:-}
+DXDY_RELEASE_MODEL=native-systemd
+DXDY_REPOSITORY=$DXDY_REPOSITORY
 DXDY_INSTALL_CHANNEL=stable
 DXDY_INSTALL_ROOT=/opt/dx-dy
 DXDY_CONFIG_DIR=/etc/dx-dy
 DXDY_DATA_DIR=/var/lib/dx-dy
 DXDY_BACKUP_DIR=/var/backups/dx-dy
-DXDY_COMPOSE_PROJECT=dx-dy
-DXDY_IMAGE_REFERENCE=$DXDY_IMAGE_REFERENCE
-DXDY_IMAGE_DIGEST=${DXDY_IMAGE_DIGEST:-}
-DXDY_CADDY_IMAGE=caddy:2.10.2-alpine
-DXDY_CADDYFILE=/etc/dx-dy/Caddyfile
-DXDY_CADDY_DATA=/var/lib/dx-dy/caddy-data
-DXDY_CADDY_CONFIG=/var/lib/dx-dy/caddy-config
-DXDY_RUNTIME_ENV=/etc/dx-dy/runtime.env
+DXDY_INTERNAL_PORT=$INTERNAL_PORT
 DXDY_ADMIN_DOMAIN=$ADMIN_DOMAIN
 DXDY_SUBSCRIPTION_DOMAIN=$SUBSCRIPTION_DOMAIN
+DXDY_CADDY_IMPORT=/etc/caddy/dx-dy.caddy
+DXDY_SERVICE=dx-dy.service
+DXDY_ARCH=$ARCH
+DXDY_PREVIOUS_RELEASE=
+DXDY_LEGACY_ROOT=${LEGACY_ROOT_PATH:-}
 EOF
-  cat >"$STAGING/runtime.env" <<EOF
+  cat >"$STAGING/dx-dy.env" <<EOF
 NODE_ENV=production
-PORT=3000
-HOST=0.0.0.0
-DATABASE_PATH=/data/private-subscription-manager.db
+PORT=$INTERNAL_PORT
+HOST=127.0.0.1
+DATABASE_PATH=/var/lib/dx-dy/dx-dy.db
 ADMIN_BASE_URL=https://$ADMIN_DOMAIN
 SUBSCRIPTION_BASE_URL=https://$SUBSCRIPTION_DOMAIN
 COOKIE_SECURE=true
 TRUST_PROXY=1
 APP_MASTER_KEY=$master_key
 EOF
-  chmod 600 "$STAGING/install.conf" "$STAGING/runtime.env"
+  chmod 600 "$STAGING/install.conf" "$STAGING/dx-dy.env"
   render_caddy
-  chmod 644 "$STAGING/Caddyfile" "$STAGING/docker-compose.yml" "$STAGING/Caddyfile.single" "$STAGING/Caddyfile.dual"
-  chmod 755 "$STAGING/dx-dy"
+}
+
+legacy_backup_and_stop() {
+  [[ "$LEGACY_MODE" == 1 ]] || return 0
+  local stamp db_backup full_backup password_file
+  stamp="$(date -u +%Y%m%d-%H%M%SZ)"; mkdir -p "$BACKUP_DIR"
+  db_backup="$BACKUP_DIR/pre-native-$stamp.db"; full_backup="$BACKUP_DIR/pre-native-$stamp.psmbackup"
+  password_file="${DXDY_MIGRATION_PASSWORD_FILE:-}"
+  [[ -n "$password_file" && -f "$password_file" ]] || die "Legacy migration requires DXDY_MIGRATION_PASSWORD_FILE for the encrypted rollback bundle."
+  legacy_compose exec -T app node dist/database.mjs backup "/backups/$(basename "$db_backup")"
+  printf '%s' "$(<"$password_file")" | legacy_compose exec -T -e BACKUP_PASSWORD_STDIN=true app node dist/database.mjs bundle "/backups/$(basename "$full_backup")"
+  # shellcheck disable=SC1090,SC1091
+  source "$CONFIG_DIR/runtime.env"
+  LEGACY_MASTER_KEY="$APP_MASTER_KEY"
+  LEGACY_DATABASE="$db_backup"
+  LEGACY_ROOT_PATH="$INSTALL_ROOT"
+  legacy_compose stop app caddy
+}
+
+install_caddy_fragment() {
+  install -d -m 0755 "$CADDY_DIR"
+  local main="$CADDY_DIR/Caddyfile" import_line="import /etc/caddy/dx-dy.caddy" had_main=0 had_fragment=0
+  if [[ -e "$main" ]]; then cp -a "$main" "$STAGING/Caddyfile.before"; had_main=1; fi
+  if [[ -e "$CADDY_IMPORT" ]]; then cp -a "$CADDY_IMPORT" "$STAGING/dx-dy.caddy.before"; had_fragment=1; fi
+  if [[ -s "$main" ]] && ! grep -Fqx "$import_line" "$main"; then
+    cp -a "$main" "$main.pre-dx-dy.$(date -u +%Y%m%d-%H%M%SZ).bak"; printf '\n%s\n' "$import_line" >>"$main"
+  elif [[ ! -s "$main" ]]; then printf '%s\n' "$import_line" >"$main"; fi
+  install -m 0644 "$STAGING/dx-dy.caddy" "$CADDY_IMPORT"
+  if [[ "$TEST_MODE" != 1 ]] && ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+    if [[ $had_main -eq 1 ]]; then cp -a "$STAGING/Caddyfile.before" "$main"; else rm -f -- "$main"; fi
+    if [[ $had_fragment -eq 1 ]]; then cp -a "$STAGING/dx-dy.caddy.before" "$CADDY_IMPORT"; else rm -f -- "$CADDY_IMPORT"; fi
+    die "Caddy validation failed; previous configuration restored."
+  fi
 }
 
 commit_installation() {
-  install -d -m 0750 "$CONFIG_DIR" "$INSTALL_ROOT"
-  install -d -m 0700 "$DATA_DIR" "$BACKUP_DIR" "$DATA_DIR/caddy-data" "$DATA_DIR/caddy-config"
-  [[ "$TEST_MODE" == 1 ]] || chown 1000:1000 "$DATA_DIR" "$BACKUP_DIR"
-  install -m 0600 "$STAGING/install.conf" "$CONFIG_DIR/install.conf"
-  install -m 0600 "$STAGING/runtime.env" "$CONFIG_DIR/runtime.env"
-  install -m 0644 "$STAGING/Caddyfile" "$CONFIG_DIR/Caddyfile"
-  install -m 0644 "$STAGING/docker-compose.yml" "$INSTALL_ROOT/docker-compose.yml"
-  install -m 0644 "$STAGING/Caddyfile.single" "$INSTALL_ROOT/Caddyfile.single"
-  install -m 0644 "$STAGING/Caddyfile.dual" "$INSTALL_ROOT/Caddyfile.dual"
-  install -D -m 0755 "$STAGING/dx-dy" "$MANAGER_PATH"
+  local release="$INSTALL_ROOT/releases/$DXDY_VERSION"
+  install -d -m 0755 "$INSTALL_ROOT/releases" "$SYSTEMD_DIR"; install -d -m 0700 "$CONFIG_DIR"; install -d -m 0750 "$DATA_DIR" "$BACKUP_DIR"
+  rm -rf -- "$release"; cp -a "$RELEASE_SOURCE" "$release"; chown -R root:root "$release" 2>/dev/null || true; chmod -R a-w "$release" 2>/dev/null || true
+  ln -sfn "releases/$DXDY_VERSION" "$INSTALL_ROOT/current.next"; mv -Tf "$INSTALL_ROOT/current.next" "$INSTALL_ROOT/current"
+  install -m 0600 "$STAGING/install.conf" "$CONFIG_DIR/install.conf"; install -m 0600 "$STAGING/dx-dy.env" "$CONFIG_DIR/dx-dy.env"
+  install -m 0644 "$release/dx-dy.service" "$SYSTEMD_DIR/dx-dy.service"; install -D -m 0755 "${DXDY_MANAGER_SOURCE:-$SCRIPT_DIR/ops/dx-dy}" "$MANAGER_PATH"
+  install_caddy_fragment
+  if [[ "$TEST_MODE" != 1 ]]; then
+    getent group dx-dy >/dev/null || groupadd --system dx-dy
+    id dx-dy >/dev/null 2>&1 || useradd --system --gid dx-dy --home-dir /var/lib/dx-dy --shell /usr/sbin/nologin dx-dy
+    chown -R dx-dy:dx-dy "$DATA_DIR" "$BACKUP_DIR"; chmod 0600 "$CONFIG_DIR/dx-dy.env" "$CONFIG_DIR/install.conf"
+  fi
 }
 
-runtime_install() {
-  [[ "$TEST_MODE" == 1 ]] && return
-  local compose=(docker compose --project-name dx-dy --env-file "$CONFIG_DIR/install.conf" -f "$INSTALL_ROOT/docker-compose.yml")
-  "${compose[@]}" pull
-  printf '%s\n%s' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | "${compose[@]}" run --rm -T --no-deps app node dist/admin-cli.mjs init
-  "${compose[@]}" up -d
-  for _ in {1..60}; do
-    if "${compose[@]}" exec -T app node -e 'fetch("http://127.0.0.1:3000/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' 2>/dev/null; then return; fi
-    sleep 2
-  done
-  die "Application health check did not become ready; inspect with dx-dy logs."
+run_app_cli() {
+  local script="$1"; shift
+  set -a
+  # shellcheck disable=SC1090,SC1091
+  source "$CONFIG_DIR/dx-dy.env"
+  set +a
+  runuser -u dx-dy -- "$INSTALL_ROOT/current/runtime/bin/node" "$INSTALL_ROOT/current/app/dist/$script" "$@"
+}
+
+initialize_and_start() {
+  if [[ "$TEST_MODE" == 1 ]]; then
+    if [[ "$LEGACY_MODE" == 1 ]]; then cp -a "$LEGACY_DATABASE" "$DATA_DIR/dx-dy.db"; fi
+    return
+  fi
+  if [[ "$LEGACY_MODE" == 1 ]]; then
+    [[ -f "$LEGACY_DATABASE" ]] || die "Legacy database path was not found."
+    cp -a "$LEGACY_DATABASE" "$DATA_DIR/dx-dy.db"; chown dx-dy:dx-dy "$DATA_DIR/dx-dy.db"
+  else printf '%s\n%s' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | run_app_cli admin-cli.mjs init; fi
+  systemctl daemon-reload
+  if ! systemctl enable --now dx-dy.service || ! systemctl enable --now caddy.service || ! systemctl reload caddy.service; then
+    systemctl stop dx-dy.service caddy.service || true
+    if [[ "$LEGACY_MODE" == 1 && "$LEGACY_RUNNING" == 1 ]]; then legacy_compose up -d app caddy || true; fi
+    die "Native services failed to start; legacy services were restored when available."
+  fi
+  for _ in {1..60}; do curl -fsS "http://127.0.0.1:$INTERNAL_PORT/health" >/dev/null 2>&1 && return; sleep 2; done
+  systemctl stop dx-dy.service caddy.service || true
+  if [[ "$LEGACY_MODE" == 1 && "$LEGACY_RUNNING" == 1 ]]; then legacy_compose up -d app caddy || true; fi
+  die "Native health check failed; legacy services were restored when available."
 }
 
 main() {
-  info "dx-dy Installer" "Version $DXDY_VERSION"
+  info "dx-dy Native Installer" "Version $DXDY_VERSION"
   require_root; detect_platform; preflight; install_dependencies
-  if [[ -n "${DXDY_ADMIN_DOMAIN:-}" ]]; then
-    valid_hostname "$DXDY_ADMIN_DOMAIN" || die "Invalid DXDY_ADMIN_DOMAIN."
-    ADMIN_DOMAIN="${DXDY_ADMIN_DOMAIN,,}"
-  else prompt_hostname "Admin domain"; ADMIN_DOMAIN="$REPLY"; fi
-  printf 'Admin: https://%s\n' "$ADMIN_DOMAIN"
-  if [[ -n "${DXDY_SUBSCRIPTION_DOMAIN:-}" ]]; then
-    valid_hostname "$DXDY_SUBSCRIPTION_DOMAIN" || die "Invalid DXDY_SUBSCRIPTION_DOMAIN."
-    SUBSCRIPTION_DOMAIN="${DXDY_SUBSCRIPTION_DOMAIN,,}"
+  if [[ "$LEGACY_MODE" == 1 ]]; then
+    ADMIN_DOMAIN="$(sed -n 's/^DXDY_ADMIN_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
+    SUBSCRIPTION_DOMAIN="$(sed -n 's/^DXDY_SUBSCRIPTION_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
+    valid_hostname "$ADMIN_DOMAIN" || die "Legacy admin domain is invalid."
+    valid_hostname "$SUBSCRIPTION_DOMAIN" || die "Legacy subscription domain is invalid."
   else
-    local separate
-    read -r -p "Use a separate subscription domain? [y/N] " separate
-    if [[ "$separate" =~ ^[Yy]$ ]]; then prompt_hostname "Subscription domain"; SUBSCRIPTION_DOMAIN="$REPLY"; else SUBSCRIPTION_DOMAIN="$ADMIN_DOMAIN"; fi
+    if [[ -n "${DXDY_ADMIN_DOMAIN:-}" ]]; then valid_hostname "$DXDY_ADMIN_DOMAIN" || die "Invalid DXDY_ADMIN_DOMAIN."; ADMIN_DOMAIN="${DXDY_ADMIN_DOMAIN,,}"; else prompt_hostname "Admin domain"; ADMIN_DOMAIN="$REPLY"; fi
+    printf 'Admin: https://%s\n' "$ADMIN_DOMAIN"
+    if [[ -n "${DXDY_SUBSCRIPTION_DOMAIN:-}" ]]; then valid_hostname "$DXDY_SUBSCRIPTION_DOMAIN" || die "Invalid DXDY_SUBSCRIPTION_DOMAIN."; SUBSCRIPTION_DOMAIN="${DXDY_SUBSCRIPTION_DOMAIN,,}"
+    else local separate; read -r -p "Use a separate subscription domain? [y/N] " separate; if [[ "$separate" =~ ^[Yy]$ ]]; then prompt_hostname "Subscription domain"; SUBSCRIPTION_DOMAIN="$REPLY"; else SUBSCRIPTION_DOMAIN="$ADMIN_DOMAIN"; fi; fi
   fi
-  printf 'Subscription: https://%s\n' "$SUBSCRIPTION_DOMAIN"
-  dns_report "$ADMIN_DOMAIN"; [[ "$SUBSCRIPTION_DOMAIN" == "$ADMIN_DOMAIN" ]] || dns_report "$SUBSCRIPTION_DOMAIN"
-  configure_ufw
-  ADMIN_USERNAME="${DXDY_ADMIN_USERNAME:-}"
-  if [[ -z "$ADMIN_USERNAME" ]]; then read -r -p "Administrator username [admin]: " ADMIN_USERNAME; ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"; fi
-  [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || die "Invalid administrator username."
-  if [[ -n "${DXDY_ADMIN_PASSWORD_FILE:-}" ]]; then
-    [[ -f "$DXDY_ADMIN_PASSWORD_FILE" ]] || die "Password file does not exist."
-    ADMIN_PASSWORD="$(<"$DXDY_ADMIN_PASSWORD_FILE")"
-  else prompt_password; fi
-  STAGING="$(mktemp -d)"
-  resolve_image
-  fetch_asset deploy/docker-compose.yml "$STAGING/docker-compose.yml"
-  fetch_asset deploy/Caddyfile.single "$STAGING/Caddyfile.single"
-  fetch_asset deploy/Caddyfile.dual "$STAGING/Caddyfile.dual"
-  fetch_asset ops/dx-dy "$STAGING/dx-dy"
-  verify_release_assets; generate_configuration; commit_installation; runtime_install
-  printf '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\ndx-dy %s installed successfully\n\nAdmin:\nhttps://%s\n\nSubscription:\nhttps://%s\n\nUsername:\n%s\n' \
-    "$DXDY_VERSION" "$ADMIN_DOMAIN" "$SUBSCRIPTION_DOMAIN" "$ADMIN_USERNAME"
-  if [[ "$GENERATED_PASSWORD" == 1 ]]; then printf '\nPassword (shown once):\n%s\n' "$ADMIN_PASSWORD"; fi
-  printf '\nManagement:\ndx-dy\n\nStatus:\ndx-dy status\n\nBackup:\ndx-dy backup db\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
-  unset ADMIN_PASSWORD
+  dns_report "$ADMIN_DOMAIN"; [[ "$SUBSCRIPTION_DOMAIN" == "$ADMIN_DOMAIN" ]] || dns_report "$SUBSCRIPTION_DOMAIN"; configure_ufw
+  ADMIN_USERNAME="${DXDY_ADMIN_USERNAME:-admin}"; [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || die "Invalid administrator username."
+  if [[ "$LEGACY_MODE" != 1 ]]; then
+    if [[ -n "${DXDY_ADMIN_PASSWORD_FILE:-}" ]]; then [[ -f "$DXDY_ADMIN_PASSWORD_FILE" ]] || die "Password file does not exist."; ADMIN_PASSWORD="$(<"$DXDY_ADMIN_PASSWORD_FILE")"; else prompt_password; fi
+    [[ ${#ADMIN_PASSWORD} -ge 12 ]] || die "Password must be at least 12 characters."
+  fi
+  STAGING="$(mktemp -d)"; download_release; legacy_backup_and_stop; write_config; commit_installation; initialize_and_start
+  printf '\ndx-dy %s native installation completed.\nAdmin: https://%s\nSubscription: https://%s\nManagement: dx-dy\n' "$DXDY_VERSION" "$ADMIN_DOMAIN" "$SUBSCRIPTION_DOMAIN"
+  if [[ "$GENERATED_PASSWORD" == 1 ]]; then printf 'Password (shown once): %s\n' "$ADMIN_PASSWORD"; fi
+  unset ADMIN_PASSWORD LEGACY_MASTER_KEY APP_MASTER_KEY || true
 }
 
 main "$@"

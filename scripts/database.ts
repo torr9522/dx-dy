@@ -27,7 +27,7 @@ import {
   snapshot,
   validateDatabase,
 } from "../apps/api/src/database-safety";
-const version = "0.1.8",
+const version = "0.1.9",
   database =
     process.env.DATABASE_PATH || "/data/private-subscription-manager.db";
 const stamp = () =>
@@ -299,7 +299,22 @@ async function restore(source: string) {
     release();
   }
 }
+function check() {
+  const db = new DatabaseSync(database, { readOnly: true });
+  try {
+    validateDatabase(db);
+    const integrityResult = db.prepare("PRAGMA integrity_check").get();
+    if (integrityResult?.integrity_check !== "ok")
+      throw new Error("SQLite integrity_check failed");
+    if (db.prepare("PRAGMA foreign_key_check").all().length)
+      throw new Error("SQLite foreign_key_check failed");
+    console.log("Database integrity and foreign keys: PASS");
+  } finally {
+    db.close();
+  }
+}
 if (command === "backup") await portable(argument);
 else if (command === "bundle") await bundle(argument);
 else if (command === "restore") await restore(argument);
-else throw new Error("Usage: database <backup|bundle|restore> [file]");
+else if (command === "check") check();
+else throw new Error("Usage: database <backup|bundle|restore|check> [file]");

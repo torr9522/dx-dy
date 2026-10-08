@@ -6,7 +6,7 @@
 - Subscription URLs are bearer credentials: possession grants feed access.
 - The subscription host is intentionally untrusted for admin routing and exposes
   only `/s/*` and `/health`.
-- The app container is unprivileged; the root-owned SSH manager is a separate
+- The app runs as an unprivileged non-login user; the root-owned SSH manager is a separate
   operations boundary.
 
 ## Authentication And Sessions
@@ -22,12 +22,12 @@ uses the application CLI over stdin and invalidates every active session.
 Subscription Tokens are 32 random bytes encoded base64url. SQLite stores their
 SHA-256 lookup hash plus AES-256-GCM ciphertext under the external 32-byte
 `APP_MASTER_KEY`; plaintext Tokens are not stored or logged. The key lives in a
-root-readable environment file, never in Git or the image.
+root-readable `0600` environment file, never in Git or a release artifact.
 
 ## Host And Container Isolation
 
-Caddy terminates TLS and enforces host routing. The app receives no Docker
-socket, privileged flag, host root or writable Caddy configuration. Web settings
+Caddy terminates TLS and enforces host routing. The app receives no systemd/Caddy
+control, host root or writable Caddy configuration and binds only localhost. Web settings
 cannot mutate infrastructure. The `dx-dy` manager validates hostnames and Caddy
 candidates, uses no `eval`, and coordinates root-only changes over SSH.
 
@@ -42,10 +42,10 @@ Migration file and its password together as complete instance access.
 
 Do not log passwords, master/session keys, Tokens, node URIs or canonical
 semantic strings. Public errors and subscription bodies contain no duplicate
-diagnostics. Public Git/source/images/assets must contain only reserved example
+diagnostics. Public Git/source/release assets must contain only reserved example
 identities and no databases, backups, `.env`, auth material or runtime logs.
 
 Before release, scan tracked/untracked candidates, all refs, tag messages, all
-objects, Docker context and source/release archives with Gitleaks plus the private
+objects, source/native release archives with Gitleaks plus the private
 known-identity list. Report vulnerabilities through the GitHub private security
 advisory channel described in [`SECURITY.md`](../SECURITY.md), not a public issue.

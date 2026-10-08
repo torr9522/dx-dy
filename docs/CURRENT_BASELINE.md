@@ -2,41 +2,31 @@
 
 ## Release Identity
 
-- Current release: **0.1.8**
-- Brand and external manager command: **dx-dy**
-- Purpose: Private Node & Subscription Manager
-- Release model: direct annotated unsigned `vX.Y.Z` tags from 0.1.8 onward
-- Historical RC tags: retained, never renamed
+- Current release: **0.1.9**
+- Brand/manager: **dx-dy**
+- Release model: direct annotated unsigned `vX.Y.Z` tags
+- Runtime model: **native-systemd**
+- Bundled Node runtime: **26.10.0**
 
-Resolve the immutable release commit with `git rev-parse v0.1.8^{}` after the tag
-exists. This document intentionally does not embed a self-referential HEAD SHA.
+After publication, resolve the immutable release commit with `git rev-parse v0.1.9^{}`. This document intentionally does not embed a self-referential HEAD SHA.
 
-## Persistence
+## Persistence And Invariants
 
-- Database: SQLite WAL
-- Released schemas: `001_initial.sql`, `002_node_collections.sql`
-- Migration in 0.1.8: **NONE**
-- Node <-> Subscription and Node <-> Collection are separate many-to-many
-  relationships; Collections never auto-synchronize Subscriptions.
-
-## Core Invariants
-
-- Universal standard Base64 is canonical for `/s/:token` and legacy aliases.
-- Library/Collections may contain equivalent Nodes; each Subscription output is
-  semantically unique and preserves the first selected position.
-- Semantic identity excludes display name/URI fragment or VMess `ps`, retains
-  connection and unknown/private parameters, and is computed at runtime.
-- Token plaintext is neither stored nor logged. Full Token continuity needs the
-  encrypted database and matching `APP_MASTER_KEY`.
-- Web containers never receive Docker socket or host infrastructure privilege.
+- SQLite WAL; schemas `001_initial.sql` and `002_node_collections.sql`
+- Migration in 0.1.9: **NONE**
+- Node/Subscription and Node/Collection are independent many-to-many relations
+- **NO AUTO SUBSCRIPTION**: Collection changes never synchronize a Subscription
+- Canonical `/s/:token` is standard Base64 of UTF-8 LF-separated share URIs
+- Library/Collections may contain equivalent Nodes; Subscription output is semantically unique
+- Token plaintext is not stored or logged; continuity requires SQLite plus `APP_MASTER_KEY`
 
 ## Supported Installation
 
-- Debian 12; Ubuntu 22.04 LTS and 24.04 LTS
+- Debian 12; Ubuntu 22.04 and 24.04 LTS
 - linux/amd64 and linux/arm64
-- Docker Engine, Compose v2 and Caddy container
-- Single-domain and isolated dual-domain modes
-- Legacy install paths remain detectable by the manager
+- GitHub Release artifact with bundled Node, native `dx-dy.service`, host Caddy and SQLite
+- Application runs as non-login `dx-dy`, listens on `127.0.0.1`, and has no Docker/GHCR runtime dependency
+- Docker 0.1.8 is a deprecated, detected migration source only
 
 ## Primary Verification
 
@@ -51,19 +41,8 @@ shellcheck -x install.sh ops/dx-dy
 pnpm release:check --full --public
 ```
 
-Before release, also run private known-identity scanning, source/archive checks,
-Docker no-cache/multi-arch verification and staging regression. Tag, scan refs,
-push the intended branch, wait for CI, push intended tags and verify public
-Release/GHCR artifacts.
-
-## Current Limitations
-
-See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). In particular, no commercial
-multi-user system, no server database, no Xray Core and no web-controlled root
-infrastructure are included.
+The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled runtime, verifies source/archive privacy and runs private known-identity scanning when configured.
 
 ## Next Version
 
-`0.1.9` is the next development version **only after `v0.1.8` is released and a
-real new source change is made**. Work required to finish the still-untagged
-0.1.8 release remains 0.1.8.
+`0.2.0` is the next code-change version **only after `v0.1.9` is released and a real source change is made**. Never move an existing public tag.

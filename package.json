@@ -1,6 +1,6 @@
 {
   "name": "dx-dy",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -29,6 +29,8 @@
     "source:verify": "node scripts/verify-source.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
+    "native:build": "node scripts/build-native-artifact.mjs",
+    "native:check": "node scripts/native-release-check.mjs",
     "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {

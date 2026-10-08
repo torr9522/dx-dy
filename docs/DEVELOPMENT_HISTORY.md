@@ -64,3 +64,12 @@ recovery, domain/backup/restore/update/doctor workflows, public CI, multi-arch
 GHCR Release automation and public privacy gates. Before first publication, the
 complete Git history was sanitized while retaining functional commits and every
 annotated historical tag. Releases use direct `vX.Y.Z` tags from this version.
+
+## 0.1.9 - Native Deployment Era
+
+Replaced the end-user Docker/Compose/GHCR runtime with architecture-specific
+GitHub Release artifacts containing Node 26.10.0 and production dependencies.
+Added a hardened systemd service, dedicated account, localhost-only listener,
+host Caddy integration, atomic version-directory updates and database/link
+rollback. The guarded 0.1.8 migration path creates portable and encrypted
+backups and retains the legacy stack. Business schema and output are unchanged.

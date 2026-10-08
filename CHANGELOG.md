@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-08
+
+### Changed
+
+- Native systemd deployment with host Caddy is now the default installation and runtime model.
+- Docker, Docker Compose, containerd and GHCR are no longer required for end-user installation, operation or updates.
+- GitHub Releases now provide architecture-specific Linux artifacts with a bundled Node.js runtime.
+
+### Added
+
+- Added a hardened `dx-dy.service`, dedicated non-login service account, localhost-only listener and root-owned secret environment.
+- Added host Caddy single/dual-domain fragments with validation and configuration rollback.
+- Added version-directory updates, atomic `current` symlink switching, WAL-safe pre-update backup and database/symlink rollback.
+- Added a guarded Docker 0.1.8 to Native 0.1.9 migration path that preserves the legacy stack.
+- Added native artifact layout, dependency, manager, installer and release metadata validation for amd64 and arm64.
+
+### Deprecated
+
+- Docker-based end-user deployment introduced in 0.1.8. Historical files remain only for migration and recovery.
+
+### Compatibility
+
+- Existing SQLite databases, Tokens, subscriptions, Collections, Universal Base64 output, semantic duplicate behavior, portable backups and `.psmbackup` archives remain compatible. No database migration was added.
+
 ## [0.1.8] - 2026-10-08
 
 ### Added

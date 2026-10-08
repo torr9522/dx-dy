@@ -4,12 +4,13 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readlinkSync,
+  readdirSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -20,18 +21,26 @@ afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
-
-function temp(prefix = "dxdy-ops-test-") {
-  const root = mkdtempSync(path.join("/tmp", prefix));
+function temp() {
+  const root = mkdtempSync("/tmp/dxdy-ops-test-");
   roots.push(root);
   return root;
 }
+function executable(file: string, body: string) {
+  writeFileSync(file, `#!/usr/bin/env bash\nset -eu\n${body}\n`);
+  chmodSync(file, 0o755);
+}
 
-function install(osId: string, version: string, arch: string, dual: boolean) {
+function freshInstall(
+  osId: string,
+  osVersion: string,
+  arch: string,
+  dual: boolean,
+) {
   const root = temp();
   const osRelease = path.join(root, "os-release");
   const password = path.join(root, "password");
-  writeFileSync(osRelease, `ID=${osId}\nVERSION_ID="${version}"\n`);
+  writeFileSync(osRelease, `ID=${osId}\nVERSION_ID="${osVersion}"\n`);
   writeFileSync(password, "Synthetic-installer-password-123!\n", {
     mode: 0o600,
   });
@@ -55,7 +64,7 @@ function install(osId: string, version: string, arch: string, dual: boolean) {
   return root;
 }
 
-describe("public installer", () => {
+describe("native installer", () => {
   it.each([
     ["debian", "12", "amd64"],
     ["debian", "12", "arm64"],
@@ -63,355 +72,380 @@ describe("public installer", () => {
     ["ubuntu", "22.04", "arm64"],
     ["ubuntu", "24.04", "amd64"],
     ["ubuntu", "24.04", "arm64"],
-  ])("generates isolated config for %s %s %s", (osId, version, arch) => {
-    const root = install(osId, version, arch, arch === "arm64");
-    const config = path.join(root, "etc/dx-dy");
-    expect(statSync(path.join(config, "install.conf")).mode & 0o777).toBe(
+  ])("prepares %s %s %s without a container runtime", (osId, version, arch) => {
+    const root = freshInstall(osId, version, arch, arch === "arm64");
+    const config = readFileSync(
+      path.join(root, "etc/dx-dy/install.conf"),
+      "utf8",
+    );
+    const env = readFileSync(path.join(root, "etc/dx-dy/dx-dy.env"), "utf8");
+    const unit = readFileSync(
+      path.join(root, "etc/systemd/system/dx-dy.service"),
+      "utf8",
+    );
+    const caddy = readFileSync(
+      path.join(root, "etc/caddy/dx-dy.caddy"),
+      "utf8",
+    );
+    expect(config).toContain("DXDY_VERSION=0.1.9");
+    expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
+    expect(config).toContain(`DXDY_ARCH=${arch}`);
+    expect(env).toContain("HOST=127.0.0.1");
+    expect(env).toContain("DATABASE_PATH=/var/lib/dx-dy/dx-dy.db");
+    expect(lstatSync(path.join(root, "etc/dx-dy/dx-dy.env")).mode & 0o777).toBe(
       0o600,
     );
-    expect(statSync(path.join(config, "runtime.env")).mode & 0o777).toBe(0o600);
+    expect(unit).toContain("User=dx-dy");
+    expect(unit).toContain("/opt/dx-dy/current/runtime/bin/node");
+    expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
+    expect(caddy).not.toContain("app:3000");
+    expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
+      "releases/0.1.9",
+    );
     expect(
-      readFileSync(path.join(config, "runtime.env"), "utf8"),
-    ).not.toContain("Synthetic-installer-password");
-    const caddy = readFileSync(path.join(config, "Caddyfile"), "utf8");
-    expect(caddy).toContain("panel.example.com");
-    if (arch === "arm64") {
-      expect(caddy).toContain("sub.example.com");
-      expect(caddy).toContain("@subscription path /s/* /health");
-      expect(caddy).toContain("respond 404");
-    } else {
-      expect(caddy.match(/panel\.example\.com/g)).toHaveLength(1);
-    }
-    expect(existsSync(path.join(root, "usr/local/bin/dx-dy"))).toBe(true);
-    expect(
-      readFileSync(path.join(config, "install.conf"), "utf8"),
-    ).toContain("DXDY_REPOSITORY=torr9522/dx-dy");
+      existsSync(path.join(root, "opt/dx-dy/releases/0.1.9/runtime/bin/node")),
+    ).toBe(true);
   });
 
-  it("fails closed on an existing install", () => {
-    const root = install("debian", "12", "amd64", false);
+  it("rejects unsupported hosts", () => {
+    const root = temp();
+    const osRelease = path.join(root, "os-release");
+    writeFileSync(osRelease, 'ID=ubuntu\nVERSION_ID="20.04"\n');
     const result = spawnSync("bash", ["install.sh"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
         DXDY_TEST_MODE: "1",
         DXDY_ROOT_PREFIX: root,
-        DXDY_OS_RELEASE_FILE: path.join(root, "os-release"),
-        DXDY_ARCH: "amd64",
+        DXDY_OS_RELEASE_FILE: osRelease,
       },
       encoding: "utf8",
     });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("already installed");
+    expect(result.stderr).toContain("Unsupported operating system");
+  });
+
+  it("contains no GHCR or alternate container-runtime dependency", () => {
+    const installer = readFileSync("install.sh", "utf8");
+    expect(installer).not.toMatch(/ghcr\.io|podman|nerdctl/);
+    expect(installer).not.toContain("install docker");
+  });
+
+  it("migrates a detected 0.1.8 Compose install after portable and full backups", () => {
+    const root = temp();
+    const config = path.join(root, "etc/dx-dy");
+    const installRoot = path.join(root, "opt/dx-dy");
+    const data = path.join(root, "var/lib/dx-dy");
+    const backups = path.join(root, "var/backups/dx-dy");
+    const bin = path.join(root, "bin");
+    const calls = path.join(root, "docker-calls");
+    const password = path.join(root, "migration-password");
+    mkdirSync(config, { recursive: true });
+    mkdirSync(installRoot, { recursive: true });
+    mkdirSync(data, { recursive: true });
+    mkdirSync(backups, { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      path.join(root, "os-release"),
+      'ID=debian\nVERSION_ID="12"\n',
+    );
+    writeFileSync(
+      path.join(installRoot, "docker-compose.yml"),
+      "services: {}\n",
+    );
+    writeFileSync(
+      path.join(config, "install.conf"),
+      [
+        "DXDY_VERSION=0.1.8",
+        `DXDY_INSTALL_ROOT=${installRoot}`,
+        `DXDY_DATA_DIR=${data}`,
+        `DXDY_BACKUP_DIR=${backups}`,
+        "DXDY_ADMIN_DOMAIN=panel.example.com",
+        "DXDY_SUBSCRIPTION_DOMAIN=sub.example.com",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(config, "runtime.env"),
+      `APP_MASTER_KEY=${"1".repeat(64)}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(password, "Synthetic-migration-password-123!\n", {
+      mode: 0o600,
+    });
+    executable(
+      path.join(bin, "docker"),
+      `printf '%s\\n' "$*" >>"${calls}"\nif [[ "$*" == *"ps -q app"* ]]; then printf 'legacy-app\\n'; fi\nif [[ "$*" == *"database.mjs backup"* ]]; then target="\${*: -1}"; printf database >"${backups}/\${target##*/}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then target="\${*: -1}"; printf bundle >"${backups}/\${target##*/}"; fi`,
+    );
+    const result = spawnSync("bash", ["install.sh"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        DXDY_TEST_MODE: "1",
+        DXDY_ROOT_PREFIX: root,
+        DXDY_OS_RELEASE_FILE: path.join(root, "os-release"),
+        DXDY_ARCH: "amd64",
+        DXDY_MIGRATION_PASSWORD_FILE: password,
+      },
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readFileSync(path.join(config, "install.conf"), "utf8")).toContain(
+      "DXDY_RELEASE_MODEL=native-systemd",
+    );
+    expect(readFileSync(path.join(data, "dx-dy.db"), "utf8")).toBe("database");
+    expect(
+      readdirSync(backups).some((name) => name.endsWith(".psmbackup")),
+    ).toBe(true);
+    expect(readFileSync(calls, "utf8")).toContain("stop app caddy");
   });
 });
 
-function managerFixture() {
+function nativeFixture() {
   const root = temp();
-  const config = path.join(root, "config");
-  const installRoot = path.join(root, "install");
-  const data = path.join(root, "data");
-  const backups = path.join(root, "backups");
+  const config = path.join(root, "etc/dx-dy");
+  const install = path.join(root, "opt/dx-dy");
+  const data = path.join(root, "var/lib/dx-dy");
+  const backups = path.join(root, "var/backups/dx-dy");
   const bin = path.join(root, "bin");
-  mkdirSync(config);
-  mkdirSync(installRoot);
-  mkdirSync(data);
-  mkdirSync(backups);
-  mkdirSync(bin);
-  writeFileSync(path.join(installRoot, "docker-compose.yml"), "services: {}\n");
+  const calls = path.join(root, "calls");
+  const current = path.join(install, "releases/0.1.9");
+  mkdirSync(path.join(current, "runtime/bin"), { recursive: true });
+  mkdirSync(path.join(current, "app/dist"), { recursive: true });
+  mkdirSync(config, { recursive: true });
+  mkdirSync(data, { recursive: true });
+  mkdirSync(backups, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  symlinkSync("releases/0.1.9", path.join(install, "current"));
+  writeFileSync(path.join(current, "RELEASE.json"), '{"version":"0.1.9"}\n');
   writeFileSync(
-    path.join(installRoot, "Caddyfile.single"),
-    "__ADMIN_DOMAIN__ { reverse_proxy app:3000 }\n",
+    path.join(current, "Caddyfile.single"),
+    "__ADMIN_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n",
   );
   writeFileSync(
-    path.join(installRoot, "Caddyfile.dual"),
-    "__ADMIN_DOMAIN__ { reverse_proxy app:3000 }\n__SUBSCRIPTION_DOMAIN__ { @subscription path /s/* /health\nhandle @subscription { reverse_proxy app:3000 }\nrespond 404\n}\n",
+    path.join(current, "Caddyfile.dual"),
+    "__ADMIN_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n__SUBSCRIPTION_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n",
   );
-  writeFileSync(
-    path.join(config, "Caddyfile"),
-    "panel.example.com { reverse_proxy app:3000 }\n",
-  );
-  writeFileSync(
-    path.join(config, "runtime.env"),
-    "ADMIN_BASE_URL=https://panel.example.com\nSUBSCRIPTION_BASE_URL=https://panel.example.com\n",
-    { mode: 0o600 },
+  executable(
+    path.join(current, "runtime/bin/node"),
+    `printf 'node %s\\n' "$*" >>"${calls}"\nif [[ "$*" == *"database.mjs backup"* ]]; then printf database >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then printf bundle >"\${*: -1}"; fi`,
   );
   writeFileSync(
     path.join(config, "install.conf"),
     [
-      "DXDY_VERSION=0.1.8",
-      "DXDY_REPOSITORY=example/dx-dy",
-      `DXDY_INSTALL_ROOT=${installRoot}`,
+      "DXDY_VERSION=0.1.9",
+      "DXDY_RELEASE_MODEL=native-systemd",
+      "DXDY_REPOSITORY=torr9522/dx-dy",
+      `DXDY_INSTALL_ROOT=${install}`,
       `DXDY_CONFIG_DIR=${config}`,
       `DXDY_DATA_DIR=${data}`,
       `DXDY_BACKUP_DIR=${backups}`,
-      "DXDY_COMPOSE_PROJECT=dx-dy-test",
-      "DXDY_IMAGE_REFERENCE=example.invalid/dx-dy:0.1.8",
-      "DXDY_IMAGE_DIGEST=sha256:synthetic",
-      "DXDY_CADDY_IMAGE=caddy:2.10.2-alpine",
-      `DXDY_CADDYFILE=${path.join(config, "Caddyfile")}`,
-      `DXDY_CADDY_DATA=${path.join(data, "caddy-data")}`,
-      `DXDY_CADDY_CONFIG=${path.join(data, "caddy-config")}`,
-      `DXDY_RUNTIME_ENV=${path.join(config, "runtime.env")}`,
+      "DXDY_INTERNAL_PORT=3000",
       "DXDY_ADMIN_DOMAIN=panel.example.com",
-      "DXDY_SUBSCRIPTION_DOMAIN=panel.example.com",
+      "DXDY_SUBSCRIPTION_DOMAIN=sub.example.com",
+      `DXDY_CADDY_IMPORT=${path.join(config, "dx-dy.caddy")}`,
+      "DXDY_SERVICE=dx-dy.service",
+      `DXDY_SYSTEMD_UNIT_PATH=${path.join(root, "dx-dy.service")}`,
+      "DXDY_ARCH=amd64",
+      "DXDY_PREVIOUS_RELEASE=",
+      "DXDY_LEGACY_ROOT=",
       "",
     ].join("\n"),
+  );
+  writeFileSync(
+    path.join(config, "dx-dy.env"),
+    `APP_MASTER_KEY=${"0".repeat(64)}\nDATABASE_PATH=${data}/dx-dy.db\n`,
     { mode: 0o600 },
   );
-  const calls = path.join(root, "calls");
   writeFileSync(
-    path.join(bin, "docker"),
-    `#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' "$*" >>"${calls}"\nif [[ "\${DXDY_FORCE_COMPOSE_V1:-0}" == 1 && "$1" == compose ]]; then exit 1; fi\nif [[ "$1" == info ]]; then exit 0; fi\nif [[ "$1" == run ]]; then exit "\${DXDY_MOCK_DOCKER_RUN_STATUS:-0}"; fi\nif [[ "\${DXDY_MOCK_RELOAD_FAIL:-0}" == 1 && "$*" == *"caddy reload"* ]]; then exit 1; fi\nif [[ "$*" == *"node dist/database.mjs backup"* ]]; then file="\${*: -1}"; touch "${backups}/\${file##*/}"; fi\nif [[ "$*" == *"node dist/database.mjs bundle"* ]]; then file="\${*: -1}"; touch "${backups}/\${file##*/}"; fi\nif [[ "$*" == *" cat /tmp/"* ]]; then printf 'synthetic backup'; fi\nif [[ "$*" == *"fetch("* ]]; then [[ "\${DXDY_MOCK_HEALTH_FAIL:-0}" == 1 ]] && exit 1; printf '{"name":"dx-dy","status":"ok","database":"ok","version":"0.1.8"}\\n'; fi\nexit 0\n`,
-    { mode: 0o755 },
+    path.join(config, "dx-dy.caddy"),
+    "panel.example.com { reverse_proxy 127.0.0.1:3000 }\n",
   );
-  chmodSync(path.join(bin, "docker"), 0o755);
-  symlinkSync(path.join(bin, "docker"), path.join(bin, "docker-compose"));
-  const managerPath = path.join(root, "installed-manager");
-  writeFileSync(managerPath, "old manager\n", { mode: 0o755 });
-  return { root, config, installRoot, data, backups, bin, calls, managerPath };
+  executable(
+    path.join(bin, "systemctl"),
+    `printf 'systemctl %s\\n' "$*" >>"${calls}"\nif [[ "$1" == is-active ]]; then printf 'active\\n'; fi\nif [[ "\${DXDY_MOCK_START_FAIL:-0}" == 1 && "$*" == "start dx-dy.service" && ! -e "${root}/failed-once" ]]; then touch "${root}/failed-once"; exit 1; fi`,
+  );
+  executable(
+    path.join(bin, "curl"),
+    `printf '{"name":"dx-dy","status":"ok","version":"0.1.9"}\\n'`,
+  );
+  executable(
+    path.join(bin, "journalctl"),
+    `printf 'journalctl %s\\n' "$*" >>"${calls}"`,
+  );
+  executable(path.join(bin, "caddy"), "exit 0");
+  executable(
+    path.join(bin, "ss"),
+    "printf 'LISTEN 0 511 127.0.0.1:3000 0.0.0.0:*\\n'",
+  );
+  executable(path.join(bin, "getent"), "exit 0");
+  writeFileSync(path.join(root, "release.json"), '{"tag_name":"v0.1.9"}\n');
+  const managerPath = path.join(root, "dx-dy-manager");
+  writeFileSync(managerPath, readFileSync("ops/dx-dy"));
+  chmodSync(managerPath, 0o755);
+  return { root, config, install, backups, bin, calls, managerPath };
 }
-
 function manager(
-  fixture: ReturnType<typeof managerFixture>,
+  f: ReturnType<typeof nativeFixture>,
   args: string[],
   input = "",
-  extra: NodeJS.ProcessEnv = {},
+  extraEnv: Record<string, string> = {},
 ) {
   return spawnSync("bash", ["ops/dx-dy", ...args], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PATH: `${fixture.bin}:${process.env.PATH}`,
-      DXDY_CONFIG_DIR: fixture.config,
-      DXDY_ALLOW_TEST_PATHS: "1",
-      DXDY_MANAGER_PATH: fixture.managerPath,
-      ...extra,
-    },
     input,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${f.bin}:${process.env.PATH}`,
+      DXDY_CONFIG_DIR: f.config,
+      DXDY_ALLOW_TEST_PATHS: "1",
+      DXDY_UPDATE_MOCK_DIR: f.root,
+      DXDY_MANAGER_PATH: f.managerPath,
+      ...extraEnv,
+    },
   });
 }
 
-describe("dx-dy manager", () => {
-  it("routes lifecycle, admin and backup operations without credential argv", () => {
-    const fixture = managerFixture();
-    expect(manager(fixture, ["status"]).status).toBe(0);
-    expect(manager(fixture, ["start"]).status).toBe(0);
-    expect(manager(fixture, ["stop"]).status).toBe(0);
-    expect(manager(fixture, ["restart"]).status).toBe(0);
-    expect(
-      manager(
-        fixture,
-        ["admin", "reset-password"],
-        "Synthetic-new-password-123!\nSynthetic-new-password-123!\n",
-      ).status,
-    ).toBe(0);
-    expect(manager(fixture, ["backup", "db"]).status).toBe(0);
-    const calls = readFileSync(fixture.calls, "utf8");
-    expect(calls).toContain("compose");
-    expect(calls).not.toContain("Synthetic-new-password");
-    expect(
-      readFileSync(fixture.config + "/install.conf", "utf8"),
-    ).not.toContain("Synthetic-new-password");
+function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
+  const version = "0.2.0";
+  const packageRoot = path.join(f.root, `dx-dy-${version}-linux-amd64`);
+  mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
+  mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
+  executable(
+    path.join(packageRoot, "runtime/bin/node"),
+    `printf 'updated-node %s\\n' "$*" >>"${f.calls}"`,
+  );
+  writeFileSync(path.join(packageRoot, "app/dist/server.mjs"), "");
+  writeFileSync(path.join(packageRoot, "app/dist/database.mjs"), "");
+  writeFileSync(
+    path.join(packageRoot, "dx-dy.service"),
+    "[Service]\nExecStart=/opt/dx-dy/current/runtime/bin/node /opt/dx-dy/current/app/dist/server.mjs\n",
+  );
+  writeFileSync(
+    path.join(packageRoot, "RELEASE.json"),
+    JSON.stringify({ version, release_model: "native-systemd" }),
+  );
+  const artifact = `dx-dy-${version}-linux-amd64.tar.gz`;
+  expect(
+    spawnSync("tar", [
+      "-czf",
+      path.join(f.root, artifact),
+      "-C",
+      f.root,
+      path.basename(packageRoot),
+    ]).status,
+  ).toBe(0);
+  writeFileSync(
+    path.join(f.root, "dx-dy"),
+    "#!/usr/bin/env bash\necho updated-manager\n",
+    { mode: 0o755 },
+  );
+  const hash = (file: string) =>
+    createHash("sha256").update(readFileSync(file)).digest("hex");
+  writeFileSync(
+    path.join(f.root, "release.json"),
+    JSON.stringify({ tag_name: `v${version}` }),
+  );
+  writeFileSync(
+    path.join(f.root, "release-manifest.json"),
+    JSON.stringify({
+      version,
+      release_model: "native-systemd",
+      architectures: ["amd64", "arm64"],
+      artifacts: [
+        {
+          name: artifact,
+          architecture: "amd64",
+          sha256: hash(path.join(f.root, artifact)),
+        },
+      ],
+      manager_sha256: hash(path.join(f.root, "dx-dy")),
+    }),
+  );
+}
+
+describe("native manager", () => {
+  it("uses systemd for lifecycle and journalctl for logs", () => {
+    const f = nativeFixture();
+    expect(manager(f, ["status"]).stdout).toContain(
+      "Release model: native-systemd",
+    );
+    expect(manager(f, ["start"]).status).toBe(0);
+    expect(manager(f, ["stop"]).status).toBe(0);
+    expect(manager(f, ["restart"]).status).toBe(0);
+    expect(manager(f, ["logs", "app", "25"]).status).toBe(0);
+    const calls = readFileSync(f.calls, "utf8");
+    expect(calls).toContain("systemctl start dx-dy.service");
+    expect(calls).toContain("systemctl stop dx-dy.service");
+    expect(calls).toContain("systemctl restart dx-dy.service");
+    expect(calls).toContain("journalctl -u dx-dy.service -n 25");
+    expect(calls).not.toContain("docker");
   });
 
-  it("validates domain candidates and rolls back a failed Caddy reload", () => {
-    const fixture = managerFixture();
-    const before = readFileSync(path.join(fixture.config, "Caddyfile"), "utf8");
+  it("runs WAL-safe backup through the bundled application CLI", () => {
+    const f = nativeFixture();
+    const result = manager(f, ["backup", "db"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("SHA-256:");
+    expect(readdirSync(f.backups).some((name) => name.endsWith(".db"))).toBe(
+      true,
+    );
+    expect(readFileSync(f.calls, "utf8")).toContain("database.mjs backup");
+  });
+
+  it("restores a full migration bundle through the application CLI", () => {
+    const f = nativeFixture();
+    const bundle = path.join(f.backups, "fixture.psmbackup");
+    writeFileSync(bundle, "synthetic bundle");
     const result = manager(
-      fixture,
-      ["domain", "set-subscription", "sub.example.com"],
-      "",
-      { DXDY_MOCK_DOCKER_RUN_STATUS: "0" },
+      f,
+      ["restore", bundle],
+      "Synthetic-restore-password!\nSynthetic-restore-password!\n",
     );
     expect(result.status).toBe(0);
-    expect(
-      readFileSync(path.join(fixture.config, "Caddyfile"), "utf8"),
-    ).toContain("sub.example.com");
-    const acceptedCaddy = readFileSync(
-      path.join(fixture.config, "Caddyfile"),
-      "utf8",
-    );
-    const acceptedConfig = readFileSync(
-      path.join(fixture.config, "install.conf"),
-      "utf8",
-    );
-    const failed = manager(
-      fixture,
-      ["domain", "set-admin", "next.example.com"],
-      "",
-      { DXDY_MOCK_RELOAD_FAIL: "1" },
-    );
-    expect(failed.status).not.toBe(0);
-    expect(readFileSync(path.join(fixture.config, "Caddyfile"), "utf8")).toBe(
-      acceptedCaddy,
-    );
-    expect(
-      readFileSync(path.join(fixture.config, "install.conf"), "utf8"),
-    ).toBe(acceptedConfig);
-    const invalid = manager(fixture, [
-      "domain",
-      "set-admin",
-      "https://bad/path",
-    ]);
-    expect(invalid.status).not.toBe(0);
-    expect(
-      readFileSync(path.join(fixture.config, "Caddyfile"), "utf8"),
-    ).not.toBe(before);
+    expect(result.stdout).toContain("Restore completed");
+    expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
   });
 
-  it("verifies local release assets, updates atomically and rolls back health failure", () => {
-    const makeRelease = (fixture: ReturnType<typeof managerFixture>) => {
-      const release = path.join(fixture.root, "release");
-      mkdirSync(release);
-      const assets: Record<string, string> = {
-        "dx-dy": "#!/usr/bin/env bash\necho updated-manager\n",
-        "docker-compose.yml": readFileSync(
-          path.join(fixture.installRoot, "docker-compose.yml"),
-          "utf8",
-        ),
-        "Caddyfile.single": "__ADMIN_DOMAIN__ { reverse_proxy app:3000 }\n",
-        "Caddyfile.dual":
-          "__ADMIN_DOMAIN__ { reverse_proxy app:3000 }\n__SUBSCRIPTION_DOMAIN__ { respond 404 }\n",
-      };
-      for (const [name, content] of Object.entries(assets))
-        writeFileSync(path.join(release, name), content);
-      const hash = (name: string) =>
-        createHash("sha256")
-          .update(readFileSync(path.join(release, name)))
-          .digest("hex");
-      writeFileSync(
-        path.join(release, "release.json"),
-        JSON.stringify({ tag_name: "v0.1.9" }),
-      );
-      writeFileSync(
-        path.join(release, "release-manifest.json"),
-        JSON.stringify({
-          version: "0.1.9",
-          docker_image: "ghcr.io/example/dx-dy",
-          docker_image_digest: `sha256:${"1".repeat(64)}`,
-          manager_sha256: hash("dx-dy"),
-          compose_sha256: hash("docker-compose.yml"),
-          caddy_single_sha256: hash("Caddyfile.single"),
-          caddy_dual_sha256: hash("Caddyfile.dual"),
-        }),
-      );
-      return release;
-    };
-
-    const successful = managerFixture();
-    const release = makeRelease(successful);
-    const result = manager(successful, ["update"], "y\n", {
-      DXDY_UPDATE_MOCK_DIR: release,
-    });
+  it("recognizes that 0.1.9 is already current", () => {
+    const f = nativeFixture();
+    const result = manager(f, ["update"]);
     expect(result.status).toBe(0);
-    expect(readFileSync(successful.managerPath, "utf8")).toContain(
-      "updated-manager",
-    );
-    expect(
-      readFileSync(path.join(successful.config, "install.conf"), "utf8"),
-    ).toContain("DXDY_VERSION=0.1.9");
+    expect(result.stdout).toContain("Already current.");
+  });
 
-    const failed = managerFixture();
-    const failedRelease = makeRelease(failed);
-    const before = readFileSync(
-      path.join(failed.config, "install.conf"),
-      "utf8",
+  it("installs an update through a new release directory and atomic symlink", () => {
+    const f = nativeFixture();
+    prepareUpdate(f);
+    const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Updated to dx-dy 0.2.0");
+    expect(readlinkSync(path.join(f.install, "current"))).toBe(
+      "releases/0.2.0",
     );
-    const failedResult = manager(failed, ["update"], "y\n", {
-      DXDY_UPDATE_MOCK_DIR: failedRelease,
-      DXDY_MOCK_HEALTH_FAIL: "1",
+    expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
+      "DXDY_VERSION=0.2.0",
+    );
+  });
+
+  it("restores the old release link and database after failed update start", () => {
+    const f = nativeFixture();
+    prepareUpdate(f);
+    const result = manager(f, ["update"], "", {
+      DXDY_UPDATE_YES: "1",
+      DXDY_MOCK_START_FAIL: "1",
     });
-    expect(failedResult.status).not.toBe(0);
-    expect(readFileSync(path.join(failed.config, "install.conf"), "utf8")).toBe(
-      before,
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("ROLLBACK: PASS");
+    expect(readlinkSync(path.join(f.install, "current"))).toBe(
+      path.join(f.install, "releases/0.1.9"),
     );
-    expect(readFileSync(failed.managerPath, "utf8")).toBe("old manager\n");
-  });
-
-  it("preserves data by default and requires DELETE for a full purge", () => {
-    const preserved = managerFixture();
-    expect(manager(preserved, ["uninstall"], "1\n").status).toBe(0);
-    expect(existsSync(preserved.installRoot)).toBe(false);
-    expect(existsSync(preserved.config)).toBe(false);
-    expect(existsSync(preserved.data)).toBe(true);
-    expect(existsSync(preserved.backups)).toBe(true);
-
-    const cancelled = managerFixture();
-    expect(manager(cancelled, ["uninstall"], "2\nNO\n").status).not.toBe(0);
-    expect(existsSync(cancelled.data)).toBe(true);
-    expect(existsSync(cancelled.backups)).toBe(true);
-
-    const purged = managerFixture();
-    expect(manager(purged, ["uninstall"], "2\nDELETE\n").status).toBe(0);
-    expect(existsSync(purged.installRoot)).toBe(false);
-    expect(existsSync(purged.config)).toBe(false);
-    expect(existsSync(purged.data)).toBe(false);
-    expect(existsSync(purged.backups)).toBe(false);
-  });
-
-  it("wraps portable and full restores with backup, stop, health and stdin secrets", () => {
-    const portable = managerFixture();
-    const db = path.join(portable.backups, "portable.db");
-    writeFileSync(db, "synthetic");
-    expect(manager(portable, ["restore", db]).status).toBe(0);
-    expect(readFileSync(portable.calls, "utf8")).toContain(
-      "dist/database.mjs restore /backups/portable.db",
+    expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
+      "DXDY_VERSION=0.1.9",
     );
-
-    const full = managerFixture();
-    const bundle = path.join(full.backups, "migration.psmbackup");
-    writeFileSync(bundle, "synthetic");
-    expect(
-      manager(
-        full,
-        ["restore", bundle],
-        "Synthetic-backup-password-123!\nSynthetic-backup-password-123!\n",
-      ).status,
-    ).toBe(0);
-    const calls = readFileSync(full.calls, "utf8");
-    expect(calls).toContain("INSTANCE_ENV_FILE=/run/dx-dy/runtime.env");
-    expect(calls).not.toContain("Synthetic-backup-password");
-  });
-
-  it("recognizes a legacy source path for status, restart, logs, backup and doctor", () => {
-    const fixture = managerFixture();
-    writeFileSync(
-      path.join(fixture.installRoot, ".env"),
-      [
-        "ADMIN_BASE_URL=https://panel.example.com",
-        "SUBSCRIPTION_BASE_URL=https://sub.example.com",
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      path.join(fixture.installRoot, "package.json"),
-      JSON.stringify({ version: "0.1.8" }),
-    );
-    const legacyEnv = {
-      DXDY_CONFIG_DIR: path.join(fixture.root, "missing-config"),
-      DXDY_LEGACY_ROOT: fixture.installRoot,
-      DXDY_FORCE_COMPOSE_V1: "1",
-    };
-    expect(manager(fixture, ["status"], "", legacyEnv).stdout).toContain(
-      "Mode: legacy",
-    );
-    expect(manager(fixture, ["restart"], "", legacyEnv).status).toBe(0);
-    expect(manager(fixture, ["logs", "app", "20"], "", legacyEnv).status).toBe(
-      0,
-    );
-    expect(manager(fixture, ["backup", "db"], "", legacyEnv).status).toBe(0);
-    expect(manager(fixture, ["doctor"], "", legacyEnv).status).toBe(0);
-    const legacyBackups = path.join(fixture.installRoot, "data/backups");
-    expect(existsSync(legacyBackups)).toBe(true);
-    expect(
-      readdirSync(legacyBackups).some((name) => name.endsWith(".db")),
-    ).toBe(true);
-    const backup = readdirSync(legacyBackups).find((name) =>
-      name.endsWith(".db"),
-    );
-    expect(statSync(path.join(legacyBackups, backup!)).size).toBeGreaterThan(0);
+    expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
   });
 });

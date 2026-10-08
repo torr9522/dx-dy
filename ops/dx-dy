@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.1.8"
+readonly DXDY_MANAGER_VERSION="0.1.9"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
-LEGACY_ROOT="${DXDY_LEGACY_ROOT:-/opt/private-subscription-manager}"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
-MODE=""
-COMPOSE_KIND=""
 TEMP_DIRS=()
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -17,112 +14,77 @@ valid_hostname() {
   [[ ${#1} -le 253 && "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
 }
 require_root() {
-  [[ ${EUID:-$(id -u)} -eq 0 ]] ||
-    [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$CONFIG_DIR" == /tmp/dxdy-ops-test-*/* ]] ||
-    die "Please run as root or sudo."
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$CONFIG_DIR" == /tmp/dxdy-ops-test-*/* ]] || die "Please run as root or sudo."
 }
-cleanup_manager() {
-  local directory
-  for directory in "${TEMP_DIRS[@]}"; do
-    [[ "$directory" == /tmp/tmp.* ]] && rm -rf -- "$directory"
-  done
-}
+cleanup_manager() { local d; for d in "${TEMP_DIRS[@]}"; do [[ "$d" == /tmp/* ]] && rm -rf -- "$d"; done; }
 trap cleanup_manager EXIT
 
 load_instance() {
-  if [[ -f "$CONFIG_FILE" ]]; then
-    # Root-owned configuration contains only validated scalar values.
-    # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
-    MODE="public"
-    : "${DXDY_INSTALL_ROOT:?Missing DXDY_INSTALL_ROOT}"
-    : "${DXDY_COMPOSE_PROJECT:?Missing DXDY_COMPOSE_PROJECT}"
-    COMPOSE_FILE="$DXDY_INSTALL_ROOT/docker-compose.yml"
-    RUNTIME_ENV="$CONFIG_DIR/runtime.env"
-    BACKUP_DIR="$DXDY_BACKUP_DIR"
-  elif [[ -f "$LEGACY_ROOT/docker-compose.yml" && -f "$LEGACY_ROOT/.env" ]]; then
-    MODE="legacy"
-    DXDY_INSTALL_ROOT="$LEGACY_ROOT"
-    DXDY_VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$LEGACY_ROOT/package.json" | head -1)"
-    DXDY_COMPOSE_PROJECT="$(basename "$LEGACY_ROOT")"
-    COMPOSE_FILE="$LEGACY_ROOT/docker-compose.yml"
-    RUNTIME_ENV="$LEGACY_ROOT/.env"
-    BACKUP_DIR="$LEGACY_ROOT/data/backups"
-    DXDY_DATA_DIR="$LEGACY_ROOT/data"
-    DXDY_ADMIN_DOMAIN=""
-    DXDY_SUBSCRIPTION_DOMAIN=""
-  else
-    die "dx-dy installation not found."
-  fi
-  [[ -f "$COMPOSE_FILE" ]] || die "Compose file not found: $COMPOSE_FILE"
-  if docker compose version >/dev/null 2>&1; then
-    COMPOSE_KIND="v2"
-  elif [[ "$MODE" == legacy ]] && command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE_KIND="v1"
-  else
-    die "Docker Compose is unavailable (public installs require Compose v2)."
-  fi
+  [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.1.9 installer to migrate."
+  : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
+  ENV_FILE="$CONFIG_DIR/dx-dy.env"
+  CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
+  NODE="$CURRENT_LINK/runtime/bin/node"
+  APP="$CURRENT_LINK/app"
+  SERVICE="${DXDY_SERVICE:-dx-dy.service}"
+  SYSTEMD_UNIT_PATH="${DXDY_SYSTEMD_UNIT_PATH:-/etc/systemd/system/dx-dy.service}"
+  CADDY_IMPORT="${DXDY_CADDY_IMPORT:-/etc/caddy/dx-dy.caddy}"
+  DATABASE="$DXDY_DATA_DIR/dx-dy.db"
+  [[ -L "$CURRENT_LINK" && -x "$NODE" && -f "$ENV_FILE" ]] || die "Native installation layout is incomplete."
 }
 
-compose() {
-  if [[ "$COMPOSE_KIND" == v1 ]]; then
-    docker-compose -f "$COMPOSE_FILE" "$@"
-  elif [[ "$MODE" == public ]]; then
-    docker compose --project-name "$DXDY_COMPOSE_PROJECT" \
-      --env-file "$CONFIG_FILE" -f "$COMPOSE_FILE" "$@"
-  else
-    docker compose -f "$COMPOSE_FILE" "$@"
-  fi
+run_cli() {
+  local script="$1"; shift
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then "$NODE" "$APP/dist/$script" "$@"
+  else runuser -u dx-dy -- "$NODE" "$APP/dist/$script" "$@"; fi
 }
 
-service_status() {
-  local service="$1" id
-  id="$(compose ps -q "$service" 2>/dev/null || true)"
-  [[ -n "$id" ]] || { printf 'not running'; return; }
-  docker inspect --format '{{.State.Status}}{{if .State.Health}} / {{.State.Health.Status}}{{end}}' "$id" 2>/dev/null || printf unknown
+run_cli_root() {
+  local script="$1"; shift
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  "$NODE" "$APP/dist/$script" "$@"
 }
 
-container_health() {
-  compose exec -T app node --input-type=module -e \
-    'const r=await fetch("http://127.0.0.1:3000/health");if(!r.ok)process.exit(2);console.log(JSON.stringify(await r.json()))'
-}
+health() { curl -fsS --max-time 10 "http://127.0.0.1:$DXDY_INTERNAL_PORT/health"; }
+wait_health() { for _ in {1..45}; do health >/dev/null 2>&1 && return; sleep 2; done; return 1; }
+service_state() { systemctl is-active "$1" 2>/dev/null || printf inactive; }
 
 cmd_status() {
   load_instance
-  local app_status caddy_status health image digest admin_url subscription_url
-  app_status="$(service_status app)"
-  if [[ "$MODE" == public ]]; then
-    caddy_status="$(service_status caddy)"
-    admin_url="https://$DXDY_ADMIN_DOMAIN"
-    subscription_url="https://$DXDY_SUBSCRIPTION_DOMAIN"
-  else
-    caddy_status="external/legacy"
-    admin_url="$(sed -n 's/^ADMIN_BASE_URL=//p' "$RUNTIME_ENV" | head -1)"
-    subscription_url="$(sed -n 's/^SUBSCRIPTION_BASE_URL=//p' "$RUNTIME_ENV" | head -1)"
-  fi
-  health="$(container_health 2>/dev/null || printf unavailable)"
-  image="$(compose ps -q app 2>/dev/null | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null || true)"
-  digest="$(compose ps -q app 2>/dev/null | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null || true)"
-  printf '%s\n' "dx-dy ${DXDY_VERSION:-$DXDY_MANAGER_VERSION}" \
-    "Mode: $MODE" \
-    "App status: ${app_status:-not running}" \
-    "Caddy status: ${caddy_status:-not running}" \
-    "Health: $health" \
-    "Admin: ${admin_url:-configured externally}" \
-    "Subscription: ${subscription_url:-database/runtime configured}" \
-    "External HTTP port: 80" \
-    "External HTTPS port: 443" \
-    "Internal App endpoint: app:3000 (not a public entry point)" \
-    "Database path: /data/private-subscription-manager.db" \
-    "Backup directory: $BACKUP_DIR" \
-    "Docker Compose project: $DXDY_COMPOSE_PROJECT" \
-    "Image: ${image:-unavailable}" \
-    "Image digest: ${digest:-unavailable}"
+  local health_json tls_state current disk
+  health_json="$(health 2>/dev/null || printf unavailable)"
+  current="$(readlink -f "$CURRENT_LINK" 2>/dev/null || printf unavailable)"
+  disk="$(du -sh "$DXDY_INSTALL_ROOT" "$DXDY_DATA_DIR" "$DXDY_BACKUP_DIR" 2>/dev/null | awk '{printf "%s=%s ",$2,$1}')"
+  if curl -fsSI --max-time 10 "https://$DXDY_ADMIN_DOMAIN/health" >/dev/null 2>&1; then tls_state=ready; else tls_state=pending-or-unreachable; fi
+  printf '%s\n' \
+    "dx-dy $DXDY_VERSION" \
+    "Release model: native-systemd" \
+    "Application service: $(service_state "$SERVICE")" \
+    "Caddy service: $(service_state caddy.service)" \
+    "Health: $health_json" \
+    "Admin: https://$DXDY_ADMIN_DOMAIN" \
+    "Subscription: https://$DXDY_SUBSCRIPTION_DOMAIN" \
+    "Internal endpoint: 127.0.0.1:$DXDY_INTERNAL_PORT" \
+    "Database: $DATABASE" \
+    "Install root: $DXDY_INSTALL_ROOT" \
+    "Current release: $current" \
+    "Caddy TLS: $tls_state" \
+    "Disk usage: ${disk:-unavailable}"
 }
 
-cmd_start() { load_instance; compose up -d; }
-cmd_stop() { load_instance; compose stop; }
-cmd_restart() { load_instance; compose restart; container_health >/dev/null; printf 'dx-dy restarted and healthy.\n'; }
+cmd_start() { load_instance; systemctl start "$SERVICE"; systemctl start caddy.service; wait_health || die "Application did not become healthy."; }
+cmd_stop() { load_instance; systemctl stop "$SERVICE"; }
+cmd_restart() { load_instance; systemctl restart "$SERVICE"; wait_health || die "Application did not become healthy."; printf 'dx-dy restarted and healthy.\n'; }
 
 read_confirmed_secret() {
   local prompt="$1" first second
@@ -136,16 +98,11 @@ read_confirmed_secret() {
 cmd_admin() {
   load_instance
   case "${1:-}" in
-    reset-password)
-      read_confirmed_secret "new administrator password"
-      printf '%s' "$REPLY" | compose exec -T app node dist/admin-cli.mjs reset-password
-      unset REPLY
-      ;;
+    reset-password) read_confirmed_secret "new administrator password"; printf '%s' "$REPLY" | run_cli admin-cli.mjs reset-password; unset REPLY ;;
     change-username)
-      local username
-      read -r -p "New administrator username: " username
+      local username; read -r -p "New administrator username: " username
       [[ "$username" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || die "Invalid username."
-      printf '%s' "$username" | compose exec -T app node dist/admin-cli.mjs change-username
+      printf '%s' "$username" | run_cli admin-cli.mjs change-username
       ;;
     *) die "Usage: dx-dy admin <reset-password|change-username>" ;;
   esac
@@ -153,168 +110,79 @@ cmd_admin() {
 
 backup_target() {
   local extension="$1"
-  mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
-  printf '%s/dx-dy-%s-%s.%s' "$BACKUP_DIR" "${DXDY_VERSION:-$DXDY_MANAGER_VERSION}" \
-    "$(date -u +%Y%m%d-%H%M%SZ)" "$extension"
+  mkdir -p "$DXDY_BACKUP_DIR"; chmod 0750 "$DXDY_BACKUP_DIR"
+  printf '%s/dx-dy-%s-%s.%s' "$DXDY_BACKUP_DIR" "$DXDY_VERSION" "$(date -u +%Y%m%d-%H%M%SZ)" "$extension"
 }
-
 report_backup() {
-  local file="$1"
-  [[ -f "$file" ]] || die "Backup was not created: $file"
-  printf 'Backup: %s\nSize: %s bytes\nSHA-256: %s\nCreated: %s\n' \
-    "$file" "$(stat -c %s "$file")" "$(sha256sum "$file" | cut -d' ' -f1)" \
-    "$(date -u -r "$file" +%Y-%m-%dT%H:%M:%SZ)"
+  local file="$1"; [[ -s "$file" ]] || die "Backup was not created: $file"
+  chmod 0600 "$file"
+  printf 'Backup: %s\nSize: %s bytes\nSHA-256: %s\n' "$file" "$(stat -c %s "$file")" "$(sha256sum "$file" | cut -d' ' -f1)"
 }
-
 cmd_backup() {
   load_instance
-  local kind="${1:-db}" host_target container_target
-  if [[ "$MODE" == public ]]; then
-    host_target="$(backup_target "$([[ "$kind" == full ]] && printf psmbackup || printf db)")"
-    container_target="/backups/$(basename "$host_target")"
-  else
-    mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
-    host_target="$(backup_target "$([[ "$kind" == full ]] && printf psmbackup || printf db)")"
-    container_target="/tmp/$(basename "$host_target")"
-  fi
+  local kind="${1:-db}" target
   case "$kind" in
-    db) compose exec -T app node dist/database.mjs backup "$container_target" ;;
-    full)
-      read_confirmed_secret "full migration backup password"
-      printf '%s' "$REPLY" | compose exec -T -e BACKUP_PASSWORD_STDIN=true app \
-        node dist/database.mjs bundle "$container_target"
-      unset REPLY
-      ;;
+    db) target="$(backup_target db)"; run_cli database.mjs backup "$target" ;;
+    full) target="$(backup_target psmbackup)"; read_confirmed_secret "full migration backup password"; printf '%s' "$REPLY" | BACKUP_PASSWORD_STDIN=true run_cli database.mjs bundle "$target"; unset REPLY ;;
     *) die "Usage: dx-dy backup <db|full>" ;;
   esac
-  if [[ "$MODE" == legacy ]]; then
-    compose exec -T app cat "$container_target" >"$host_target"
-    [[ -s "$host_target" ]] || die "Backup copied from the container is empty."
-    chmod 600 "$host_target"
-    compose exec -T app node --input-type=module -e \
-      'import{rmSync}from"node:fs";rmSync(process.argv[1],{force:true})' "$container_target"
-  fi
-  report_backup "$host_target"
+  report_backup "$target"
 }
 
 cmd_restore() {
-  require_root
-  load_instance
-  local source="${1:-}"
-  [[ -n "$source" ]] || { read -r -p "Backup path: " source; }
-  [[ "$source" = /* && -f "$source" ]] || die "Use an existing absolute backup path."
-  local staged="$source" container_source
-  if [[ "$MODE" == public ]]; then
-    [[ "$source" == "$BACKUP_DIR"/* ]] || die "Backup must be inside $BACKUP_DIR."
-    container_source="/backups/$(basename "$source")"
-  else
-    [[ "$source" == "$BACKUP_DIR"/* ]] || die "Backup must be inside $BACKUP_DIR."
-    container_source="/restore/$(basename "$source")"
-  fi
+  require_root; load_instance
+  local source="${1:-}" result=0
+  [[ -n "$source" ]] || read -r -p "Backup path: " source
+  [[ "$source" = /* && -f "$source" && "$source" == "$DXDY_BACKUP_DIR"/* ]] || die "Use an existing backup inside $DXDY_BACKUP_DIR."
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then chown dx-dy:dx-dy "$source"; fi
   cmd_backup db >/dev/null
-  compose stop app
-  local result=0
+  systemctl stop "$SERVICE"
   if [[ "$source" == *.psmbackup ]]; then
     read_confirmed_secret "full migration backup password"
-    if [[ "$MODE" == public ]]; then
-      printf '%s' "$REPLY" | compose run --rm -T --no-deps --user 0:0 \
-        -v "$CONFIG_DIR:/run/dx-dy" -e INSTANCE_ENV_FILE=/run/dx-dy/runtime.env \
-        -e BACKUP_PASSWORD_STDIN=true app node dist/database.mjs restore "$container_source" || result=$?
-    else
-      printf '%s' "$REPLY" | compose run --rm -T --no-deps --user 0:0 \
-        -v "$DXDY_INSTALL_ROOT:/run/dx-dy" -v "$BACKUP_DIR:/restore:ro" \
-        -e INSTANCE_ENV_FILE=/run/dx-dy/.env \
-        -e BACKUP_PASSWORD_STDIN=true app node dist/database.mjs restore "$container_source" || result=$?
-    fi
+    printf '%s' "$REPLY" | BACKUP_PASSWORD_STDIN=true INSTANCE_ENV_FILE="$ENV_FILE" run_cli_root database.mjs restore "$source" || result=$?
     unset REPLY
-  else
-    if [[ "$MODE" == public ]]; then
-      compose run --rm -T --no-deps app node dist/database.mjs restore "$container_source" || result=$?
-    else
-      compose run --rm -T --no-deps -v "$BACKUP_DIR:/restore:ro" app \
-        node dist/database.mjs restore "$container_source" || result=$?
-    fi
-  fi
-  compose up -d app
-  [[ $result -eq 0 ]] || die "Restore failed; previous database remains available."
-  container_health >/dev/null
-  printf 'Restore completed and health check passed: %s\n' "$staged"
+  else run_cli database.mjs restore "$source" || result=$?; fi
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then chown dx-dy:dx-dy "$DATABASE"; chmod 0600 "$DATABASE" "$ENV_FILE"; fi
+  systemctl start "$SERVICE"
+  [[ $result -eq 0 ]] || die "Restore failed; the pre-restore snapshot remains available."
+  wait_health || die "Restore completed but health check failed."
+  printf 'Restore completed and health check passed: %s\n' "$source"
 }
 
 render_caddy() {
   local admin="$1" subscription="$2" output="$3" template
-  if [[ "$admin" == "$subscription" ]]; then
-    template="$DXDY_INSTALL_ROOT/Caddyfile.single"
-  else
-    template="$DXDY_INSTALL_ROOT/Caddyfile.dual"
-  fi
-  [[ -f "$template" ]] || die "Caddy template missing: $template"
-  sed -e "s/__ADMIN_DOMAIN__/$admin/g" -e "s/__SUBSCRIPTION_DOMAIN__/$subscription/g" \
-    "$template" >"$output"
-  chmod 644 "$output"
+  if [[ "$admin" == "$subscription" ]]; then template="$CURRENT_LINK/Caddyfile.single"; else template="$CURRENT_LINK/Caddyfile.dual"; fi
+  sed -e "s/__ADMIN_DOMAIN__/$admin/g" -e "s/__SUBSCRIPTION_DOMAIN__/$subscription/g" -e "s/__INTERNAL_PORT__/$DXDY_INTERNAL_PORT/g" "$template" >"$output"
 }
-
 set_config_value() {
   local file="$1" key="$2" value="$3" temp
   temp="$(mktemp "${file}.XXXXXX")"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { found=0 }
-    $0 ~ "^" key "=" { print key "=" value; found=1; next }
-    { print }
-    END { if (!found) print key "=" value }
-  ' "$file" >"$temp"
-  chmod --reference="$file" "$temp"
-  mv -f "$temp" "$file"
+  awk -v key="$key" -v value="$value" 'BEGIN{found=0}$0~"^"key"="{print key"="value;found=1;next}{print}END{if(!found)print key"="value}' "$file" >"$temp"
+  chmod --reference="$file" "$temp"; mv -f "$temp" "$file"
 }
 
 cmd_domain() {
-  require_root
-  load_instance
-  [[ "$MODE" == public ]] || die "Legacy installs keep proxy configuration external; domain mutation is unavailable."
-  local action="${1:-menu}" admin="$DXDY_ADMIN_DOMAIN" subscription="$DXDY_SUBSCRIPTION_DOMAIN" candidate
+  require_root; load_instance
+  local action="${1:-menu}" admin="$DXDY_ADMIN_DOMAIN" subscription="$DXDY_SUBSCRIPTION_DOMAIN" temp old
   case "$action" in
-    set-admin) admin="${2:-}" ;;
-    set-subscription) subscription="${2:-}" ;;
-    single) subscription="$admin" ;;
-    dual) subscription="${2:-}" ;;
-    check) cmd_doctor; return ;;
+    set-admin) admin="${2:-}" ;; set-subscription) subscription="${2:-}" ;; single) subscription="$admin" ;; dual) subscription="${2:-}" ;; check) cmd_doctor; return ;;
     menu)
-      printf 'Current Admin: https://%s\nCurrent Subscription: https://%s\n' "$admin" "$subscription"
-      printf '1. Change Admin Domain\n2. Change Subscription Domain\n3. Single-domain mode\n4. Dual-domain mode\n0. Return\n'
-      local choice
-      read -r -p "Choice: " choice
-      case "$choice" in
-        1) read -r -p "Admin hostname: " admin ;;
-        2) read -r -p "Subscription hostname: " subscription ;;
-        3) subscription="$admin" ;;
-        4) read -r -p "Subscription hostname: " subscription ;;
-        0) return ;;
-        *) die "Invalid choice." ;;
-      esac
+      printf 'Current Admin: https://%s\nCurrent Subscription: https://%s\n1. Change Admin Domain\n2. Change Subscription Domain\n3. Single-domain mode\n4. Dual-domain mode\n0. Return\n' "$admin" "$subscription"
+      local choice; read -r -p "Choice: " choice
+      case "$choice" in 1) read -r -p "Admin hostname: " admin ;; 2) read -r -p "Subscription hostname: " subscription ;; 3) subscription="$admin" ;; 4) read -r -p "Subscription hostname: " subscription ;; 0) return ;; *) die "Invalid choice." ;; esac
       ;;
     *) die "Usage: dx-dy domain [set-admin HOST|set-subscription HOST|single|dual HOST|check]" ;;
   esac
-  valid_hostname "$admin" || die "Invalid admin hostname."
-  valid_hostname "$subscription" || die "Invalid subscription hostname."
-  local tempdir old_caddy old_conf old_env
-  tempdir="$(mktemp -d)"; TEMP_DIRS+=("$tempdir")
-  candidate="$tempdir/Caddyfile"
-  render_caddy "$admin" "$subscription" "$candidate"
-  docker run --rm -v "$candidate:/etc/caddy/Caddyfile:ro" "$DXDY_CADDY_IMAGE" \
-    caddy validate --config /etc/caddy/Caddyfile >/dev/null
-  old_caddy="$tempdir/Caddyfile.old"; old_conf="$tempdir/install.conf.old"; old_env="$tempdir/runtime.env.old"
-  cp "$DXDY_CADDYFILE" "$old_caddy"; cp "$CONFIG_FILE" "$old_conf"; cp "$RUNTIME_ENV" "$old_env"
-  cp "$candidate" "$DXDY_CADDYFILE"
-  set_config_value "$CONFIG_FILE" DXDY_ADMIN_DOMAIN "$admin"
-  set_config_value "$CONFIG_FILE" DXDY_SUBSCRIPTION_DOMAIN "$subscription"
-  set_config_value "$RUNTIME_ENV" ADMIN_BASE_URL "https://$admin"
-  set_config_value "$RUNTIME_ENV" SUBSCRIPTION_BASE_URL "https://$subscription"
-  if ! compose up -d app || \
-    ! printf '%s' "https://$subscription" | compose exec -T app node dist/domain-cli.mjs set-subscription || \
-    ! compose up -d caddy || ! compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
-    cp "$old_caddy" "$DXDY_CADDYFILE"; cp "$old_conf" "$CONFIG_FILE"; cp "$old_env" "$RUNTIME_ENV"
-    printf '%s' "https://$DXDY_SUBSCRIPTION_DOMAIN" | compose exec -T app node dist/domain-cli.mjs set-subscription || true
-    compose up -d app caddy || true
+  if ! valid_hostname "$admin" || ! valid_hostname "$subscription"; then die "Invalid hostname."; fi
+  temp="$(mktemp -d)"; TEMP_DIRS+=("$temp"); render_caddy "$admin" "$subscription" "$temp/candidate"; old="$temp/old"; cp "$CADDY_IMPORT" "$old"
+  caddy validate --config "$temp/candidate" --adapter caddyfile >/dev/null
+  install -m 0644 "$temp/candidate" "$CADDY_IMPORT"
+  set_config_value "$CONFIG_FILE" DXDY_ADMIN_DOMAIN "$admin"; set_config_value "$CONFIG_FILE" DXDY_SUBSCRIPTION_DOMAIN "$subscription"
+  set_config_value "$ENV_FILE" ADMIN_BASE_URL "https://$admin"; set_config_value "$ENV_FILE" SUBSCRIPTION_BASE_URL "https://$subscription"
+  if ! printf '%s' "https://$subscription" | run_cli domain-cli.mjs set-subscription || ! systemctl restart "$SERVICE" || ! systemctl reload caddy.service || ! wait_health; then
+    cp "$old" "$CADDY_IMPORT"; set_config_value "$CONFIG_FILE" DXDY_ADMIN_DOMAIN "$DXDY_ADMIN_DOMAIN"; set_config_value "$CONFIG_FILE" DXDY_SUBSCRIPTION_DOMAIN "$DXDY_SUBSCRIPTION_DOMAIN"
+    set_config_value "$ENV_FILE" ADMIN_BASE_URL "https://$DXDY_ADMIN_DOMAIN"; set_config_value "$ENV_FILE" SUBSCRIPTION_BASE_URL "https://$DXDY_SUBSCRIPTION_DOMAIN"
+    printf '%s' "https://$DXDY_SUBSCRIPTION_DOMAIN" | run_cli domain-cli.mjs set-subscription || true; systemctl restart "$SERVICE" || true; systemctl reload caddy.service || true
     die "Domain change failed; previous configuration restored."
   fi
   printf 'Domains updated. Admin: https://%s Subscription: https://%s\n' "$admin" "$subscription"
@@ -323,156 +191,95 @@ cmd_domain() {
 check_line() { printf '%-5s %s\n' "$1" "$2"; }
 cmd_doctor() {
   load_instance
-  if have docker && docker info >/dev/null 2>&1; then check_line PASS "Docker daemon"; else check_line FAIL "Docker daemon"; fi
-  if [[ "$COMPOSE_KIND" == v1 || "$COMPOSE_KIND" == v2 ]]; then check_line PASS "Docker Compose $COMPOSE_KIND"; else check_line FAIL "Docker Compose"; fi
-  if compose ps app >/dev/null 2>&1; then check_line PASS "App service known"; else check_line FAIL "App service"; fi
-  if container_health >/dev/null 2>&1; then check_line PASS "Application health"; else check_line FAIL "Application health"; fi
-  if compose exec -T app node --input-type=module -e \
-    'import{DatabaseSync}from"node:sqlite";const d=new DatabaseSync(process.env.DATABASE_PATH,{readOnly:true});if(d.prepare("PRAGMA integrity_check").get().integrity_check!=="ok"||d.prepare("PRAGMA foreign_key_check").all().length)process.exit(1)' >/dev/null 2>&1
-  then check_line PASS "Database integrity and foreign keys"; else check_line FAIL "Database integrity and foreign keys"; fi
-  if [[ -d "$BACKUP_DIR" && -w "$BACKUP_DIR" ]]; then check_line PASS "Backup directory"; else check_line WARN "Backup directory"; fi
-  local free_kb
-  free_kb="$(df -Pk "$DXDY_INSTALL_ROOT" | awk 'NR==2{print $4}')"
-  if [[ ${free_kb:-0} -ge 1048576 ]]; then check_line PASS "Disk space"; else check_line WARN "Less than 1 GiB free"; fi
-  if [[ "$MODE" == public ]]; then
-    for host in "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN"; do
-      if getent ahosts "$host" >/dev/null 2>&1; then check_line PASS "DNS $host"; else check_line WARN "DNS $host unresolved"; fi
-    done
-    if curl -fsSI --max-time 10 "https://$DXDY_ADMIN_DOMAIN/health" >/dev/null 2>&1; then
-      check_line PASS "TLS/HTTPS"
-    else check_line WARN "TLS/HTTPS pending or unreachable"; fi
-  else
-    check_line WARN "TLS and DNS managed by legacy external proxy"
-  fi
+  if [[ -d /run/systemd/system || "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then check_line PASS "systemd"; else check_line FAIL "systemd"; fi
+  if [[ "$(service_state "$SERVICE")" == active ]]; then check_line PASS "$SERVICE active"; else check_line FAIL "$SERVICE inactive"; fi
+  if [[ "$(service_state caddy.service)" == active ]]; then check_line PASS "Caddy active"; else check_line WARN "Caddy inactive"; fi
+  if health >/dev/null 2>&1; then check_line PASS "Application health"; else check_line FAIL "Application health"; fi
+  if run_cli database.mjs check >/dev/null 2>&1; then check_line PASS "Database integrity and foreign keys"; else check_line FAIL "Database integrity and foreign keys"; fi
+  if [[ -L "$CURRENT_LINK" && -f "$CURRENT_LINK/RELEASE.json" ]]; then check_line PASS "Current release symlink and manifest"; else check_line FAIL "Current release layout"; fi
+  if [[ "$(stat -c %a "$ENV_FILE")" == 600 ]]; then check_line PASS "Secret environment permissions"; else check_line FAIL "Secret environment permissions"; fi
+  if ss -H -ltn "sport = :$DXDY_INTERNAL_PORT" 2>/dev/null | grep -q '127.0.0.1'; then check_line PASS "Local-only application listener"; else check_line WARN "Local listener not observed"; fi
+  local host; for host in "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN"; do if getent ahosts "$host" >/dev/null 2>&1; then check_line PASS "DNS $host"; else check_line WARN "DNS $host unresolved"; fi; done
+  if curl -fsSI --max-time 10 "https://$DXDY_ADMIN_DOMAIN/health" >/dev/null 2>&1; then check_line PASS "TLS/HTTPS"; else check_line WARN "TLS/HTTPS pending or unreachable"; fi
+  df -Pk "$DXDY_INSTALL_ROOT" | awk 'NR==2{if($4>=1048576)print "PASS  Disk space";else print "WARN  Less than 1 GiB free"}'
 }
 
 cmd_logs() {
   load_instance
-  local service="${1:-all}" lines="${2:-200}"
+  local service="${1:-app}" lines="${2:-200}" follow=()
   [[ "$lines" =~ ^[1-9][0-9]{0,4}$ ]] || die "Line count must be 1-99999."
-  case "$service" in
-    app|caddy) compose logs --tail "$lines" "$service" ;;
-    all) compose logs --tail "$lines" ;;
-    follow) compose logs --tail "$lines" --follow ;;
-    *) die "Usage: dx-dy logs [app|caddy|all|follow] [lines]" ;;
-  esac
+  [[ "$service" == follow ]] && { service=app; follow=(-f); }
+  case "$service" in app) journalctl -u "$SERVICE" -n "$lines" "${follow[@]}" ;; caddy) journalctl -u caddy.service -n "$lines" "${follow[@]}" ;; all) journalctl -u "$SERVICE" -u caddy.service -n "$lines" ;; *) die "Usage: dx-dy logs [app|caddy|all|follow] [lines]" ;; esac
 }
 
 version_lt() { [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" != "$2" ]]; }
 fetch_update_asset() {
   local url="$1" name="$2" target="$3"
-  if [[ -n "${DXDY_UPDATE_MOCK_DIR:-}" ]]; then
-    [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$DXDY_UPDATE_MOCK_DIR" == /tmp/dxdy-ops-test-* ]] ||
-      die "Unsafe update mock directory."
-    cp "$DXDY_UPDATE_MOCK_DIR/$name" "$target"
-  else
-    if [[ "$name" == release.json ]]; then
-      curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$target"
-    else
-      curl -fsSL --proto '=https' --tlsv1.2 "$url/$name" -o "$target"
-    fi
-  fi
+  if [[ -n "${DXDY_UPDATE_MOCK_DIR:-}" ]]; then [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$DXDY_UPDATE_MOCK_DIR" == /tmp/dxdy-ops-test-* ]] || die "Unsafe update mock directory."; cp "$DXDY_UPDATE_MOCK_DIR/$name" "$target"
+  else curl -fsSL --proto '=https' --tlsv1.2 "$url/$name" -o "$target"; fi
 }
 
-verify_manifest_asset() {
-  local manifest="$1" field="$2" file="$3" expected actual
-  expected="$(jq -er ".$field" "$manifest")"
-  actual="$(sha256sum "$file" | cut -d' ' -f1)"
-  [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] ||
-    die "Release asset checksum failed: $(basename "$file")"
+prune_releases() {
+  local current previous dir
+  current="$(readlink -f "$CURRENT_LINK")"; previous="${DXDY_PREVIOUS_RELEASE:-}"
+  while IFS= read -r dir; do [[ "$dir" == "$current" || "$dir" == "$previous" ]] || rm -rf -- "$dir"; done < <(find "$DXDY_INSTALL_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr | awk 'NR>3{sub(/^[^ ]+ /,"");print}')
 }
 
 cmd_update() {
-  require_root
-  load_instance
-  [[ "$MODE" == public ]] || die "Automated updates require a public-mode installation."
-  [[ -n "${DXDY_REPOSITORY:-}" && "$DXDY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || \
-    die "GitHub repository coordinate is not configured yet."
-  local api="https://api.github.com/repos/$DXDY_REPOSITORY/releases/latest" latest base temp image
+  require_root; load_instance
+  [[ "$DXDY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Invalid repository coordinate."
+  local temp api latest base artifact expected actual old_release new_release backup result=0
   temp="$(mktemp -d)"; TEMP_DIRS+=("$temp")
-  fetch_update_asset "$api" release.json "$temp/release.json"
-  latest="$(jq -er '.tag_name | sub("^v"; "")' "$temp/release.json")"
-  [[ "$latest" =~ ^[0-9]+\.[0-9]\.[0-9]$ ]] || die "Invalid latest release version."
-  printf 'Current: %s\nLatest: %s\n' "$DXDY_VERSION" "$latest"
-  version_lt "$DXDY_VERSION" "$latest" || { printf 'Already current.\n'; return; }
-  read -r -p "Update now? [y/N] " confirm
-  [[ "$confirm" =~ ^[Yy]$ ]] || return
-  base="https://github.com/$DXDY_REPOSITORY/releases/download/v$latest"
-  fetch_update_asset "$base" release-manifest.json "$temp/manifest.json"
-  jq -e --arg version "$latest" '.version == $version and (.docker_image | startswith("ghcr.io/")) and (.docker_image_digest | test("^sha256:[a-f0-9]{64}$"))' "$temp/manifest.json" >/dev/null || die "Release manifest validation failed."
-  image="$(jq -er '.docker_image + "@" + .docker_image_digest' "$temp/manifest.json")"
-  local name field
-  while read -r name field; do
-    fetch_update_asset "$base" "$name" "$temp/$name"
-    verify_manifest_asset "$temp/manifest.json" "$field" "$temp/$name"
-  done <<'EOF'
-dx-dy manager_sha256
-docker-compose.yml compose_sha256
-Caddyfile.single caddy_single_sha256
-Caddyfile.dual caddy_dual_sha256
-EOF
-  docker compose --project-name "$DXDY_COMPOSE_PROJECT" --env-file "$CONFIG_FILE" \
-    -f "$temp/docker-compose.yml" config --quiet
-  cmd_backup db >/dev/null
-  local old_image="$DXDY_IMAGE_REFERENCE" old_version="$DXDY_VERSION" rollback="$temp/rollback"
-  mkdir "$rollback"
-  cp "$COMPOSE_FILE" "$rollback/docker-compose.yml"
-  cp "$DXDY_INSTALL_ROOT/Caddyfile.single" "$rollback/Caddyfile.single"
-  cp "$DXDY_INSTALL_ROOT/Caddyfile.dual" "$rollback/Caddyfile.dual"
-  install -m 0644 "$temp/docker-compose.yml" "$COMPOSE_FILE"
-  install -m 0644 "$temp/Caddyfile.single" "$DXDY_INSTALL_ROOT/Caddyfile.single"
-  install -m 0644 "$temp/Caddyfile.dual" "$DXDY_INSTALL_ROOT/Caddyfile.dual"
-  set_config_value "$CONFIG_FILE" DXDY_IMAGE_REFERENCE "$image"
-  set_config_value "$CONFIG_FILE" DXDY_VERSION "$latest"
-  if ! compose pull app || ! compose up -d app || ! container_health >/dev/null; then
-    cp "$rollback/docker-compose.yml" "$COMPOSE_FILE"
-    cp "$rollback/Caddyfile.single" "$DXDY_INSTALL_ROOT/Caddyfile.single"
-    cp "$rollback/Caddyfile.dual" "$DXDY_INSTALL_ROOT/Caddyfile.dual"
-    set_config_value "$CONFIG_FILE" DXDY_IMAGE_REFERENCE "$old_image"
-    set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"
-    compose up -d app || true
-    die "Update failed; previous image configuration restored."
+  api="https://api.github.com/repos/$DXDY_REPOSITORY/releases/latest"
+  if [[ -n "${DXDY_UPDATE_MOCK_DIR:-}" ]]; then cp "$DXDY_UPDATE_MOCK_DIR/release.json" "$temp/release.json"; else curl -fsSL --proto '=https' --tlsv1.2 "$api" -o "$temp/release.json"; fi
+  latest="$(jq -er '.tag_name|sub("^v";"")' "$temp/release.json")"; [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Invalid latest version."
+  printf 'Current: %s\nLatest: %s\n' "$DXDY_VERSION" "$latest"; version_lt "$DXDY_VERSION" "$latest" || { printf 'Already current.\n'; return; }
+  [[ "${DXDY_UPDATE_YES:-0}" == 1 ]] || { local confirm; read -r -p "Update now? [y/N] " confirm; [[ "$confirm" =~ ^[Yy]$ ]] || return; }
+  base="https://github.com/$DXDY_REPOSITORY/releases/download/v$latest"; fetch_update_asset "$base" release-manifest.json "$temp/manifest.json"
+  jq -e --arg v "$latest" --arg a "$DXDY_ARCH" '.version==$v and .release_model=="native-systemd" and (.architectures|index($a))' "$temp/manifest.json" >/dev/null || die "Release manifest validation failed."
+  artifact="dx-dy-$latest-linux-$DXDY_ARCH.tar.gz"; fetch_update_asset "$base" "$artifact" "$temp/$artifact"
+  expected="$(jq -er --arg n "$artifact" '.artifacts[]|select(.name==$n)|.sha256' "$temp/manifest.json")"; actual="$(sha256sum "$temp/$artifact"|cut -d' ' -f1)"; [[ "$expected" == "$actual" ]] || die "Artifact checksum failed."
+  fetch_update_asset "$base" dx-dy "$temp/dx-dy"; expected="$(jq -er '.manager_sha256' "$temp/manifest.json")"; actual="$(sha256sum "$temp/dx-dy"|cut -d' ' -f1)"; [[ "$expected" == "$actual" ]] || die "Manager checksum failed."
+  backup="$(backup_target db)"; run_cli database.mjs backup "$backup" >/dev/null
+  old_release="$(readlink -f "$CURRENT_LINK")"; new_release="$DXDY_INSTALL_ROOT/releases/$latest"; rm -rf -- "$new_release"; mkdir -p "$temp/extract"; tar -xzf "$temp/$artifact" -C "$temp/extract"; cp -a "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH" "$new_release"
+  chown -R root:root "$new_release" 2>/dev/null || true; chmod -R a-w "$new_release" 2>/dev/null || true
+  systemctl stop "$SERVICE"; ln -sfn "releases/$latest" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
+  set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_release"; set_config_value "$CONFIG_FILE" DXDY_VERSION "$latest"
+  install -m 0644 "$new_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload; systemctl start "$SERVICE" || result=$?
+  [[ $result -eq 0 ]] && wait_health || result=1
+  if [[ $result -ne 0 ]]; then
+    systemctl stop "$SERVICE" || true; ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
+    set_config_value "$CONFIG_FILE" DXDY_VERSION "$DXDY_VERSION"; run_cli database.mjs restore "$backup" || true; systemctl start "$SERVICE" || true
+    wait_health && printf 'ROLLBACK: PASS\n' || printf 'ROLLBACK: FAIL\n' >&2
+    die "Update failed; previous release and database were restored."
   fi
-  install -m 0755 "$temp/dx-dy" "$MANAGER_PATH.next"
-  mv -f "$MANAGER_PATH.next" "$MANAGER_PATH"
-  printf 'Updated to dx-dy %s.\n' "$latest"
+  install -m 0755 "$temp/dx-dy" "$MANAGER_PATH.next"; mv -f "$MANAGER_PATH.next" "$MANAGER_PATH"; prune_releases
+  printf 'Updated to dx-dy %s.\nROLLBACK: NOT REQUIRED\n' "$latest"
+}
+
+cmd_cleanup_legacy() {
+  require_root; load_instance
+  [[ -n "${DXDY_LEGACY_ROOT:-}" ]] || die "No retained legacy installation is recorded."
+  printf 'This removes only the retained dx-dy Docker stack. Type CLEANUP to continue: '
+  local answer; read -r answer; [[ "$answer" == CLEANUP ]] || die "Confirmation did not match."
+  [[ -f "$DXDY_LEGACY_ROOT/docker-compose.yml" ]] || die "Legacy Compose file not found."
+  docker compose -f "$DXDY_LEGACY_ROOT/docker-compose.yml" down
+  printf 'Legacy containers stopped and removed. Docker Engine and images were preserved.\n'
 }
 
 safe_remove_tree() {
   local target="$1"
-  [[ "$target" == /opt/dx-dy || "$target" == /etc/dx-dy || "$target" == /var/lib/dx-dy || "$target" == /var/backups/dx-dy || \
-    ( "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$target" == /tmp/dxdy-ops-test-* ) ]] || \
-    die "Refusing unexpected removal path: $target"
+  [[ "$target" == /opt/dx-dy || "$target" == /etc/dx-dy || "$target" == /var/lib/dx-dy || "$target" == /var/backups/dx-dy || ( "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$target" == /tmp/dxdy-ops-test-* ) ]] || die "Refusing unexpected removal path: $target"
   rm -rf -- "$target"
 }
-
 cmd_uninstall() {
-  require_root
-  load_instance
-  [[ "$MODE" == public ]] || die "Legacy uninstall is intentionally manual."
-  printf '1. Uninstall program, preserve database and backups\n2. Full uninstall and delete all data\n0. Cancel\n'
-  local choice confirmation
-  read -r -p "Choice: " choice
+  require_root; load_instance
+  printf '1. Uninstall program; preserve config, database and backups\n2. Full purge\n0. Cancel\n'
+  local choice confirmation; read -r -p "Choice: " choice
   case "$choice" in
-    1)
-      compose down
-      safe_remove_tree "$DXDY_INSTALL_ROOT"
-      safe_remove_tree "$CONFIG_DIR"
-      rm -f -- "$MANAGER_PATH"
-      printf 'Program removed; data and backups preserved.\n'
-      ;;
-    2)
-      printf 'Will delete: %s %s %s %s containers and manager.\n' "$DXDY_INSTALL_ROOT" "$CONFIG_DIR" "$DXDY_DATA_DIR" "$DXDY_BACKUP_DIR"
-      read -r -p 'Type DELETE to continue: ' confirmation
-      [[ "$confirmation" == DELETE ]] || die "Confirmation did not match."
-      compose down --remove-orphans
-      safe_remove_tree "$DXDY_INSTALL_ROOT"; safe_remove_tree "$CONFIG_DIR"
-      safe_remove_tree "$DXDY_DATA_DIR"; safe_remove_tree "$DXDY_BACKUP_DIR"
-      rm -f -- "$MANAGER_PATH"
-      printf 'dx-dy and all instance data removed.\n'
-      ;;
-    0) return ;;
-    *) die "Invalid choice." ;;
+    1) systemctl disable --now "$SERVICE" || true; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'Program removed; config, database and backups preserved. Caddy was not uninstalled.\n' ;;
+    2) read -r -p 'Type DELETE to continue: ' confirmation; [[ "$confirmation" == DELETE ]] || die "Confirmation did not match."; systemctl disable --now "$SERVICE" || true; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; safe_remove_tree "$CONFIG_DIR"; safe_remove_tree "$DXDY_DATA_DIR"; safe_remove_tree "$DXDY_BACKUP_DIR"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'dx-dy and all instance data removed. Caddy was not uninstalled.\n' ;;
+    0) return ;; *) die "Invalid choice." ;;
   esac
 }
 
@@ -486,41 +293,18 @@ Usage: dx-dy [command]
   domain [set-admin HOST|set-subscription HOST|single|dual HOST|check]
   backup <db|full> | migrate | restore [ABSOLUTE_PATH]
   logs [app|caddy|all|follow] [lines]
-  doctor | version | uninstall | --help
+  doctor | cleanup-legacy | version | uninstall | --help
 EOF
 }
-
 menu() {
   while true; do
-    printf '\n────────────────────────────────────────\ndx-dy\nPrivate Node & Subscription Manager\nVersion: %s\n────────────────────────────────────────\n' "$DXDY_MANAGER_VERSION"
-    printf '1. Status\n2. Start\n3. Stop\n4. Restart\n5. Update\n6. Reset admin password\n7. Change admin username\n8. Domain management\n9. Doctor\n10. Database backup\n11. Full migration backup\n12. Restore\n13. Logs\n14. Uninstall\n0. Exit\n'
-    local choice
-    read -r -p "Choice: " choice
-    case "$choice" in
-      1) cmd_status ;; 2) cmd_start ;; 3) cmd_stop ;; 4) cmd_restart ;; 5) cmd_update ;;
-      6) cmd_admin reset-password ;; 7) cmd_admin change-username ;; 8) cmd_domain menu ;;
-      9) cmd_doctor ;; 10) cmd_backup db ;; 11) cmd_backup full ;; 12) cmd_restore ;;
-      13) cmd_logs all 200 ;; 14) cmd_uninstall; return ;; 0) return ;; *) warn "Invalid choice." ;;
-    esac
+    printf '\ndx-dy %s - Native systemd management\n1. Status\n2. Start\n3. Stop application\n4. Restart\n5. Update\n6. Reset admin password\n7. Change admin username\n8. Domain management\n9. Doctor\n10. Database backup\n11. Full migration backup\n12. Restore\n13. Logs\n14. Uninstall\n0. Exit\n' "$DXDY_MANAGER_VERSION"
+    local choice; read -r -p "Choice: " choice
+    case "$choice" in 1) cmd_status ;; 2) require_root; cmd_start ;; 3) require_root; cmd_stop ;; 4) require_root; cmd_restart ;; 5) cmd_update ;; 6) require_root; cmd_admin reset-password ;; 7) require_root; cmd_admin change-username ;; 8) cmd_domain menu ;; 9) cmd_doctor ;; 10) require_root; cmd_backup db ;; 11) require_root; cmd_backup full ;; 12) cmd_restore ;; 13) cmd_logs app 200 ;; 14) cmd_uninstall; return ;; 0) return ;; *) warn "Invalid choice." ;; esac
   done
 }
 
 case "${1:-}" in
-  "") menu ;;
-  status) cmd_status ;;
-  start) require_root; cmd_start ;;
-  stop) require_root; cmd_stop ;;
-  restart) require_root; cmd_restart ;;
-  update) cmd_update ;;
-  admin) require_root; shift; cmd_admin "$@" ;;
-  domain) shift; cmd_domain "$@" ;;
-  backup) require_root; shift; cmd_backup "$@" ;;
-  migrate) require_root; cmd_backup full ;;
-  restore) shift; cmd_restore "$@" ;;
-  logs) shift; cmd_logs "$@" ;;
-  doctor) cmd_doctor ;;
-  version) printf 'dx-dy %s\n' "$DXDY_MANAGER_VERSION" ;;
-  uninstall) cmd_uninstall ;;
-  -h|--help|help) show_help ;;
-  *) die "Unknown command. Run dx-dy --help." ;;
+  "") menu ;; status) cmd_status ;; start) require_root; cmd_start ;; stop) require_root; cmd_stop ;; restart) require_root; cmd_restart ;; update) cmd_update ;;
+  admin) require_root; shift; cmd_admin "$@" ;; domain) shift; cmd_domain "$@" ;; backup) require_root; shift; cmd_backup "$@" ;; migrate) require_root; cmd_backup full ;; restore) shift; cmd_restore "$@" ;; logs) shift; cmd_logs "$@" ;; doctor) cmd_doctor ;; cleanup-legacy) cmd_cleanup_legacy ;; version) printf 'dx-dy %s\n' "$DXDY_MANAGER_VERSION" ;; uninstall) cmd_uninstall ;; -h|--help|help) show_help ;; *) die "Unknown command. Run dx-dy --help." ;;
 esac

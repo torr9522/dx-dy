@@ -2,9 +2,10 @@
 
 ## Storage Model
 
-The container database path is `/data/private-subscription-manager.db`. Fresh
-installs bind persistent data from `/var/lib/dx-dy`; legacy layouts remain
-manager-compatible. SQLite enables foreign keys, WAL and a busy timeout in
+The native database path is `/var/lib/dx-dy/dx-dy.db`, supplied through
+`DATABASE_PATH`. Historical 0.1.8 containers used
+`/data/private-subscription-manager.db`; migration preserves its schema and
+content. SQLite enables foreign keys, WAL and a busy timeout in
 [`db.ts`](../apps/api/src/db.ts).
 
 ## Released Schemas
@@ -14,7 +15,7 @@ manager-compatible. SQLite enables foreign keys, WAL and a busy timeout in
 - [`002_node_collections.sql`](../migrations/002_node_collections.sql): ordered
   Collections and many-to-many members.
 
-There is no migration after `002` in 0.1.8. Released migration files are
+There is no migration after `002` in 0.1.9. Released migration files are
 immutable.
 
 ## Forward Migration Safety
@@ -38,7 +39,7 @@ pnpm migration:export -- /absolute/path/backup.psmbackup
 ```
 
 Normal operators should use `dx-dy backup db`, `dx-dy backup full` and
-`dx-dy restore`, which coordinate Compose and health checks.
+`dx-dy restore`, which coordinate systemd and health checks.
 
 ## Backup Rules
 

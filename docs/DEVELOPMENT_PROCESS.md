@@ -9,7 +9,7 @@ Requirement and scope
   -> implement in the existing ownership layer
   -> unit/integration/frontend tests
   -> Playwright for runtime/UI behavior
-  -> optimized build and Docker validation
+  -> optimized build and native artifact validation
   -> isolated staging validation
   -> full/public release gate
   -> annotated direct tag
@@ -47,7 +47,7 @@ test the previous release upgrade, failed rollback and newer-schema rejection.
 Run focused tests during implementation, then the complete commands in
 [Testing and Release](TESTING_AND_RELEASE.md). Stage intended sources, run
 `pnpm source:manifest`, review the diff and commit a coherent change. The release
-gate runs only on a clean committed tree so its source archive and Docker image
+gate runs only on a clean committed tree so its source archive and native artifacts
 can be tied to one commit.
 
 ## Publication
@@ -55,7 +55,7 @@ can be tied to one commit.
 Verify the single intended remote, branch and tag list. Create an annotated,
 unsigned `vX.Y.Z` only after gates and staging validation. Scan refs again, push
 the current branch, wait for CI, then push approved tags. The tag workflow builds
-GHCR images and Release assets; it never deploys the staging server.
+architecture-specific Release assets; it never deploys the staging server.
 
 Once a version is public, a source fix belongs to the next version. Never move a
 public tag or force-push normal development history.

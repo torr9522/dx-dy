@@ -49,12 +49,15 @@ credentials.
 - SQLite with immutable released migrations
   [`001_initial.sql`](migrations/001_initial.sql) and
   [`002_node_collections.sql`](migrations/002_node_collections.sql). There is no
-  migration after `002` at the 0.1.8 baseline.
+  migration after `002` at the 0.1.9 baseline.
 - Backend: Node.js/TypeScript, Express, Zod and `node:sqlite`.
 - Frontend: React/TypeScript and Vite.
-- Deployment: Docker Compose, a non-root application container and Caddy.
+- Deployment: architecture-specific native artifact, bundled Node 26.10.0,
+  `dx-dy.service`, host Caddy and SQLite. The app runs as the unprivileged
+  `dx-dy` user and listens only on localhost.
 - Privileged infrastructure actions belong in the root-owned `dx-dy` manager.
-  Never mount the Docker socket into the web application or make it privileged.
+  The Web process never controls systemd/Caddy or receives host root privilege.
+  Docker is a deprecated 0.1.8 migration source, not a current runtime.
 
 ## Version Rule
 
@@ -63,8 +66,8 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The next code-change version is `0.1.9` only after `v0.1.8` is released and a
-new change is authorized. Never move an existing public tag.
+The current development/release version is `0.1.9`. After `v0.1.9` is public,
+the next real source change is `0.2.0`. Never move an existing public tag.
 
 ## Git Safety And Privacy
 
@@ -96,8 +99,8 @@ pnpm release:check --full --public
 ```
 
 Runtime/UI changes require Playwright. Release candidates require ShellCheck,
-Docker no-cache and isolated runtime checks, database backup/restore tests,
-source verification, Gitleaks and known-identity scanning. Details are in
+amd64/arm64 native artifact and bundled-runtime checks, database backup/restore
+tests, source verification, Gitleaks and known-identity scanning. Details are in
 [docs/TESTING_AND_RELEASE.md](docs/TESTING_AND_RELEASE.md).
 
 ## Change Discipline
