@@ -1,0 +1,83 @@
+# Private Subscription Manager 0.1.0
+
+单管理员的私人节点资产库、多订阅 Profile 与订阅分发系统。**不是机场**：无普通用户、注册、套餐、支付、订单、流量计费或运营模块。
+
+## 功能
+
+- 六协议 URI 粘贴、批量逐行预览、失败/警告/重复提示、事务导入。
+- 全局节点库与 Profile 多对多，pivot 排序；共享节点编辑自动同步。
+- 结构化 Drawer、高级 JSON、重新导入差异确认、恢复原始参数。
+- original_uri / normalized_config / ordered raw sidecar 分离。
+- 随机 Token、SHA-256 lookup、AES-256-GCM 密文保存、轮换/禁用/删除。
+- Raw、V2Ray Base64、Shadowrocket 原生 producer/无损 URI 兼容路径。
+- 中文后台，搜索/筛选、拖拽排序、QR、Light/Dark/System、密码修改。
+
+## 协议与客户端
+
+VLESS (TLS/Reality/Vision/TCP/WS/gRPC/HTTPUpgrade/XHTTP)、VMess legacy JSON、Trojan、SS SIP002、Hysteria2、TUIC v5。固定 Sub-Store 源码提供 parser/producer。未知 query 保存原始编码与重复项；已知字段以当前结构化值为准。
+
+目标客户端 Shadowrocket、v2rayN、v2rayNG。服务器格式与 round-trip 验证不能替代设备级验收。Shadowrocket YAML 不表示任意完整规则配置；含 SpiderX、未知字段、XHTTP 时显式回退 URI/Base64。没有 Clash rules、策略组、DNS 模板。v0.1 不安装 Xray Core。
+
+## 技术栈
+
+Node 26.10.0、TypeScript strict、Express、React、Tailwind、Radix、SQLite (WAL/foreign_keys)、Sub-Store adapter。Node 标准库负责随机数、AES-GCM、Base64 和 SQLite；Argon2id 保存管理员密码。
+
+## 本地开发
+
+```sh
+pnpm install --frozen-lockfile
+pnpm adapter:build
+export APP_MASTER_KEY=$(openssl rand -hex 32)
+export ADMIN_INITIAL_PASSWORD=$(openssl rand -base64 24)
+export PUBLIC_BASE_URL=http://localhost:3000
+pnpm dev
+# Another terminal:
+pnpm dev:web
+```
+
+使用 Vite 的开发反代时，PUBLIC_BASE_URL 设成浏览器实际访问 origin（例如 http://localhost:5173）。管理员用户名默认 admin。初始化密码只在数据库为空时使用，必须至少20字符。已有数据库启动不需要初始密码。
+
+```sh
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+```
+
+E2E 使用隔离的本地测试数据库与虚构凭据，需要 Playwright Chromium。node_modules、数据库、环境、测试输出都忽略。
+
+## Docker Compose
+
+把 `.env.example` 复制到 `.env`，生成 APP_MASTER_KEY（32 bytes hex）和20+字符随机初始密码，填入 HTTPS public URL。`.env` 权限600，不提交。
+
+```sh
+docker compose build
+docker compose up -d
+```
+
+Debian 的 legacy Compose 可使用 `docker-compose`。应用端口只发布到127.0.0.1:3000，容器非root、只读根文件系统，数据库持久化到app-data volume。`GET /health` 返回状态与版本。
+
+使用 `docker/Caddyfile` 配置 Caddy，开放80/443，域名解析正确后自动取得可信证书。没有 access log，并排除可能包含敏感 URL 的代理错误日志。不要开启记录 /s/ 原始 URI 的外部 CDN/WAF/代理日志。管理员初始化凭据保存在 root-only 配置，首次登录后修改密码。
+
+## 数据、备份、升级
+
+迁移位于 migrations，schema_migrations记录版本；每个migration在事务内执行，失败不启动。已有nodes表时在迁移前执行 SQLite backup。
+
+容器中：
+
+```sh
+docker compose exec app node dist/backup.mjs /data/backups/manual.sqlite
+```
+
+使用SQLite backup API，不直接复制运行中的WAL数据库。备份同时保护APP_MASTER_KEY：丢失key后数据库Token无法解密复制（可重新轮换）；旧Token哈希lookup仍需要原数据。不要删除volume。升级前备份、保留.env和volume，build并up后验证health和真实订阅。
+
+## 安全
+
+服务器端opaque session，HttpOnly/Secure/SameSite Strict cookie；CSRF、同源、登录/订阅限流、Helmet/CSP、no-referrer、no-store。密码修改撤销所有会话。Token轮换撤销旧URL，但不能撤销客户端已经持有的节点凭据。
+
+未知参数会保留，但客户端可能不认识它们；已知重复query输出由normalized值控制并给出warning。不要公开数据库、管理输出预览、订阅链接和QR。v0.1不抓取远程订阅，避免SSRF。管理列表会向已认证管理员返回节点凭据，不向公网提供。
+
+## License / 对应源码
+
+本项目 AGPL-3.0-only。见 LICENSE 与 THIRD_PARTY_NOTICES.md。网络用户可在 `/source.tar.gz` 获取实际构建所用对应源码（排除secret、数据库与用户节点）。许可证和Sub-Store固定来源必须保留。

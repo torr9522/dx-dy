@@ -1,0 +1,1975 @@
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import * as Dialog from "@radix-ui/react-dialog";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  LayoutDashboard,
+  Network,
+  Layers,
+  Settings,
+  Plus,
+  Search,
+  Sun,
+  Moon,
+  LogOut,
+  ArrowRight,
+  ShieldCheck,
+  Copy,
+  GripVertical,
+  X,
+  Check,
+  ChevronUp,
+  ChevronDown,
+  ExternalLink,
+} from "lucide-react";
+import QRCode from "qrcode";
+import type {
+  NodeRecord,
+  Profile,
+  NormalizedNode,
+  Envelope,
+} from "../../../packages/shared/schema";
+import { api, setCsrf } from "./api";
+import { getField, setField, nodeMatches } from "./fields";
+import "./style.css";
+type SettingsData = {
+  site_name: string;
+  public_base_url: string;
+  default_format: string;
+};
+type Preview = {
+  index: number;
+  status: string;
+  envelope: Envelope | null;
+  duplicate: boolean;
+  error: string | null;
+};
+const protocols = ["vless", "vmess", "trojan", "ss", "hysteria2", "tuic"];
+const date = (s: string) => new Date(s).toLocaleString();
+const labelProtocol = (s: string) =>
+  s === "ss"
+    ? "Shadowsocks"
+    : s === "hysteria2"
+      ? "Hysteria2"
+      : s.toUpperCase();
+const security = (n: NormalizedNode) =>
+  n["reality-opts"] ? "Reality" : n.tls ? "TLS" : "无 TLS";
+function Field({
+  label,
+  children,
+}: React.PropsWithChildren<{ label: string }>) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  drawer = false,
+  children,
+}: React.PropsWithChildren<{
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description?: string;
+  drawer?: boolean;
+}>) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="overlay" />
+        <Dialog.Content className={drawer ? "modal drawer" : "modal"}>
+          <div className="modal-head">
+            <div>
+              <Dialog.Title>{title}</Dialog.Title>
+              <Dialog.Description>
+                {description || "更改将在确认后保存。"}
+              </Dialog.Description>
+            </div>
+            <Dialog.Close className="icon-button" aria-label="关闭">
+              <X size={18} />
+            </Dialog.Close>
+          </div>
+          <div className="modal-body">{children}</div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+function Empty({ text }: { text: string }) {
+  return (
+    <div className="empty">
+      <Network size={34} />
+      <h3>{text}</h3>
+      <p>从一条节点分享链接开始，建立自己的订阅。</p>
+    </div>
+  );
+}
+function App() {
+  const [user, setUser] = useState<string | null>(null),
+    [boot, setBoot] = useState(true),
+    [page, setPage] = useState("dashboard");
+  const [nodes, setNodes] = useState<NodeRecord[]>([]),
+    [profiles, setProfiles] = useState<Profile[]>([]),
+    [settings, setSettings] = useState<SettingsData>({
+      site_name: "私人节点库",
+      public_base_url: "",
+      default_format: "v2ray",
+    });
+  const [toast, setToast] = useState(""),
+    [pending, setPending] = useState(false),
+    [theme, setTheme] = useState(localStorage.getItem("psm-theme") || "system");
+  const [importOpen, setImportOpen] = useState(false),
+    [editing, setEditing] = useState<NodeRecord | null>(null),
+    [profile, setProfile] = useState<Profile | null>(null),
+    [newProfile, setNewProfile] = useState(false);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    text: string;
+    run: () => Promise<void>;
+  } | null>(null);
+  const [search, setSearch] = useState(""),
+    [filter, setFilter] = useState(""),
+    [tag, setTag] = useState(""),
+    [status, setStatus] = useState("");
+  const notify = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(""), 4500);
+  };
+  const refresh = async () => {
+    const [n, p, s] = await Promise.all([
+      api<NodeRecord[]>("/nodes"),
+      api<Profile[]>("/subscriptions"),
+      api<SettingsData>("/settings"),
+    ]);
+    setNodes(n);
+    setProfiles(p);
+    setSettings(s);
+  };
+  const action = async (fn: () => Promise<void>) => {
+    setPending(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  };
+  const copy = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    notify("已复制到剪贴板");
+  };
+  useEffect(() => {
+    api<{ username: string; csrf: string }>("/auth/me")
+      .then(async (me) => {
+        setCsrf(me.csrf);
+        setUser(me.username);
+        await refresh();
+      })
+      .catch(() => setUser(null))
+      .finally(() => setBoot(false));
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("psm-theme", theme);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () =>
+      document.documentElement.classList.toggle(
+        "dark",
+        theme === "dark" || (theme === "system" && media.matches),
+      );
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
+  if (boot) return <div className="loading">正在连接私人节点库…</div>;
+  if (!user)
+    return (
+      <>
+        <Login
+          onLogin={async (username, csrf) => {
+            setCsrf(csrf);
+            setUser(username);
+            await refresh();
+          }}
+          notify={notify}
+        />
+        {toast && (
+          <div className="toast" role="status">
+            {toast}
+          </div>
+        )}
+      </>
+    );
+  const filtered = nodes.filter((n) =>
+    nodeMatches(n, search, filter, tag, status),
+  );
+  const nav = [
+    ["dashboard", "Dashboard", LayoutDashboard],
+    ["nodes", "节点库", Network],
+    ["subscriptions", "订阅", Layers],
+    ["settings", "设置", Settings],
+  ] as const;
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">
+            <Network size={21} />
+          </div>
+          <div>
+            <strong>{settings.site_name}</strong>
+            <small>PRIVATE SPACE</small>
+          </div>
+        </div>
+        <div className="nav-label">工作空间</div>
+        <nav>
+          {nav.map(([key, label, Icon]) => (
+            <button
+              key={key}
+              className={page === key ? "nav active" : "nav"}
+              onClick={() => {
+                setPage(key);
+                setProfile(null);
+              }}
+            >
+              <Icon size={18} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <span className="secure-note">
+            <ShieldCheck size={15} />
+            单管理员 · 私有管理
+          </span>
+          <a href="/source.tar.gz">源码 · AGPL-3.0</a>
+          <small>Private Subscription Manager v0.1</small>
+        </div>
+      </aside>
+      <main>
+        <header className="topbar">
+          <span className="breadcrumb">
+            工作空间 <span>/</span> {nav.find((n) => n[0] === page)?.[1]}
+          </span>
+          <div className="top-actions">
+            <select
+              aria-label="主题"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+            >
+              <option value="system">跟随系统</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+            {theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}
+            <span className="avatar">A</span>
+            <span>{user}</span>
+            <button
+              className="icon-button"
+              aria-label="退出登录"
+              onClick={() =>
+                action(async () => {
+                  await api("/auth/logout", "POST", {});
+                  setUser(null);
+                })
+              }
+            >
+              <LogOut size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="page">
+          <div className="page-heading">
+            <div>
+              <div className="eyebrow">YOUR PRIVATE NETWORK</div>
+              <h1>
+                {page === "dashboard"
+                  ? "总览"
+                  : page === "nodes"
+                    ? "节点库"
+                    : page === "subscriptions"
+                      ? "订阅"
+                      : "设置"}
+              </h1>
+              <p>
+                {page === "dashboard"
+                  ? "节点集中管理，订阅随时保持同步。"
+                  : page === "nodes"
+                    ? "每个节点只存一份，更新自动应用到所有订阅。"
+                    : page === "subscriptions"
+                      ? "为设备或使用场景组合节点，独立、安全地分发。"
+                      : "管理工作空间与账户安全。"}
+              </p>
+            </div>
+            {page === "nodes" && (
+              <button className="primary" onClick={() => setImportOpen(true)}>
+                <Plus size={17} />
+                添加 / 批量添加节点
+              </button>
+            )}
+            {page === "subscriptions" && (
+              <button className="primary" onClick={() => setNewProfile(true)}>
+                <Plus size={17} />
+                创建订阅
+              </button>
+            )}
+          </div>
+          {page === "dashboard" && (
+            <Dashboard nodes={nodes} profiles={profiles} go={setPage} />
+          )}
+          {page === "nodes" && (
+            <section className="card">
+              <div className="toolbar">
+                <div className="search">
+                  <Search size={16} />
+                  <input
+                    aria-label="搜索节点"
+                    placeholder="搜索名称或服务器…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <select
+                  aria-label="协议筛选"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                >
+                  <option value="">所有协议</option>
+                  {protocols.map((p) => (
+                    <option key={p} value={p}>
+                      {labelProtocol(p)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="标签筛选"
+                  value={tag}
+                  onChange={(e) => setTag(e.target.value)}
+                >
+                  <option value="">所有标签</option>
+                  {[...new Set(nodes.flatMap((n) => n.tags))].map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label="状态筛选"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                >
+                  <option value="">所有状态</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">禁用</option>
+                </select>
+                <small>{filtered.length} 个节点</small>
+              </div>
+              {!filtered.length ? (
+                <Empty text="暂无节点" />
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>名称 / 协议</th>
+                        <th>服务器</th>
+                        <th>安全 / 传输</th>
+                        <th>标签</th>
+                        <th>状态</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((n) => (
+                        <tr key={n.id}>
+                          <td>
+                            <button
+                              className="text-button node-title"
+                              onClick={() => setEditing(n)}
+                            >
+                              {n.name}
+                            </button>
+                            <div>
+                              <span className={"badge " + n.protocol}>
+                                {labelProtocol(n.protocol)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="mono">
+                            {n.normalized_config.server}:
+                            {n.normalized_config.port}
+                          </td>
+                          <td>
+                            {security(n.normalized_config)}
+                            <small className="block">
+                              {n.normalized_config.network || "tcp"}
+                            </small>
+                          </td>
+                          <td>
+                            {n.tags.map((t) => (
+                              <span className="tag" key={t}>
+                                {t}
+                              </span>
+                            ))}
+                          </td>
+                          <td>
+                            <span
+                              className={n.enabled ? "state enabled" : "state"}
+                            >
+                              {n.enabled ? "启用" : "禁用"}
+                            </span>
+                          </td>
+                          <td>
+                            <small>{date(n.updated_at)}</small>
+                          </td>
+                          <td>
+                            <div className="row-actions">
+                              <button onClick={() => setEditing(n)}>
+                                编辑
+                              </button>
+                              <button
+                                aria-label={"复制 " + n.name}
+                                onClick={() =>
+                                  action(async () => {
+                                    const { uri } = await api<{ uri: string }>(
+                                      `/nodes/${n.id}/uri`,
+                                    );
+                                    await copy(uri);
+                                  })
+                                }
+                              >
+                                <Copy size={15} />
+                              </button>
+                              <button
+                                onClick={() =>
+                                  action(async () => {
+                                    await api(`/nodes/${n.id}`, "PATCH", {
+                                      normalized_config: n.normalized_config,
+                                      remark: n.remark,
+                                      tags: n.tags,
+                                      enabled: !n.enabled,
+                                    });
+                                    await refresh();
+                                  })
+                                }
+                              >
+                                {n.enabled ? "禁用" : "启用"}
+                              </button>
+                              <button
+                                className="danger-text"
+                                onClick={() =>
+                                  setConfirm({
+                                    title: "删除节点",
+                                    text: `「${n.name}」被 ${n.references} 个订阅引用。删除后会从这些订阅中移除，此操作无法撤销。`,
+                                    run: async () => {
+                                      await api(`/nodes/${n.id}`, "DELETE", {
+                                        confirm: true,
+                                      });
+                                      await refresh();
+                                    },
+                                  })
+                                }
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+          {page === "subscriptions" &&
+            (profile ? (
+              <ProfileDetail
+                key={profile.id}
+                initial={profile}
+                nodes={nodes}
+                notify={notify}
+                copy={copy}
+                onSaved={async () => {
+                  await refresh();
+                }}
+                onBack={() => setProfile(null)}
+                confirm={setConfirm}
+              />
+            ) : (
+              <div className="profile-grid">
+                {profiles.length ? (
+                  profiles.map((p) => (
+                    <div className="card profile-card" key={p.id}>
+                      <div className="profile-top">
+                        <span className="profile-icon">
+                          <Layers size={22} />
+                        </span>
+                        <span className={p.enabled ? "state enabled" : "state"}>
+                          {p.enabled ? "启用" : "禁用"}
+                        </span>
+                      </div>
+                      <h2>{p.name}</h2>
+                      <p>{p.remark || "独立订阅配置"}</p>
+                      <div className="profile-meta">
+                        {p.node_ids.length} 个节点
+                        <span>{date(p.updated_at)}</span>
+                      </div>
+                      <button
+                        className="profile-open"
+                        onClick={() => setProfile(p)}
+                      >
+                        管理订阅
+                        <ArrowRight size={16} />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="card">
+                    <Empty text="还没有订阅" />
+                  </div>
+                )}
+              </div>
+            ))}
+          {page === "settings" && (
+            <SettingsPage
+              initial={settings}
+              onSave={refresh}
+              notify={notify}
+              onPasswordChanged={() => setUser(null)}
+            />
+          )}
+          <footer>只管理节点与订阅 · 数据保存在您的服务器上</footer>
+        </div>
+      </main>
+      <ImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSaved={refresh}
+        notify={notify}
+      />
+      {editing && (
+        <NodeDrawer
+          key={editing.id}
+          node={editing}
+          onClose={() => setEditing(null)}
+          onSaved={refresh}
+          notify={notify}
+          copy={copy}
+          confirm={setConfirm}
+        />
+      )}
+      <NewProfile
+        open={newProfile}
+        close={() => setNewProfile(false)}
+        saved={refresh}
+        notify={notify}
+      />
+      <Modal
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title={confirm?.title || "确认"}
+      >
+        <p>{confirm?.text}</p>
+        <div className="modal-actions">
+          <button onClick={() => setConfirm(null)}>取消</button>
+          <button
+            className="danger"
+            disabled={pending}
+            onClick={() =>
+              action(async () => {
+                await confirm?.run();
+                setConfirm(null);
+                notify("操作已完成");
+              })
+            }
+          >
+            确认
+          </button>
+        </div>
+      </Modal>
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+function Login({
+  onLogin,
+  notify,
+}: {
+  onLogin: (username: string, csrf: string) => Promise<void>;
+  notify: (s: string) => void;
+}) {
+  const [username, setUsername] = useState("admin"),
+    [password, setPassword] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <div className="login-screen">
+      <div className="login-decoration">
+        <div className="brand-mark">
+          <Network size={27} />
+        </div>
+        <span>PRIVATE SUBSCRIPTIONS</span>
+        <h1>
+          你的节点。
+          <br />
+          你的私人空间。
+        </h1>
+        <p>
+          一个节点库，多份订阅。
+          <br />
+          让每台设备保持同步。
+        </p>
+        <div className="login-lines">
+          <i />
+          <i />
+          <i />
+        </div>
+      </div>
+      <form
+        className="login-card"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try {
+            const m = await api<{ username: string; csrf: string }>(
+              "/auth/login",
+              "POST",
+              { username, password },
+            );
+            await onLogin(m.username, m.csrf);
+          } catch (err) {
+            notify((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <div className="eyebrow">WELCOME BACK</div>
+        <h2>登录管理后台</h2>
+        <p>仅限管理员访问</p>
+        <Field label="用户名">
+          <input
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="密码">
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
+        <button className="primary" disabled={busy}>
+          {busy ? "登录中…" : "安全登录"}
+          <ArrowRight size={16} />
+        </button>
+        <small>
+          <ShieldCheck size={14} />
+          服务器端安全会话 · 私人节点管理
+        </small>
+        <a href="/source.tar.gz">对应源码 · AGPL-3.0</a>
+      </form>
+    </div>
+  );
+}
+function Dashboard({
+  nodes,
+  profiles,
+  go,
+}: {
+  nodes: NodeRecord[];
+  profiles: Profile[];
+  go: (s: string) => void;
+}) {
+  const cards = [
+    ["节点总数", nodes.length, Network],
+    ["启用节点", nodes.filter((n) => n.enabled).length, ShieldCheck],
+    ["订阅配置", profiles.length, Layers],
+  ] as const;
+  const recent = [
+    ...nodes.map((n) => ({ name: n.name, kind: "节点", at: n.updated_at })),
+    ...profiles.map((n) => ({ name: n.name, kind: "订阅", at: n.updated_at })),
+  ]
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, 7);
+  return (
+    <>
+      <div className="stats">
+        {cards.map(([title, count, Icon]) => (
+          <div className="card stat" key={title}>
+            <div>
+              <span>{title}</span>
+              <strong>{count}</strong>
+              <small>当前工作空间</small>
+            </div>
+            <div className="stat-icon">
+              <Icon size={22} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="dashboard-grid">
+        <section className="card section-pad">
+          <h2>协议分布</h2>
+          <p className="muted">节点库中的协议组成</p>
+          {protocols.map((p) => {
+            const count = nodes.filter((n) => n.protocol === p).length;
+            return (
+              <div className="distribution" key={p}>
+                <span>{labelProtocol(p)}</span>
+                <div className="bar">
+                  <i
+                    style={{
+                      width: `${nodes.length ? (count / nodes.length) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                <strong>{count}</strong>
+              </div>
+            );
+          })}
+        </section>
+        <section className="card section-pad">
+          <h2>最近更新</h2>
+          <p className="muted">节点与订阅的最新更改</p>
+          {recent.length ? (
+            recent.map((r, i) => (
+              <div className="recent" key={i}>
+                <span className="recent-dot" />
+                <div>
+                  <strong>{r.name}</strong>
+                  <small>
+                    {r.kind} · {date(r.at)}
+                  </small>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="muted">还没有记录</p>
+          )}
+        </section>
+      </div>
+      <div className="welcome-strip">
+        <div>
+          <h3>集中维护，自动同步</h3>
+          <p>修改节点库配置，所有引用它的订阅将在下次更新时获取新配置。</p>
+        </div>
+        <button onClick={() => go("nodes")}>
+          管理节点
+          <ArrowRight size={16} />
+        </button>
+      </div>
+    </>
+  );
+}
+function ImportDialog({
+  open,
+  onClose,
+  onSaved,
+  notify,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  notify: (s: string) => void;
+}) {
+  const [text, setText] = useState(""),
+    [rows, setRows] = useState<Preview[]>([]),
+    [selected, setSelected] = useState<Set<number>>(new Set()),
+    [names, setNames] = useState<Record<number, string>>({}),
+    [busy, setBusy] = useState(false);
+  const work = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="粘贴节点链接"
+      description="一行一条，支持 VLESS / VMess / Trojan / SS / HY2 / TUIC。先预览，再确认导入。"
+    >
+      <textarea
+        aria-label="节点链接"
+        className="uri-input"
+        rows={7}
+        placeholder="vless://…\nvmess://…\nhysteria2://…"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setRows([]);
+        }}
+      />
+      <div className="modal-actions">
+        <span className="muted">每批最多 300 行，不会自动丢弃失败项</span>
+        <button
+          className="primary"
+          disabled={busy || !text.trim()}
+          onClick={() =>
+            work(async () => {
+              const result = await api<Preview[]>("/nodes/preview", "POST", {
+                text,
+              });
+              setRows(result);
+              setSelected(
+                new Set(
+                  result
+                    .filter((r) => r.envelope && !r.duplicate)
+                    .map((r) => r.index),
+                ),
+              );
+              setNames(
+                Object.fromEntries(
+                  result
+                    .filter((r) => r.envelope)
+                    .map((r) => [r.index, r.envelope!.normalized_config.name]),
+                ),
+              );
+            })
+          }
+        >
+          解析预览
+        </button>
+      </div>
+      {rows.length > 0 && (
+        <>
+          <div className="import-summary">
+            {rows.filter((r) => r.status === "success").length} 成功 ·{" "}
+            {rows.filter((r) => r.status === "warning").length} 警告 ·{" "}
+            {rows.filter((r) => r.status === "failure").length} 失败
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>选择</th>
+                  <th>状态 / 名称</th>
+                  <th>协议 / 地址</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.index}>
+                    <td>
+                      <input
+                        aria-label={`导入第 ${r.index + 1} 行`}
+                        type="checkbox"
+                        checked={selected.has(r.index)}
+                        disabled={!r.envelope}
+                        onChange={(e) =>
+                          setSelected((s) => {
+                            const n = new Set(s);
+                            if (e.target.checked) n.add(r.index);
+                            else n.delete(r.index);
+                            return n;
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <small>
+                        第 {r.index + 1} 行 ·{" "}
+                        {r.status === "success"
+                          ? "成功"
+                          : r.status === "warning"
+                            ? "警告"
+                            : "失败"}
+                      </small>
+                      {r.envelope && (
+                        <input
+                          aria-label={`第 ${r.index + 1} 行名称`}
+                          value={names[r.index] || ""}
+                          onChange={(e) =>
+                            setNames({ ...names, [r.index]: e.target.value })
+                          }
+                        />
+                      )}
+                    </td>
+                    <td>
+                      {r.envelope && (
+                        <>
+                          {labelProtocol(r.envelope.normalized_config.type)}
+                          <small className="block">
+                            {r.envelope.normalized_config.server}:
+                            {r.envelope.normalized_config.port}
+                          </small>
+                          <small>
+                            {security(r.envelope.normalized_config)} /{" "}
+                            {r.envelope.normalized_config.network || "tcp"}
+                          </small>
+                        </>
+                      )}
+                    </td>
+                    <td>
+                      <small className={r.error ? "danger-text" : "muted"}>
+                        {r.error ||
+                          [
+                            r.duplicate
+                              ? "可能重复，默认不选中；可手动确认保留"
+                              : "",
+                            ...r.envelope!.parse_warnings,
+                          ]
+                            .filter(Boolean)
+                            .join("；") ||
+                          "解析成功"}
+                      </small>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="modal-actions">
+            <span>已选择 {selected.size} 条</span>
+            <button
+              className="primary"
+              disabled={busy || !selected.size}
+              onClick={() =>
+                work(async () => {
+                  await api("/nodes/import", "POST", {
+                    items: rows
+                      .filter((r) => selected.has(r.index) && r.envelope)
+                      .map((r) => ({
+                        uri: r.envelope!.original_uri,
+                        name: names[r.index],
+                      })),
+                  });
+                  await onSaved();
+                  notify(`已导入 ${selected.size} 个节点`);
+                  setText("");
+                  setRows([]);
+                  onClose();
+                })
+              }
+            >
+              确认导入
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+type ConfirmSetter = (
+  v: { title: string; text: string; run: () => Promise<void> } | null,
+) => void;
+function NodeDrawer({
+  node,
+  onClose,
+  onSaved,
+  notify,
+  copy,
+  confirm,
+}: {
+  node: NodeRecord;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  notify: (s: string) => void;
+  copy: (s: string) => Promise<void>;
+  confirm: ConfirmSetter;
+}) {
+  const [config, setConfig] = useState<NormalizedNode>(
+      structuredClone(node.normalized_config),
+    ),
+    [remark, setRemark] = useState(node.remark),
+    [tags, setTags] = useState(node.tags.join(", ")),
+    [enabled, setEnabled] = useState(node.enabled),
+    [tab, setTab] = useState("form"),
+    [newUri, setNewUri] = useState(""),
+    [diff, setDiff] = useState<
+      { field: string; old: unknown; new: unknown }[] | null
+    >(null),
+    [busy, setBusy] = useState(false),
+    [advanced, setAdvanced] = useState(
+      JSON.stringify(node.normalized_config, null, 2),
+    );
+  const work = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const input = (label: string, key: string, numeric = false) => {
+    const v = getField(config, key);
+    return (
+      <Field key={key} label={label}>
+        <input
+          type={numeric ? "number" : "text"}
+          value={
+            Array.isArray(v) ? v.join(",") : v === undefined ? "" : String(v)
+          }
+          onChange={(e) =>
+            setConfig(
+              setField(
+                config,
+                key,
+                e.target.value === ""
+                  ? undefined
+                  : numeric
+                    ? Number(e.target.value)
+                    : e.target.value,
+              ),
+            )
+          }
+        />
+      </Field>
+    );
+  };
+  const net = config.network || "tcp";
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={node.name}
+      description="原始来源与当前配置分开保存；结构化编辑不会覆盖原始链接。"
+      drawer
+    >
+      <div className="tabs">
+        {[
+          ["form", "参数编辑"],
+          ["reimport", "重新导入"],
+          ["original", "原始链接"],
+          ["advanced", "高级配置"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "active" : ""}
+            onClick={() => {
+              setTab(key);
+              if (key === "advanced")
+                setAdvanced(JSON.stringify(config, null, 2));
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "form" && (
+        <>
+          <div className="form-grid">
+            {input("节点名称", "name")}
+            {input("服务器 IP / Domain", "server")}
+            {input("端口", "port", true)}
+            <Field label="协议">
+              <input disabled value={labelProtocol(config.type)} />
+            </Field>
+            {["vless", "vmess", "tuic"].includes(config.type) &&
+              input("UUID", "uuid")}
+            {["trojan", "ss", "hysteria2", "tuic"].includes(config.type) &&
+              input("Password", "password")}
+            {["ss", "vmess"].includes(config.type) && input("Cipher", "cipher")}
+            {config.type === "vmess" && input("Alter ID", "alterId", true)}
+            {["vless", "vmess", "trojan"].includes(config.type) && (
+              <Field label="Transport">
+                <select
+                  value={net}
+                  onChange={(e) =>
+                    setConfig({ ...config, network: e.target.value })
+                  }
+                >
+                  {[
+                    "tcp",
+                    "ws",
+                    "grpc",
+                    "httpupgrade",
+                    "xhttp",
+                    "http",
+                    "h2",
+                  ].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {config.type === "vless" && input("Flow / Vision", "flow")}
+            <Field label="安全类型">
+              <select
+                value={
+                  config["reality-opts"]
+                    ? "reality"
+                    : config.tls
+                      ? "tls"
+                      : "none"
+                }
+                onChange={(e) => {
+                  const c: NormalizedNode = {
+                    ...config,
+                    tls: e.target.value !== "none",
+                  };
+                  if (e.target.value === "reality")
+                    c["reality-opts"] = c["reality-opts"] || {
+                      "public-key": "",
+                      "short-id": "",
+                    };
+                  else delete c["reality-opts"];
+                  setConfig(c);
+                }}
+              >
+                <option value="none">无 TLS</option>
+                <option value="tls">TLS</option>
+                {config.type === "vless" && (
+                  <option value="reality">Reality</option>
+                )}
+              </select>
+            </Field>
+            {(config.tls ||
+              ["trojan", "hysteria2", "tuic"].includes(config.type)) && (
+              <>
+                {input("SNI", "sni")}
+                {input("Fingerprint", "client-fingerprint")}
+                <Field label="ALPN（逗号分隔）">
+                  <input
+                    value={config.alpn?.join(",") || ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        alpn: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="证书校验">
+                  <select
+                    value={config["skip-cert-verify"] ? "skip" : "verify"}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        "skip-cert-verify": e.target.value === "skip",
+                      })
+                    }
+                  >
+                    <option value="verify">验证证书</option>
+                    <option value="skip">跳过验证（不推荐）</option>
+                  </select>
+                </Field>
+              </>
+            )}
+            {config["reality-opts"] && (
+              <>
+                {input("Reality Public Key", "reality-opts.public-key")}
+                {input("Short ID", "reality-opts.short-id")}
+                {input("SpiderX", "reality-opts._spider-x")}
+              </>
+            )}
+            {["ws", "http", "httpupgrade", "xhttp", "h2"].includes(net) && (
+              <>
+                {input("Path", `${net}-opts.path`)}
+                {input(
+                  "Host",
+                  net === "xhttp"
+                    ? "xhttp-opts.host"
+                    : `${net}-opts.headers.Host`,
+                )}
+              </>
+            )}
+            {net === "grpc" &&
+              input("gRPC serviceName", "grpc-opts.grpc-service-name")}
+            {net === "xhttp" && input("XHTTP mode", "xhttp-opts.mode")}
+            {config.type === "ss" && (
+              <>
+                {input("Plugin", "plugin")}
+                {input("Plugin mode", "plugin-opts.mode")}
+                {input("Plugin host", "plugin-opts.host")}
+                {input("Plugin path", "plugin-opts.path")}
+              </>
+            )}
+            {config.type === "hysteria2" && (
+              <>
+                {input("Obfs", "obfs")}
+                {input("Obfs password", "obfs-password")}
+                {input("端口跳跃", "ports")}
+                {input("Hop interval", "hop-interval", true)}
+                {input("Up Mbps", "up", true)}
+                {input("Down Mbps", "down", true)}
+              </>
+            )}
+            {config.type === "tuic" && (
+              <>
+                {input("Congestion controller", "congestion-controller")}
+                {input("UDP relay mode", "udp-relay-mode")}
+                {input("Heartbeat interval", "heartbeat-interval", true)}
+              </>
+            )}
+          </div>
+          <Field label="备注">
+            <textarea
+              rows={2}
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+            />
+          </Field>
+          <Field label="标签（逗号分隔）">
+            <input value={tags} onChange={(e) => setTags(e.target.value)} />
+          </Field>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+            启用节点
+          </label>
+          <div className="notice">
+            私有参数原始编码保留。高级配置可编辑其他成熟 parser 字段。
+          </div>
+        </>
+      )}
+      {tab === "advanced" && (
+        <>
+          <p className="muted">
+            当前结构化配置。敏感凭据仅在本页面显示，不进入日志。
+          </p>
+          <textarea
+            className="code-input"
+            rows={22}
+            value={advanced}
+            onChange={(e) => setAdvanced(e.target.value)}
+          />
+          <button
+            onClick={() => {
+              try {
+                setConfig(JSON.parse(advanced) as NormalizedNode);
+                setTab("form");
+                notify("已应用到表单，点击保存提交");
+              } catch {
+                notify("JSON 格式无效");
+              }
+            }}
+          >
+            应用到表单
+          </button>
+          <details>
+            <summary>保留的 raw sidecar</summary>
+            <pre>{JSON.stringify(node.unknown_params, null, 2)}</pre>
+          </details>
+        </>
+      )}
+      {tab === "reimport" && (
+        <>
+          <textarea
+            aria-label="重新导入链接"
+            rows={5}
+            value={newUri}
+            onChange={(e) => {
+              setNewUri(e.target.value);
+              setDiff(null);
+            }}
+            placeholder="粘贴新的完整 URI"
+          />
+          <button
+            disabled={busy || !newUri.trim()}
+            onClick={() =>
+              work(async () => {
+                const d = await api<{
+                  diff: { field: string; old: unknown; new: unknown }[];
+                }>(`/nodes/${node.id}/reimport-preview`, "POST", {
+                  uri: newUri,
+                });
+                setDiff(d.diff);
+              })
+            }
+          >
+            解析并比较
+          </button>
+          {diff && (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>原值</th>
+                    <th>新值</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diff.map((d) => (
+                    <tr key={d.field}>
+                      <td>{d.field}</td>
+                      <td className="break">{JSON.stringify(d.old)}</td>
+                      <td className="break">{JSON.stringify(d.new)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                className="primary"
+                onClick={() =>
+                  confirm({
+                    title: "确认重新导入",
+                    text: "将替换当前配置、原始 URI 与 sidecar；备注与标签保持不变。",
+                    run: async () => {
+                      await api(`/nodes/${node.id}/reimport`, "POST", {
+                        uri: newUri,
+                        confirm: true,
+                      });
+                      await onSaved();
+                      onClose();
+                    },
+                  })
+                }
+              >
+                确认替换来源与配置
+              </button>
+            </>
+          )}
+        </>
+      )}
+      {tab === "original" && (
+        <>
+          <p>这是最近一次明确导入的来源，可能与当前有效配置不同。</p>
+          <textarea readOnly rows={8} value={node.original_uri} />
+          <div className="row-actions">
+            <button onClick={() => work(() => copy(node.original_uri))}>
+              复制原始链接
+            </button>
+            <button
+              onClick={() =>
+                confirm({
+                  title: "恢复原始参数",
+                  text: "重新解析原始 URI，覆盖当前协议参数；备注与标签不变。",
+                  run: async () => {
+                    await api(`/nodes/${node.id}/restore`, "POST", {
+                      confirm: true,
+                    });
+                    await onSaved();
+                    onClose();
+                  },
+                })
+              }
+            >
+              恢复原始参数
+            </button>
+          </div>
+        </>
+      )}
+      <div className="modal-actions sticky">
+        <button
+          onClick={() =>
+            work(async () => {
+              const { uri } = await api<{ uri: string }>(
+                `/nodes/${node.id}/uri`,
+              );
+              await copy(uri);
+            })
+          }
+        >
+          复制已保存当前链接
+        </button>
+        {tab === "form" && (
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() =>
+              work(async () => {
+                await api(`/nodes/${node.id}`, "PATCH", {
+                  normalized_config: config,
+                  remark,
+                  tags: tags
+                    .split(/[,，]/)
+                    .map((t) => t.trim())
+                    .filter(Boolean),
+                  enabled,
+                });
+                await onSaved();
+                notify("节点已更新，关联订阅自动同步");
+                onClose();
+              })
+            }
+          >
+            保存更改
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+function NewProfile({
+  open,
+  close,
+  saved,
+  notify,
+}: {
+  open: boolean;
+  close: () => void;
+  saved: () => Promise<void>;
+  notify: (s: string) => void;
+}) {
+  const [name, setName] = useState(""),
+    [remark, setRemark] = useState("");
+  return (
+    <Modal open={open} onClose={close} title="创建订阅">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api("/subscriptions", "POST", {
+              name,
+              remark,
+              enabled: true,
+            });
+            await saved();
+            close();
+            setName("");
+            setRemark("");
+            notify("订阅已创建");
+          } catch (err) {
+            notify((err as Error).message);
+          }
+        }}
+      >
+        <Field label="订阅名称">
+          <input
+            required
+            placeholder="例如 iPhone"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field label="备注">
+          <input value={remark} onChange={(e) => setRemark(e.target.value)} />
+        </Field>
+        <div className="modal-actions">
+          <button className="primary">创建订阅</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function SortableNode({
+  node,
+  remove,
+  up,
+  down,
+}: {
+  node: NodeRecord;
+  remove: () => void;
+  up: () => void;
+  down: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: node.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className="selected-node"
+    >
+      <button
+        className="drag"
+        aria-label={`拖动 ${node.name}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={18} />
+      </button>
+      <div>
+        <strong>{node.name}</strong>
+        <small>
+          {labelProtocol(node.protocol)} · {node.enabled ? "启用" : "禁用"}
+        </small>
+      </div>
+      <button
+        aria-label={`上移 ${node.name}`}
+        className="icon-button"
+        onClick={up}
+      >
+        <ChevronUp size={15} />
+      </button>
+      <button
+        aria-label={`下移 ${node.name}`}
+        className="icon-button"
+        onClick={down}
+      >
+        <ChevronDown size={15} />
+      </button>
+      <button
+        className="icon-button"
+        aria-label={`移除 ${node.name}`}
+        onClick={remove}
+      >
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+function ProfileDetail({
+  initial,
+  nodes,
+  notify,
+  copy,
+  onSaved,
+  onBack,
+  confirm,
+}: {
+  initial: Profile;
+  nodes: NodeRecord[];
+  notify: (s: string) => void;
+  copy: (s: string) => Promise<void>;
+  onSaved: () => Promise<void>;
+  onBack: () => void;
+  confirm: ConfirmSetter;
+}) {
+  const [profile, setProfile] = useState(initial),
+    [ids, setIds] = useState(initial.node_ids),
+    [search, setSearch] = useState(""),
+    [filter, setFilter] = useState(""),
+    [tag, setTag] = useState(""),
+    [url, setUrl] = useState(""),
+    [qr, setQr] = useState(""),
+    [output, setOutput] = useState<{ body: string; mode: string } | null>(null),
+    [qrOpen, setQrOpen] = useState(false),
+    [busy, setBusy] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const loadUrl = async () => {
+    const u = await api<{ url: string }>(`/subscriptions/${profile.id}/url`);
+    setUrl(u.url);
+  };
+  useEffect(() => {
+    loadUrl().catch((e) => notify(e.message));
+  }, []);
+  const work = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const selected = ids
+    .map((id) => nodes.find((n) => n.id === id))
+    .filter((n): n is NodeRecord => !!n);
+  const move = (from: number, to: number) => {
+    if (to >= 0 && to < ids.length) setIds(arrayMove(ids, from, to));
+  };
+  const drag = ({ active, over }: DragEndEvent) => {
+    if (over && active.id !== over.id)
+      move(ids.indexOf(Number(active.id)), ids.indexOf(Number(over.id)));
+  };
+  return (
+    <>
+      <button className="text-button" onClick={onBack}>
+        ← 返回订阅列表
+      </button>
+      <section className="card section-pad profile-form">
+        <div className="form-grid">
+          <Field label="名称">
+            <input
+              value={profile.name}
+              onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+            />
+          </Field>
+          <Field label="备注">
+            <input
+              value={profile.remark}
+              onChange={(e) =>
+                setProfile({ ...profile, remark: e.target.value })
+              }
+            />
+          </Field>
+        </div>
+        <div className="modal-actions">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={profile.enabled}
+              onChange={(e) =>
+                setProfile({ ...profile, enabled: e.target.checked })
+              }
+            />
+            启用订阅
+          </label>
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() =>
+              work(async () => {
+                await api(`/subscriptions/${profile.id}`, "PATCH", profile);
+                await onSaved();
+                notify("订阅信息已保存");
+              })
+            }
+          >
+            保存信息
+          </button>
+        </div>
+      </section>
+      <div className="assignment-grid">
+        <section className="card section-pad">
+          <h2>选择节点</h2>
+          <p className="muted">全局节点可同时加入多个订阅</p>
+          <input
+            aria-label="搜索可选节点"
+            placeholder="搜索节点…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="row-actions">
+            <select
+              aria-label="选择器协议"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="">所有协议</option>
+              {protocols.map((p) => (
+                <option key={p} value={p}>
+                  {labelProtocol(p)}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="选择器标签"
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+            >
+              <option value="">所有标签</option>
+              {[...new Set(nodes.flatMap((n) => n.tags))].map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div className="node-picker">
+            {nodes
+              .filter((n) => nodeMatches(n, search, filter, tag, ""))
+              .map((n) => (
+                <label key={n.id} className="picker-node">
+                  <input
+                    type="checkbox"
+                    checked={ids.includes(n.id)}
+                    onChange={(e) =>
+                      setIds(
+                        e.target.checked
+                          ? [...ids, n.id]
+                          : ids.filter((id) => id !== n.id),
+                      )
+                    }
+                  />
+                  <div>
+                    <strong>{n.name}</strong>
+                    <small>
+                      {labelProtocol(n.protocol)} · {n.normalized_config.server}
+                    </small>
+                  </div>
+                  <span className={n.enabled ? "state enabled" : "state"}>
+                    {n.enabled ? "启用" : "禁用"}
+                  </span>
+                </label>
+              ))}
+          </div>
+        </section>
+        <section className="card section-pad">
+          <div className="section-heading">
+            <h2>
+              已选节点 <span className="count">{ids.length}</span>
+            </h2>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                work(async () => {
+                  await api(`/subscriptions/${profile.id}/nodes`, "PUT", {
+                    node_ids: ids,
+                  });
+                  await onSaved();
+                  notify("节点关联与顺序已保存");
+                })
+              }
+            >
+              保存节点与顺序
+            </button>
+          </div>
+          <p className="muted">
+            拖动排序；也可使用上下箭头。禁用节点不会输出。
+          </p>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={drag}
+          >
+            <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+              {selected.map((n, i) => (
+                <SortableNode
+                  node={n}
+                  key={n.id}
+                  remove={() => setIds(ids.filter((id) => id !== n.id))}
+                  up={() => move(i, i - 1)}
+                  down={() => move(i, i + 1)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+          {!ids.length && (
+            <p className="notice">
+              没有显式关联时返回空订阅，绝不会返回全节点。
+            </p>
+          )}
+        </section>
+      </div>
+      <section className="card section-pad">
+        <h2>订阅分发</h2>
+        <p className="muted">
+          链接即访问凭证，请不要公开分享。轮换后旧链接立即失效。
+        </p>
+        <div className="subscription-links">
+          {[
+            ["shadowrocket", "Shadowrocket"],
+            ["v2ray", "V2Ray / v2rayN / v2rayNG"],
+            ["raw", "Raw URI"],
+          ].map(([format, label]) => (
+            <div className="link-row" key={format}>
+              <strong>{label}</strong>
+              <span className="mono muted">/s/••••••••?format={format}</span>
+              <button
+                disabled={!url}
+                onClick={() => work(() => copy(url + "?format=" + format))}
+              >
+                <Copy size={15} />
+                复制链接
+              </button>
+              <button
+                onClick={() =>
+                  work(async () => {
+                    setOutput(
+                      await api(
+                        `/subscriptions/${profile.id}/preview?format=${format}`,
+                      ),
+                    );
+                  })
+                }
+              >
+                <ExternalLink size={15} />
+                预览
+              </button>
+              <button
+                disabled={!url}
+                onClick={() =>
+                  work(async () => {
+                    setQr(
+                      await QRCode.toDataURL(url + "?format=" + format, {
+                        width: 300,
+                        margin: 2,
+                      }),
+                    );
+                    setQrOpen(true);
+                  })
+                }
+              >
+                二维码
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button
+            onClick={() =>
+              confirm({
+                title: "轮换订阅 Token",
+                text: "旧链接将立即失效。所有客户端需重新添加新的订阅链接。",
+                run: async () => {
+                  await api(`/subscriptions/${profile.id}/rotate`, "POST", {});
+                  await loadUrl();
+                  await onSaved();
+                },
+              })
+            }
+          >
+            重新生成 Token
+          </button>
+          <button
+            className="danger-text"
+            onClick={() =>
+              confirm({
+                title: "删除订阅",
+                text: "订阅链接立即失效；全局节点不会删除。",
+                run: async () => {
+                  await api(`/subscriptions/${profile.id}`, "DELETE", {});
+                  await onSaved();
+                  onBack();
+                },
+              })
+            }
+          >
+            删除订阅
+          </button>
+        </div>
+      </section>
+      <Modal
+        open={!!output}
+        onClose={() => setOutput(null)}
+        title="实际订阅输出"
+        description="含敏感节点凭据，仅管理员可见。"
+      >
+        <small>输出方式：{output?.mode}</small>
+        <pre className="output">{output?.body || "（空订阅）"}</pre>
+      </Modal>
+      <Modal
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        title="订阅二维码"
+        description="扫码获取订阅凭证，请勿公开截图。"
+      >
+        <img className="qr" src={qr} alt="订阅二维码" />
+      </Modal>
+    </>
+  );
+}
+function SettingsPage({
+  initial,
+  onSave,
+  notify,
+  onPasswordChanged,
+}: {
+  initial: SettingsData;
+  onSave: () => Promise<void>;
+  notify: (s: string) => void;
+  onPasswordChanged: () => void;
+}) {
+  const [settings, setSettings] = useState(initial),
+    [current, setCurrent] = useState(""),
+    [password, setPassword] = useState("");
+  return (
+    <div className="settings-grid">
+      <form
+        className="card section-pad"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api("/settings", "PUT", settings);
+            await onSave();
+            notify("设置已保存");
+          } catch (err) {
+            notify((err as Error).message);
+          }
+        }}
+      >
+        <h2>工作空间</h2>
+        <Field label="站点名称">
+          <input
+            value={settings.site_name}
+            onChange={(e) =>
+              setSettings({ ...settings, site_name: e.target.value })
+            }
+          />
+        </Field>
+        <Field label="Public Base URL">
+          <input
+            type="url"
+            value={settings.public_base_url}
+            onChange={(e) =>
+              setSettings({ ...settings, public_base_url: e.target.value })
+            }
+          />
+        </Field>
+        <Field label="默认订阅格式">
+          <select
+            value={settings.default_format}
+            onChange={(e) =>
+              setSettings({ ...settings, default_format: e.target.value })
+            }
+          >
+            <option value="v2ray">V2Ray Base64</option>
+            <option value="shadowrocket">Shadowrocket</option>
+            <option value="raw">Raw URI</option>
+          </select>
+        </Field>
+        <button className="primary">保存设置</button>
+      </form>
+      <form
+        className="card section-pad"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          try {
+            await api("/auth/password", "POST", { current, password });
+            notify("密码已修改，请重新登录");
+            onPasswordChanged();
+          } catch (err) {
+            notify((err as Error).message);
+          }
+        }}
+      >
+        <h2>账户安全</h2>
+        <p className="muted">修改密码后所有会话立即退出。</p>
+        <Field label="当前密码">
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="新密码（至少 12 字符）">
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={12}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
+        <button className="primary">修改密码</button>
+        <div className="notice">
+          加密 master key 仅由服务器环境配置，不能通过此页面修改。
+        </div>
+      </form>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

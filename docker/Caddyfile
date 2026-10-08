@@ -1,0 +1,13 @@
+{
+    # Disable runtime request/error logging: reverse_proxy errors can include bearer URLs.
+    # Caddy remains observable through systemd status, TLS inspection and /health.
+    log default {
+        level ERROR
+        exclude http.log.error
+    }
+}
+panel.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+    # Deliberately no access log directive, so /s/<token> is never persisted.
+}
