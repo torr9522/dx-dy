@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.1.7-rc.1] - 2026-10-08
+
+### Fixed
+
+- Prevented semantically identical nodes from being emitted more than once in the same subscription while preserving the first node by subscription position.
+- Added final deduplication to canonical Universal Base64, raw output and every legacy format alias through one shared renderer path.
+- Prevented newly selected semantic duplicates from being saved to a Subscription with structured 422 validation and no partial write.
+
+### Added
+
+- Added runtime semantic fingerprints derived from current rendered connection semantics: URI fragments are excluded, VMess `ps` is excluded, and all other rendered fields and unknown/private parameters remain significant.
+- Added semantic-aware manual, current-result, Shift-range and cross-Collection source selection, with duplicate feedback and deterministic first-visible selection.
+- Added historical-conflict indicators plus selected, emitted and suppressed duplicate counts in Subscription management and Preview.
+
+### Safety
+
+- Duplicate detection ignores display names and node IDs; equal names with different connections remain distinct.
+- Global Node Library and Collections continue to allow duplicate node records and memberships.
+- Existing duplicate `subscription_nodes` relationships are never modified automatically; semantic keys remain transient and require no database migration.
+- The production Subscription containing four selected nodes and two equally named VMess nodes was compared safely; their current connection semantics differ, so the reported device behavior is not confirmed as a semantic-duplicate root cause.
+
+### Validation
+
+- Added protocol, unknown-parameter, ordered-renderer, raw/alias parity, 422 rollback, historical-relation and Collection-boundary regression coverage.
+- Added Playwright coverage for equal-name/different-connection selection, different-name/equal-connection blocking, semantic-aware bulk/Shift/cross-source selection, historical warning, 2-to-1 Preview output and 390px/320px containment.
+
 ## [0.1.6-rc.1] - 2026-10-08
 
 ### Added

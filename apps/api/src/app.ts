@@ -29,6 +29,9 @@ import {
   generateURI,
   generateUniversalUriLines,
   generateUniversalBase64Subscription,
+  dedupeSubscriptionNodes,
+  findSemanticDuplicateGroups,
+  getNodeSemanticKey,
   parseNode,
   preview,
 } from "../../../packages/proxy-adapter";
@@ -80,6 +83,7 @@ class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -213,7 +217,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.6" });
+    res.json({ status: "ok", database: "ok", version: "0.1.7" });
   });
   app.post(
     "/api/auth/login",
@@ -322,7 +326,14 @@ export async function createApp(options: Options) {
     );
     res.clearCookie("psm_session", cookie).json({ ok: true });
   });
-  app.get("/api/nodes", (_req, res) => res.json(store.nodes()));
+  app.get("/api/nodes", (_req, res) =>
+    res.json(
+      store.nodes().map((node) => ({
+        ...node,
+        semantic_key: getNodeSemanticKey(node),
+      })),
+    ),
+  );
   const collectionSchema = z.object({
     name: z.string().trim().min(1).max(100),
     remark: z.string().max(2000).default(""),
@@ -662,8 +673,27 @@ export async function createApp(options: Options) {
           .refine((a) => new Set(a).size === a.length),
       })
       .parse(req.body);
-    if (node_ids.some((n) => !store.findNode(n)))
+    const byId = new Map(store.nodes().map((node) => [node.id, node]));
+    if (node_ids.some((nodeId) => !byId.has(nodeId)))
       return fail(400, "NODE", "含不存在的节点");
+    const selected = node_ids.map((nodeId) => byId.get(nodeId)!);
+    const duplicateGroups = findSemanticDuplicateGroups(selected);
+    if (duplicateGroups.length) {
+      const duplicates = duplicateGroups.flatMap(({ nodes: group }) =>
+        group.slice(1).map((node) => ({
+          node_id: node.id,
+          display_name: node.name,
+          protocol: node.protocol,
+          duplicate_of_node_id: group[0].id,
+        })),
+      );
+      throw new ApiError(
+        422,
+        "DUPLICATE_SEMANTICS",
+        "存在重复连接配置，请取消重复节点后再保存",
+        { duplicates },
+      );
+    }
     store.assign(id(req), node_ids);
     res.json(store.profile(getProfile(req)));
   });
@@ -684,24 +714,47 @@ export async function createApp(options: Options) {
     const token = decryptToken(String(p.token_ciphertext), key);
     res.json({ url: buildSubscriptionUrl(token) });
   });
-  const render = (nodes: Envelope[], format: string) => ({
-    body:
-      format === "raw"
-        ? generateUniversalUriLines(nodes)
-        : generateUniversalBase64Subscription(nodes),
-    contentType: "text/plain; charset=utf-8",
-    mode: format === "raw" ? "raw" : "universal-base64",
-  });
+  const render = <T extends Envelope & { id?: number }>(
+    nodes: T[],
+    format: string,
+  ) => {
+    const { emitted, suppressed } = dedupeSubscriptionNodes(nodes);
+    return {
+      body:
+        format === "raw"
+          ? generateUniversalUriLines(emitted)
+          : generateUniversalBase64Subscription(emitted),
+      contentType: "text/plain; charset=utf-8",
+      mode: format === "raw" ? "raw" : "universal-base64",
+      emitted,
+      suppressed,
+    };
+  };
   app.get("/api/subscriptions/:id/preview", (req, res) => {
     const p = getProfile(req);
     const f = z
       .enum(["auto", "raw", "v2ray", "shadowrocket"])
       .parse(req.query.format || "auto");
-    const nodes = store.authorized(Number(p.id));
+    const selectedNodes = store.selectedNodes(Number(p.id));
+    const nodes = selectedNodes.filter((node) => node.enabled);
+    const output = render(nodes, f);
+    const duplicateGroups = findSemanticDuplicateGroups(selectedNodes);
     res.json({
-      ...render(nodes, f),
-      decoded: generateUniversalUriLines(nodes),
-      nodes: nodes.map((node) => ({
+      body: output.body,
+      contentType: output.contentType,
+      mode: output.mode,
+      decoded: generateUniversalUriLines(output.emitted),
+      selected_node_count: selectedNodes.length,
+      emitted_node_count: output.emitted.length,
+      suppressed_duplicate_count: output.suppressed.length,
+      duplicate_groups: duplicateGroups.map(({ nodes: group }) =>
+        group.map((node) => ({
+          node_id: node.id,
+          name: node.name,
+          protocol: node.protocol,
+        })),
+      ),
+      nodes: output.emitted.map((node) => ({
         name: node.normalized_config.name,
         protocol: node.normalized_config.type,
       })),
@@ -796,7 +849,18 @@ export async function createApp(options: Options) {
       const format = z
         .enum(["auto", "raw", "v2ray", "shadowrocket"])
         .parse(req.query.format || "auto");
-      const output = render(store.authorized(Number(p.id)), format);
+      const selected = store.authorized(Number(p.id));
+      const output = render(selected, format);
+      if (output.suppressed.length)
+        console.warn(
+          JSON.stringify({
+            event: "subscription_semantic_dedupe",
+            subscription_id: Number(p.id),
+            selected: selected.length,
+            emitted: output.emitted.length,
+            semantic_duplicates: output.suppressed.length,
+          }),
+        );
       res
         .set("Content-Type", output.contentType)
         .set("X-Subscription-Format", output.mode)
@@ -811,7 +875,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.6-source.tar.gz",
+        "private-subscription-manager-0.1.7-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");
@@ -839,6 +903,9 @@ export async function createApp(options: Options) {
             : invalid
               ? "输入参数不合法"
               : "操作失败，请检查输入或稍后重试",
+          ...(known && error.details !== undefined
+            ? { details: error.details }
+            : {}),
         },
       });
     },

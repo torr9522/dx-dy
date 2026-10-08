@@ -6,10 +6,77 @@ import {
   generateShadowrocket,
   generateShadowrocketStructured,
   editConfig,
+  getNodeSemanticKey,
+  dedupeSubscriptionNodes,
+  generateUniversalUriLines,
 } from "../packages/proxy-adapter";
 import { fixtures, vless, vmess, uuid } from "./fixtures";
 import { parse as parseYaml } from "yaml";
 describe("protocol adapter", () => {
+  it("derives semantic identity from connection output, never display name", () => {
+    const first = parseNode(vmess);
+    const renamed = editConfig(first, {
+      ...first.normalized_config,
+      name: "HK Backup Name",
+    });
+    const changed = editConfig(first, {
+      ...first.normalized_config,
+      name: first.normalized_config.name,
+      port: 8443,
+    });
+    expect(getNodeSemanticKey(first)).toBe(getNodeSemanticKey(renamed));
+    expect(getNodeSemanticKey(first)).not.toBe(getNodeSemanticKey(changed));
+  });
+  it("removes URI fragments but retains every connection and private parameter", () => {
+    const first = parseNode(vless);
+    const renamed = parseNode(vless.replace("#日本%20测试", "#Different"));
+    expect(getNodeSemanticKey(first)).toBe(getNodeSemanticKey(renamed));
+    for (const [key, value] of [
+      ["pbk", "other-key"],
+      ["sid", "ffff"],
+      ["spx", "%2Fother"],
+      ["flow", "other-flow"],
+      ["sni", "other.example.com"],
+      ["fp", "firefox"],
+    ]) {
+      const changed = parseNode(
+        vless.replace(new RegExp(`([?&])${key}=[^&#]*`), `$1${key}=${value}`),
+      );
+      expect(getNodeSemanticKey(changed), key).not.toBe(
+        getNodeSemanticKey(first),
+      );
+    }
+    expect(
+      getNodeSemanticKey(parseNode(vless.replace("#", "&private=one#"))),
+    ).not.toBe(
+      getNodeSemanticKey(parseNode(vless.replace("#", "&private=two#"))),
+    );
+  });
+  it.each(fixtures.slice(7))(
+    "%s ignores only its display fragment and retains connection changes",
+    (_name, input) => {
+      const first = parseNode(input);
+      const renamed = parseNode(input.replace(/#.*$/, "#Renamed"));
+      const changed = editConfig(first, {
+        ...first.normalized_config,
+        port: first.normalized_config.port === 443 ? 8443 : 443,
+      });
+      expect(getNodeSemanticKey(first)).toBe(getNodeSemanticKey(renamed));
+      expect(getNodeSemanticKey(first)).not.toBe(getNodeSemanticKey(changed));
+    },
+  );
+  it("deduplicates by ordered first occurrence and keeps emitted URI order", () => {
+    const a = parseNode(vless);
+    const b = parseNode(vmess);
+    const c = parseNode(fixtures[7][1]);
+    const d = editConfig(b, { ...b.normalized_config, name: "VMess alias" });
+    const result = dedupeSubscriptionNodes([a, b, c, d]);
+    expect(result.emitted).toEqual([a, b, c]);
+    expect(result.suppressed).toHaveLength(1);
+    expect(generateUniversalUriLines(result.emitted).split("\n")).toHaveLength(
+      3,
+    );
+  });
   it("VMess unknown query survives edit and second parse", () => {
     const e = parseNode(vmess + "?foo=1&foo=2");
     e.normalized_config.port = 8443;

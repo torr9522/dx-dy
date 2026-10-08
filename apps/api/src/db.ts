@@ -258,6 +258,12 @@ export class Store {
       id,
     ).map((r) => this.node(r, []));
   }
+  selectedNodes(id: number) {
+    return this.all(
+      "SELECT n.* FROM subscription_nodes sn JOIN nodes n ON n.id=sn.node_id WHERE sn.subscription_id=? ORDER BY sn.position",
+      id,
+    ).map((r) => this.node(r, []));
+  }
   settings() {
     return Object.fromEntries(
       this.all("SELECT * FROM settings").map((r) => [

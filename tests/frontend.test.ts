@@ -7,6 +7,8 @@ import {
   setRangeSelection,
   setVisibleSelection,
   visibleSelectionState,
+  setGroupedSelection,
+  semanticDuplicateOf,
 } from "../apps/web/src/nodeSelection";
 describe("frontend editor and filters", () => {
   it("nested edit is immutable", () => {
@@ -38,6 +40,26 @@ describe("frontend editor and filters", () => {
 });
 
 describe("shared node selection", () => {
+  it("keeps the first visible semantic group and blocks selected/cross-source duplicates", () => {
+    const keys = new Map([
+      [1, "a"],
+      [2, "b"],
+      [3, "b"],
+      [4, "c"],
+    ]);
+    const group = (id: number) => keys.get(id)!;
+    const first = setGroupedSelection(
+      new Set<number>(),
+      [1, 2, 3, 4],
+      true,
+      group,
+    );
+    expect([...first.selected]).toEqual([1, 2, 4]);
+    expect(first.blocked).toEqual([3]);
+    const crossSource = setGroupedSelection(first.selected, [3], true, group);
+    expect([...crossSource.selected]).toEqual([1, 2, 4]);
+    expect(semanticDuplicateOf(3, first.selected, group)).toBe(2);
+  });
   it("toggles one node with Set semantics", () => {
     const selected = setVisibleSelection(new Set([1]), [2], true);
     expect([...selected]).toEqual([1, 2]);

@@ -172,6 +172,107 @@ export function generateUniversalBase64Subscription(nodes: Envelope[]) {
     "base64",
   );
 }
+
+function stableJson(value: Json): Json {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])]),
+    );
+  return value;
+}
+
+export function canonicalizeRenderedProxyUri(rendered: string): string | null {
+  try {
+    if (rendered.startsWith("vmess://")) {
+      const source = rendered.slice("vmess://".length);
+      const queryIndex = source.indexOf("?");
+      const payload = queryIndex < 0 ? source : source.slice(0, queryIndex);
+      const query = queryIndex < 0 ? "" : source.slice(queryIndex);
+      const object = JSON.parse(
+        Buffer.from(payload, "base64").toString("utf8"),
+      ) as Record<string, Json>;
+      if (!object || Array.isArray(object) || typeof object !== "object")
+        return null;
+      delete object.ps;
+      return `vmess:${JSON.stringify(stableJson(object))}${query}`;
+    }
+    if (/^(?:vless|trojan|ss|hysteria2|hy2|tuic):\/\//.test(rendered)) {
+      const fragmentIndex = rendered.indexOf("#");
+      return fragmentIndex < 0 ? rendered : rendered.slice(0, fragmentIndex);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const fallbackIdentities = new WeakMap<object, number>();
+let fallbackIdentity = 0;
+export function getNodeSemanticKey(node: Envelope & { id?: number }) {
+  try {
+    const canonical = canonicalizeRenderedProxyUri(generateURI(node));
+    if (canonical !== null) return hash(canonical);
+  } catch {
+    /* A malformed/unsupported node must never suppress another node. */
+  }
+  let identity = node.id;
+  if (identity === undefined) {
+    identity = fallbackIdentities.get(node);
+    if (identity === undefined) {
+      identity = ++fallbackIdentity;
+      fallbackIdentities.set(node, identity);
+    }
+  }
+  console.warn(
+    JSON.stringify({
+      event: "semantic_canonicalization_failed",
+      node_id: node.id,
+    }),
+  );
+  return hash(`unproven:${identity}`);
+}
+
+export type SemanticDuplicate<T> = {
+  node: T;
+  duplicateOf: T;
+  semanticKey: string;
+};
+
+export function dedupeSubscriptionNodes<T extends Envelope & { id?: number }>(
+  nodes: readonly T[],
+) {
+  const seen = new Map<string, T>();
+  const emitted: T[] = [];
+  const suppressed: SemanticDuplicate<T>[] = [];
+  for (const node of nodes) {
+    const semanticKey = getNodeSemanticKey(node);
+    const first = seen.get(semanticKey);
+    if (first) suppressed.push({ node, duplicateOf: first, semanticKey });
+    else {
+      seen.set(semanticKey, node);
+      emitted.push(node);
+    }
+  }
+  return { emitted, suppressed };
+}
+
+export function findSemanticDuplicateGroups<
+  T extends Envelope & { id?: number },
+>(nodes: readonly T[]) {
+  const groups = new Map<string, T[]>();
+  for (const node of nodes) {
+    const key = getNodeSemanticKey(node);
+    const group = groups.get(key);
+    if (group) group.push(node);
+    else groups.set(key, [node]);
+  }
+  return [...groups.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([semanticKey, group]) => ({ semanticKey, nodes: group }));
+}
 // Internal compatibility exports share the canonical implementation.
 export const generateBase64Subscription = generateUniversalBase64Subscription;
 export function generateShadowrocket(nodes: Envelope[]) {

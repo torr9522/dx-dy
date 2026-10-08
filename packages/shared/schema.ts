@@ -110,6 +110,7 @@ export type NodeRecord = Envelope & {
   updated_at: string;
   references: number;
   collection_ids: number[];
+  semantic_key?: string;
 };
 export type NodeCollection = {
   id: number;

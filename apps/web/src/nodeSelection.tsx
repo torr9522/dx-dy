@@ -4,6 +4,7 @@ import { Search, X } from "lucide-react";
 import type { NodeRecord } from "../../../packages/shared/schema";
 
 export type NodeId = number;
+export type SelectionGroup = (id: NodeId) => string;
 
 export function visibleSelectionState(
   selected: ReadonlySet<NodeId>,
@@ -27,6 +28,40 @@ export function setVisibleSelection(
     if (shouldSelect) next.add(id);
     else next.delete(id);
   return next;
+}
+
+export function setGroupedSelection(
+  selected: ReadonlySet<NodeId>,
+  ids: readonly NodeId[],
+  shouldSelect: boolean,
+  group: SelectionGroup,
+) {
+  if (!shouldSelect)
+    return { selected: setVisibleSelection(selected, ids, false), blocked: [] };
+  const next = new Set(selected);
+  const groups = new Set([...selected].map(group));
+  const blocked: NodeId[] = [];
+  for (const id of ids) {
+    if (next.has(id)) continue;
+    const key = group(id);
+    if (groups.has(key)) blocked.push(id);
+    else {
+      groups.add(key);
+      next.add(id);
+    }
+  }
+  return { selected: next, blocked };
+}
+
+export function semanticDuplicateOf(
+  id: NodeId,
+  selected: ReadonlySet<NodeId>,
+  group: SelectionGroup,
+) {
+  const key = group(id);
+  return [...selected].find(
+    (selectedId) => selectedId !== id && group(selectedId) === key,
+  );
 }
 
 export function setRangeSelection(
@@ -61,7 +96,13 @@ export function selectedNodes<T extends { id: NodeId }>(
   return nodes.filter((node) => selected.has(node.id));
 }
 
-export function useNodeSelection(initialIds: readonly NodeId[] = []) {
+export function useNodeSelection(
+  initialIds: readonly NodeId[] = [],
+  options: {
+    group?: SelectionGroup;
+    onBlocked?: (ids: readonly NodeId[]) => void;
+  } = {},
+) {
   const [selected, setSelected] = useState<Set<NodeId>>(
     () => new Set(initialIds),
   );
@@ -93,25 +134,50 @@ export function useNodeSelection(initialIds: readonly NodeId[] = []) {
       const anchorId = anchor.current;
       setSelected((current) => {
         const shouldSelect = options.checked ?? !current.has(id);
-        return options.shiftKey && options.visibleIds
-          ? setRangeSelection(
-              current,
-              options.visibleIds,
-              anchorId,
-              id,
-              disabled,
-              shouldSelect,
-            )
-          : setVisibleSelection(current, [id], shouldSelect);
+        const changed =
+          options.shiftKey && options.visibleIds
+            ? setRangeSelection(
+                current,
+                options.visibleIds,
+                anchorId,
+                id,
+                disabled,
+                shouldSelect,
+              )
+            : setVisibleSelection(current, [id], shouldSelect);
+        if (!shouldSelect || !optionsRef.current.group) return changed;
+        const targetIds = [...changed].filter(
+          (candidate) => !current.has(candidate),
+        );
+        const result = setGroupedSelection(
+          current,
+          targetIds,
+          true,
+          optionsRef.current.group,
+        );
+        if (result.blocked.length)
+          optionsRef.current.onBlocked?.(result.blocked);
+        return result.selected;
       });
       anchor.current = id;
     },
     [],
   );
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const toggleVisible = useCallback((ids: readonly NodeId[]) => {
     setSelected((current) => {
       const { all } = visibleSelectionState(current, ids);
-      return setVisibleSelection(current, ids, !all);
+      if (all || !optionsRef.current.group)
+        return setVisibleSelection(current, ids, !all);
+      const result = setGroupedSelection(
+        current,
+        ids,
+        true,
+        optionsRef.current.group,
+      );
+      if (result.blocked.length) optionsRef.current.onBlocked?.(result.blocked);
+      return result.selected;
     });
   }, []);
   const removeOne = useCallback((id: NodeId) => {
@@ -172,6 +238,7 @@ export function SelectedNodesDialog({
   selected,
   remove,
   protocolLabel,
+  duplicateOf,
 }: {
   open: boolean;
   close: () => void;
@@ -179,6 +246,7 @@ export function SelectedNodesDialog({
   selected: ReadonlySet<NodeId>;
   remove: (id: NodeId) => void;
   protocolLabel: (protocol: string) => string;
+  duplicateOf?: (id: NodeId) => NodeId | undefined;
 }) {
   const [search, setSearch] = useState("");
   const chosen = selectedNodes(nodes, selected).filter(
@@ -223,6 +291,9 @@ export function SelectedNodesDialog({
                       {protocolLabel(node.protocol)} ·{" "}
                       {node.normalized_config.server}
                     </small>
+                    {duplicateOf?.(node.id) !== undefined && (
+                      <small className="duplicate-note">重复配置</small>
+                    )}
                   </div>
                   <button onClick={() => remove(node.id)}>取消选择</button>
                 </div>

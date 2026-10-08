@@ -43,7 +43,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.6",
+      version: "0.1.7",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -916,6 +916,159 @@ describe("API and domain regression", () => {
       ).status,
     ).toBe(200);
     expect((await agent.get("/api/nodes")).status).toBe(401);
+  });
+});
+
+describe("subscription semantic duplicate protection", () => {
+  it("rejects new duplicates, preserves historical relations, and dedupes every feed", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const post = (route: string, body: object) =>
+        agent.post(route).set("X-CSRF-Token", csrf).send(body);
+      const imported = (
+        await post("/api/nodes/import", {
+          items: [
+            { uri: vmess, name: "阿里香港" },
+            { uri: vmess, name: "HK Backup" },
+          ],
+        })
+      ).body as NodeRecord[];
+      const listed = (await agent.get("/api/nodes")).body as NodeRecord[];
+      expect(
+        listed.find((node) => node.id === imported[0].id)?.semantic_key,
+      ).toBe(listed.find((node) => node.id === imported[1].id)?.semantic_key);
+      const subscription = (
+        await post("/api/subscriptions", { name: "Historical duplicate" })
+      ).body as { id: number };
+      const rejected = await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: imported.map((node) => node.id) });
+      expect(rejected.status).toBe(422);
+      expect(rejected.body.error).toMatchObject({
+        code: "DUPLICATE_SEMANTICS",
+        details: {
+          duplicates: [
+            {
+              node_id: imported[1].id,
+              display_name: "HK Backup",
+              protocol: "vmess",
+              duplicate_of_node_id: imported[0].id,
+            },
+          ],
+        },
+      });
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) n FROM subscription_nodes WHERE subscription_id=?",
+          subscription.id,
+        )?.n,
+      ).toBe(0);
+
+      system.store.assign(
+        subscription.id,
+        imported.map((node) => node.id),
+      );
+      const url = (await agent.get(`/api/subscriptions/${subscription.id}/url`))
+        .body.url as string;
+      const path = new URL(url).pathname;
+      const raw = await request(system.app).get(path + "?format=raw");
+      expect(raw.text.split("\n")).toHaveLength(1);
+      const canonical = await request(system.app).get(path);
+      expect(Buffer.from(canonical.text, "base64").toString("utf8")).toBe(
+        raw.text,
+      );
+      for (const alias of ["auto", "v2ray", "shadowrocket"])
+        expect(
+          (await request(system.app).get(`${path}?format=${alias}`)).text,
+        ).toBe(canonical.text);
+
+      const preview = await agent.get(
+        `/api/subscriptions/${subscription.id}/preview`,
+      );
+      expect(preview.body).toMatchObject({
+        selected_node_count: 2,
+        emitted_node_count: 1,
+        suppressed_duplicate_count: 1,
+      });
+      expect(preview.body.nodes).toHaveLength(1);
+      expect(preview.body.duplicate_groups).toHaveLength(1);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) n FROM subscription_nodes WHERE subscription_id=?",
+          subscription.id,
+        )?.n,
+      ).toBe(2);
+
+      const collection = (
+        await post("/api/collections", { name: "Duplicates allowed" })
+      ).body as { id: number };
+      await post(`/api/collections/${collection.id}/nodes`, {
+        node_ids: imported.map((node) => node.id),
+      }).expect(200);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) n FROM node_collection_members WHERE collection_id=?",
+          collection.id,
+        )?.n,
+      ).toBe(2);
+
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [imported[0].id] })
+        .expect(200);
+      expect(system.store.selectedNodes(subscription.id)).toHaveLength(1);
+    } finally {
+      system.store.close();
+    }
+  });
+
+  it("allows equal display names when connection semantics differ", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const changed = JSON.parse(
+        Buffer.from(vmess.slice(8), "base64").toString("utf8"),
+      );
+      changed.port = "8443";
+      const changedUri =
+        "vmess://" + Buffer.from(JSON.stringify(changed)).toString("base64");
+      const imported = (
+        await agent
+          .post("/api/nodes/import")
+          .set("X-CSRF-Token", csrf)
+          .send({
+            items: [
+              { uri: vmess, name: "阿里 hk1" },
+              { uri: changedUri, name: "阿里 hk1" },
+            ],
+          })
+      ).body as NodeRecord[];
+      const subscription = (
+        await agent
+          .post("/api/subscriptions")
+          .set("X-CSRF-Token", csrf)
+          .send({ name: "Same name" })
+      ).body as { id: number };
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: imported.map((node) => node.id) })
+        .expect(200);
+      expect(system.store.authorized(subscription.id)).toHaveLength(2);
+    } finally {
+      system.store.close();
+    }
   });
 });
 describe("isolated rate limits and token AEAD", () => {

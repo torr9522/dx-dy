@@ -53,6 +53,7 @@ import {
   SelectedNodesDialog,
   SelectionMaster,
   shouldToggleRow,
+  semanticDuplicateOf,
   useNodeSelection,
 } from "./nodeSelection";
 import "./style.css";
@@ -284,7 +285,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.6</small>
+          <small>Private Subscription Manager v0.1.7</small>
         </div>
       </aside>
       <main>
@@ -1438,11 +1439,13 @@ function SortableNode({
   remove,
   up,
   down,
+  duplicate = false,
 }: {
   node: NodeRecord;
   remove: () => void;
   up: () => void;
   down: () => void;
+  duplicate?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: node.id });
@@ -1465,6 +1468,7 @@ function SortableNode({
         <small>
           {labelProtocol(node.protocol)} · {node.enabled ? "启用" : "禁用"}
         </small>
+        {duplicate && <small className="duplicate-note">重复配置</small>}
       </div>
       <button
         aria-label={`上移 ${node.name}`}
@@ -1557,6 +1561,14 @@ function SubscriptionActions({
     [output, setOutput] = useState<{
       decoded: string;
       nodes: { name: string; protocol: string }[];
+      selected_node_count: number;
+      emitted_node_count: number;
+      suppressed_duplicate_count: number;
+      duplicate_groups: {
+        node_id: number;
+        name: string;
+        protocol: string;
+      }[][];
     } | null>(null);
   const work = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -1634,7 +1646,14 @@ function SubscriptionActions({
         title="通用订阅预览"
         description="含敏感节点凭据，仅管理员可见。"
       >
-        <p>节点数量：{output?.nodes.length ?? 0}</p>
+        <p>已选择：{output?.selected_node_count ?? 0} 个节点</p>
+        <p>实际订阅输出：{output?.emitted_node_count ?? 0} 个唯一节点</p>
+        {!!output?.suppressed_duplicate_count && (
+          <div className="duplicate-warning" role="status">
+            检测到 {output.suppressed_duplicate_count}{" "}
+            个重复连接配置，订阅输出已抑制。
+          </div>
+        )}
         <ol aria-label="订阅节点顺序">
           {output?.nodes.map((node, i) => (
             <li key={i}>
@@ -1694,7 +1713,12 @@ function ProfileDetail({
     [collectionId, setCollectionId] = useState<number | null>(null),
     [reviewOpen, setReviewOpen] = useState(false),
     [busy, setBusy] = useState(false);
-  const selection = useNodeSelection(initial.node_ids);
+  const semanticGroup = (id: number) =>
+    nodes.find((node) => node.id === id)?.semantic_key || `node:${id}`;
+  const selection = useNodeSelection(initial.node_ids, {
+    group: semanticGroup,
+    onBlocked: () => notify("重复配置：该节点与已选择节点连接配置相同"),
+  });
   const ids = selection.selectedIds;
   const setIds = selection.replace;
   const sensors = useSensors(
@@ -1723,6 +1747,25 @@ function ProfileDetail({
   const candidateNodes = sourceNodes.filter((node) =>
     nodeMatches(node, search, filter, tag, status),
   );
+  const candidateIds = candidateNodes.map((node) => node.id);
+  const reservedGroups = new Set(ids.map(semanticGroup));
+  const candidateSelectableIds: number[] = [];
+  for (const node of candidateNodes) {
+    if (selection.isSelected(node.id)) {
+      candidateSelectableIds.push(node.id);
+      reservedGroups.add(semanticGroup(node.id));
+    } else if (!reservedGroups.has(semanticGroup(node.id))) {
+      candidateSelectableIds.push(node.id);
+      reservedGroups.add(semanticGroup(node.id));
+    }
+  }
+  const duplicateOf = (nodeId: number) =>
+    semanticDuplicateOf(nodeId, selection.selected, semanticGroup);
+  const duplicateConflicts = new Set(
+    ids
+      .filter((nodeId) => duplicateOf(nodeId) !== undefined)
+      .map(semanticGroup),
+  ).size;
   const selectedCollection = collections.find((c) => c.id === collectionId);
   useEffect(
     () => selection.resetAnchor(),
@@ -1789,6 +1832,12 @@ function ProfileDetail({
           <p className="muted">
             来源只筛选候选节点；订阅仍由明确勾选的节点决定
           </p>
+          {!!duplicateConflicts && (
+            <div className="duplicate-warning" role="alert">
+              当前订阅存在 {duplicateConflicts}{" "}
+              个重复配置，请取消重复节点后再保存。
+            </div>
+          )}
           <div className="subscription-source" aria-label="节点来源">
             <div className="source-master">
               <small>节点库</small>
@@ -1876,59 +1925,69 @@ function ProfileDetail({
           <div className="selection-toolbar">
             <SelectionMaster
               selected={selection.selected}
-              selectableIds={candidateNodes.map((node) => node.id)}
-              toggle={() =>
-                selection.toggleVisible(candidateNodes.map((node) => node.id))
-              }
+              selectableIds={candidateSelectableIds}
+              toggle={() => selection.toggleVisible(candidateSelectableIds)}
               label="当前候选节点"
             />
           </div>
           <div className="node-picker">
-            {candidateNodes.map((n) => (
-              <div
-                key={n.id}
-                className={`picker-node selectable-row${selection.isSelected(n.id) ? " is-selected" : ""}`}
-                onMouseDown={(event) => {
-                  if (event.shiftKey && shouldToggleRow(event.target, true)) {
-                    event.preventDefault();
-                    selection.toggleOne(n.id, {
-                      shiftKey: true,
-                      visibleIds: candidateNodes.map((node) => node.id),
-                    });
-                  }
-                }}
-                onClick={(event) => {
-                  if (!event.shiftKey && shouldToggleRow(event.target))
-                    selection.toggleOne(n.id, {
-                      visibleIds: candidateNodes.map((node) => node.id),
-                    });
-                }}
-              >
-                <input
-                  type="checkbox"
-                  aria-label={`选择订阅节点 ${n.name}`}
-                  checked={selection.isSelected(n.id)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    selection.toggleOne(n.id, {
-                      checked: event.currentTarget.checked,
-                      shiftKey: event.shiftKey,
-                      visibleIds: candidateNodes.map((node) => node.id),
-                    });
+            {candidateNodes.map((n) => {
+              const duplicateNodeId = duplicateOf(n.id);
+              const duplicate =
+                !selection.isSelected(n.id) && duplicateNodeId !== undefined;
+              return (
+                <div
+                  key={n.id}
+                  className={`picker-node selectable-row${selection.isSelected(n.id) ? " is-selected" : ""}${duplicate ? " is-duplicate" : ""}`}
+                  aria-disabled={duplicate || undefined}
+                  onMouseDown={(event) => {
+                    if (event.shiftKey && shouldToggleRow(event.target, true)) {
+                      event.preventDefault();
+                      selection.toggleOne(n.id, {
+                        shiftKey: true,
+                        visibleIds: candidateIds,
+                      });
+                    }
                   }}
-                  onChange={() => undefined}
-                />
-                <div>
-                  <strong>{n.name}</strong>
-                  <small>
-                    {labelProtocol(n.protocol)} · {n.normalized_config.server}
-                  </small>
+                  onClick={(event) => {
+                    if (!event.shiftKey && shouldToggleRow(event.target))
+                      selection.toggleOne(n.id, {
+                        visibleIds: candidateNodes.map((node) => node.id),
+                      });
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`选择订阅节点 ${n.name}`}
+                    checked={selection.isSelected(n.id)}
+                    aria-disabled={duplicate || undefined}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selection.toggleOne(n.id, {
+                        checked: event.currentTarget.checked,
+                        shiftKey: event.shiftKey,
+                        visibleIds: candidateIds,
+                      });
+                    }}
+                    onChange={() => undefined}
+                  />
+                  <div>
+                    <strong>{n.name}</strong>
+                    <small>
+                      {labelProtocol(n.protocol)} · {n.normalized_config.server}
+                    </small>
+                    {duplicate && (
+                      <small className="duplicate-note">
+                        重复配置 · 与已选择节点相同
+                      </small>
+                    )}
+                  </div>
+                  <span className={n.enabled ? "state enabled" : "state"}>
+                    {n.enabled ? "启用" : "禁用"}
+                  </span>
                 </div>
-                <span className={n.enabled ? "state enabled" : "state"}>
-                  {n.enabled ? "启用" : "禁用"}
-                </span>
-              </div>
-            ))}
+              );
+            })}
             {!candidateNodes.length && (
               <div className="selector-empty">
                 <Network size={28} />
@@ -2011,6 +2070,7 @@ function ProfileDetail({
                   remove={() => selection.removeOne(n.id)}
                   up={() => move(i, i - 1)}
                   down={() => move(i, i + 1)}
+                  duplicate={duplicateOf(n.id) !== undefined}
                 />
               ))}
             </SortableContext>
@@ -2076,6 +2136,7 @@ function ProfileDetail({
         selected={selection.selected}
         remove={selection.removeOne}
         protocolLabel={labelProtocol}
+        duplicateOf={duplicateOf}
       />
     </>
   );
