@@ -26,8 +26,8 @@ import {
 import {
   editConfig,
   generateURI,
-  generateShadowrocket,
-  generateBase64Subscription,
+  generateUniversalUriLines,
+  generateUniversalBase64Subscription,
   parseNode,
   preview,
 } from "../../../packages/proxy-adapter";
@@ -137,7 +137,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.0" });
+    res.json({ status: "ok", database: "ok", version: "0.1.1" });
   });
   app.post(
     "/api/auth/login",
@@ -427,23 +427,28 @@ export async function createApp(options: Options) {
     const base = String(store.settings().public_base_url || options.publicBase);
     res.json({ url: `${base}/s/${token}` });
   });
-  const render = (nodes: Envelope[], format: string) =>
-    format === "shadowrocket"
-      ? generateShadowrocket(nodes)
-      : {
-          body:
-            format === "v2ray"
-              ? generateBase64Subscription(nodes)
-              : nodes.map(generateURI).join("\n"),
-          contentType: "text/plain; charset=utf-8",
-          mode: format,
-        };
+  const render = (nodes: Envelope[], format: string) => ({
+    body:
+      format === "raw"
+        ? generateUniversalUriLines(nodes)
+        : generateUniversalBase64Subscription(nodes),
+    contentType: "text/plain; charset=utf-8",
+    mode: format === "raw" ? "raw" : "universal-base64",
+  });
   app.get("/api/subscriptions/:id/preview", (req, res) => {
     const p = getProfile(req);
     const f = z
-      .enum(["raw", "v2ray", "shadowrocket"])
-      .parse(req.query.format || "raw");
-    res.json(render(store.authorized(Number(p.id)), f));
+      .enum(["auto", "raw", "v2ray", "shadowrocket"])
+      .parse(req.query.format || "auto");
+    const nodes = store.authorized(Number(p.id));
+    res.json({
+      ...render(nodes, f),
+      decoded: generateUniversalUriLines(nodes),
+      nodes: nodes.map((node) => ({
+        name: node.normalized_config.name,
+        protocol: node.normalized_config.type,
+      })),
+    });
   });
   app.get("/api/dashboard", (_req, res) => {
     const nodes = store.nodes(),
@@ -511,16 +516,9 @@ export async function createApp(options: Options) {
         digest(token),
       );
       if (!p) return fail(404, "NOT_FOUND", "订阅不可用");
-      let format = z
+      const format = z
         .enum(["auto", "raw", "v2ray", "shadowrocket"])
         .parse(req.query.format || "auto");
-      if (format === "auto")
-        format = /shadowrocket/i.test(req.headers["user-agent"] || "")
-          ? "shadowrocket"
-          : (String(store.settings().default_format || "v2ray") as
-              | "raw"
-              | "v2ray"
-              | "shadowrocket");
       const output = render(store.authorized(Number(p.id)), format);
       res
         .set("Content-Type", output.contentType)
@@ -536,7 +534,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.0-source.tar.gz",
+        "private-subscription-manager-0.1.1-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

@@ -5,6 +5,7 @@ Copy these checks into the release review; do not precheck them from an earlier 
 ## Source
 - [ ] Git clean, expected master branch, no untracked release-critical files
 - [ ] Product version consistent, CHANGELOG updated
+- [ ] Each actual task increments decimal product version with carry at ten; no repeated RC substituted for a new task
 - [ ] LICENSE and THIRD_PARTY_NOTICES correct
 - [ ] Git source inventory refreshed and committed
 

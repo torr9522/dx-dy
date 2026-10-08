@@ -1,4 +1,4 @@
-# Private Subscription Manager 0.1.0
+# Private Subscription Manager 0.1.1
 
 单管理员的私人节点资产库、多订阅 Profile 与订阅分发系统。**不是机场**：无普通用户、注册、套餐、支付、订单、流量计费或运营模块。
 
@@ -9,14 +9,16 @@
 - 结构化 Drawer、高级 JSON、重新导入差异确认、恢复原始参数。
 - original_uri / normalized_config / ordered raw sidecar 分离。
 - 随机 Token、SHA-256 lookup、AES-256-GCM 密文保存、轮换/禁用/删除。
-- Raw、V2Ray Base64、Shadowrocket 标准 Base64 URI 订阅。
+- 一个 Profile、一个正式 `/s/<TOKEN>` 通用标准 Base64 URI 订阅链接。
 - 中文后台，搜索/筛选、拖拽排序、QR、Light/Dark/System、密码修改。
 
 ## 协议与客户端
 
 VLESS (TLS/Reality/Vision/TCP/WS/gRPC/HTTPUpgrade/XHTTP)、VMess legacy JSON、Trojan、SS SIP002、Hysteria2、TUIC v5。固定 Sub-Store 源码提供 parser/producer。未知 query 保存原始编码与重复项；已知字段以当前结构化值为准。
 
-目标客户端 Shadowrocket、v2rayN、v2rayNG。服务器格式与 round-trip 验证不能替代设备级验收。Shadowrocket 与 V2Ray 当前共用标准 Base64 URI feed：当前 URI 按订阅顺序以 LF 拼接，UTF-8 后整体标准 Base64。Sub-Store structured Shadowrocket producer 仅保留内部用途，不用于公网订阅响应。没有 Clash rules、策略组、DNS 模板。v0.1 不安装 Xray Core。
+目标客户端 Shadowrocket、v2rayN、v2rayNG，以及支持标准 Base64 URI Subscription 的客户端。服务器格式支持已验证；**Shadowrocket 真机验收仍待用户测试，当前设备失败根因未确认**。正式 URL 只有 `/s/<TOKEN>`：当前 normalized 配置 + unknown sidecar 生成 URI，按授权 position 排序、LF 拼接、UTF-8 整体标准 Base64；不随 UA、Accept 或旧默认格式设置变化。空订阅返回空文本。旧 `?format=v2ray`、`?format=shadowrocket`、`?format=auto` 不重定向，返回相同 body。`?format=raw` 仅作开发调试，不是主 UI 入口。管理预览显示节点顺序/协议/名称，高级区域可查看解码 URI（含凭据）。
+
+Sub-Store structured Shadowrocket producer 仅保留内部用途，不用于公网订阅响应。没有 Clash rules、策略组、DNS 模板，不安装 Xray Core。详见 [订阅格式契约与兼容证据](docs/SUBSCRIPTION_FORMAT.md)。
 
 ## 技术栈
 
@@ -94,6 +96,8 @@ docker compose exec app node dist/backup.mjs /data/backups/manual.sqlite
 ## 开发与发布
 
 产品版本来源为 `package.json`。使用 `master` 主线和 annotated RC tags；stable tag 与 remote push 必须用户明确批准。
+
+每轮实际修改版本固定 +0.0.1，十进制进位（0.1.9 → 0.2.0），下一轮为 0.1.2；不能用重复 RC 代替任务版本递增。
 
 ```sh
 pnpm release:check

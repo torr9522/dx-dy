@@ -1561,7 +1561,12 @@ function ProfileDetail({
     [tag, setTag] = useState(""),
     [url, setUrl] = useState(""),
     [qr, setQr] = useState(""),
-    [output, setOutput] = useState<{ body: string; mode: string } | null>(null),
+    [output, setOutput] = useState<{
+      body: string;
+      decoded: string;
+      mode: string;
+      nodes: { name: string; protocol: string }[];
+    } | null>(null),
     [qrOpen, setQrOpen] = useState(false),
     [busy, setBusy] = useState(false);
   const sensors = useSensors(
@@ -1762,53 +1767,44 @@ function ProfileDetail({
           链接即访问凭证，请不要公开分享。轮换后旧链接立即失效。
         </p>
         <div className="subscription-links">
-          {[
-            ["shadowrocket", "Shadowrocket"],
-            ["v2ray", "V2Ray / v2rayN / v2rayNG"],
-            ["raw", "Raw URI"],
-          ].map(([format, label]) => (
-            <div className="link-row" key={format}>
-              <strong>{label}</strong>
-              <span className="mono muted">/s/••••••••?format={format}</span>
-              <button
-                disabled={!url}
-                onClick={() => work(() => copy(url + "?format=" + format))}
-              >
-                <Copy size={15} />
-                复制链接
-              </button>
-              <button
-                onClick={() =>
-                  work(async () => {
-                    setOutput(
-                      await api(
-                        `/subscriptions/${profile.id}/preview?format=${format}`,
-                      ),
-                    );
-                  })
-                }
-              >
-                <ExternalLink size={15} />
-                预览
-              </button>
-              <button
-                disabled={!url}
-                onClick={() =>
-                  work(async () => {
-                    setQr(
-                      await QRCode.toDataURL(url + "?format=" + format, {
-                        width: 300,
-                        margin: 2,
-                      }),
-                    );
-                    setQrOpen(true);
-                  })
-                }
-              >
-                二维码
-              </button>
-            </div>
-          ))}
+          <p className="muted">
+            适用于 Shadowrocket、v2rayN、v2rayNG 及其他支持标准 Base64 URI
+            Subscription 的客户端。Shadowrocket 真机验收待完成。
+          </p>
+          <div className="link-row">
+            <strong>通用订阅</strong>
+            <span className="mono muted">/s/••••••••</span>
+            <button disabled={!url} onClick={() => work(() => copy(url))}>
+              <Copy size={15} />
+              复制订阅链接
+            </button>
+            <button
+              onClick={() =>
+                work(async () => {
+                  setOutput(await api(`/subscriptions/${profile.id}/preview`));
+                })
+              }
+            >
+              <ExternalLink size={15} />
+              预览
+            </button>
+            <button
+              disabled={!url}
+              onClick={() =>
+                work(async () => {
+                  setQr(
+                    await QRCode.toDataURL(url, {
+                      width: 300,
+                      margin: 2,
+                    }),
+                  );
+                  setQrOpen(true);
+                })
+              }
+            >
+              二维码
+            </button>
+          </div>
         </div>
         <div className="modal-actions">
           <button
@@ -1847,11 +1843,21 @@ function ProfileDetail({
       <Modal
         open={!!output}
         onClose={() => setOutput(null)}
-        title="实际订阅输出"
+        title="通用订阅预览"
         description="含敏感节点凭据，仅管理员可见。"
       >
-        <small>输出方式：{output?.mode}</small>
-        <pre className="output">{output?.body || "（空订阅）"}</pre>
+        <p>节点数量：{output?.nodes.length ?? 0}</p>
+        <ol aria-label="订阅节点顺序">
+          {output?.nodes.map((node, i) => (
+            <li key={i}>
+              {node.protocol.toUpperCase()} · {node.name}
+            </li>
+          ))}
+        </ol>
+        <details>
+          <summary>高级：查看解码后的 URI（含凭据）</summary>
+          <pre className="output">{output?.decoded || "（空订阅）"}</pre>
+        </details>
       </Modal>
       <Modal
         open={qrOpen}
@@ -1860,6 +1866,9 @@ function ProfileDetail({
         description="扫码获取订阅凭证，请勿公开截图。"
       >
         <img className="qr" src={qr} alt="订阅二维码" />
+        <a href={url} className="mono" rel="noreferrer">
+          订阅链接
+        </a>
       </Modal>
     </>
   );
@@ -1910,18 +1919,6 @@ function SettingsPage({
               setSettings({ ...settings, public_base_url: e.target.value })
             }
           />
-        </Field>
-        <Field label="默认订阅格式">
-          <select
-            value={settings.default_format}
-            onChange={(e) =>
-              setSettings({ ...settings, default_format: e.target.value })
-            }
-          >
-            <option value="v2ray">V2Ray Base64</option>
-            <option value="shadowrocket">Shadowrocket</option>
-            <option value="raw">Raw URI</option>
-          </select>
         </Field>
         <button className="primary">保存设置</button>
       </form>

@@ -164,11 +164,16 @@ export function generateURI(node: Envelope): string {
 export function generateV2RayLine(node: Envelope) {
   return generateURI(node);
 }
-export function generateBase64Subscription(nodes: Envelope[]) {
-  return Buffer.from(nodes.map(generateURI).join("\n"), "utf8").toString(
+export function generateUniversalUriLines(nodes: Envelope[]) {
+  return nodes.map(generateURI).join("\n");
+}
+export function generateUniversalBase64Subscription(nodes: Envelope[]) {
+  return Buffer.from(generateUniversalUriLines(nodes), "utf8").toString(
     "base64",
   );
 }
+// Internal compatibility exports share the canonical implementation.
+export const generateBase64Subscription = generateUniversalBase64Subscription;
 export function generateShadowrocket(nodes: Envelope[]) {
   return {
     body: generateBase64Subscription(nodes),

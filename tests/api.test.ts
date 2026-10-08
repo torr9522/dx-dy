@@ -7,8 +7,8 @@ import {
   encryptToken,
   randomToken,
 } from "../apps/api/src/security";
-import { vless, vmess } from "./fixtures";
-import { parseNode } from "../packages/proxy-adapter";
+import { vless, vmess, fixtures } from "./fixtures";
+import { parseNode, generateURI } from "../packages/proxy-adapter";
 const password = "Synthetic-admin-password-123!";
 const options: Options = {
   database: ":memory:",
@@ -41,7 +41,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.0",
+      version: "0.1.1",
     });
   });
   it("unauthorized admin request fails", async () => {
@@ -176,12 +176,12 @@ describe("API and domain regression", () => {
       expected.map((node) => node.normalized_config),
     );
   });
-  it("UA auto detection and explicit format priority", async () => {
+  it("canonical format and explicit raw debug override", async () => {
     const path = new URL(url).pathname;
     const r = await request(system.app)
       .get(path)
       .set("User-Agent", "Shadowrocket");
-    expect(r.headers["x-subscription-format"]).toBe("shadowrocket-base64");
+    expect(r.headers["x-subscription-format"]).toBe("universal-base64");
     const raw = await request(system.app)
       .get(path + "?format=raw")
       .set("User-Agent", "Shadowrocket");
@@ -204,9 +204,72 @@ describe("API and domain regression", () => {
       expect(automatic.headers.location).toBeUndefined();
       expect(automatic.text).toBe(explicit.text);
       expect(override.text).toBe(explicit.text);
-      expect(override.headers["x-subscription-format"]).toBe("v2ray");
+      expect(override.headers["x-subscription-format"]).toBe(
+        "universal-base64",
+      );
     },
   );
+  it.each(["", "?format=auto", "?format=v2ray", "?format=shadowrocket"])(
+    "canonical/legacy %s is byte-identical across UAs and ignores old settings",
+    async (query) => {
+      system.store.set("default_format", "raw");
+      const path = new URL(url).pathname;
+      const expected = await request(system.app).get(path + "?format=v2ray");
+      for (const ua of [
+        "Shadowrocket/2.2.92",
+        "shadowrocket/unknown",
+        "v2rayN",
+        "v2rayNG",
+        "Mozilla/5.0",
+        "curl/8",
+        "Unknown-iOS-networking",
+      ]) {
+        const r = await request(system.app)
+          .get(path + query)
+          .set("User-Agent", ua)
+          .set("Accept", "text/html");
+        expect(r.status).toBe(200);
+        expect(r.headers.location).toBeUndefined();
+        expect(r.headers["content-type"]).toBe("text/plain; charset=utf-8");
+        expect(r.headers["cache-control"]).toBe("private, no-store");
+        expect(r.headers["content-encoding"]).toBeUndefined();
+        expect(r.text).toBe(expected.text);
+        expect(r.headers["x-subscription-format"]).toBe("universal-base64");
+      }
+    },
+  );
+  it("canonical empty profile and authenticated decoded summary", async () => {
+    const p = await post("/api/subscriptions", { name: "Empty universal" });
+    const path = new URL(
+      (await agent.get(`/api/subscriptions/${p.body.id}/url`)).body.url,
+    ).pathname;
+    for (const query of [
+      "",
+      "?format=auto",
+      "?format=v2ray",
+      "?format=shadowrocket",
+      "?format=raw",
+    ])
+      expect((await request(system.app).get(path + query)).text).toBe("");
+    const preview = await agent.get(`/api/subscriptions/${profile}/preview`);
+    expect(preview.body.mode).toBe("universal-base64");
+    expect(preview.body.nodes).toEqual(
+      system.store.authorized(profile).map((n) => ({
+        name: n.normalized_config.name,
+        protocol: n.normalized_config.type,
+      })),
+    );
+    expect(preview.body.decoded).toBe(
+      Buffer.from(preview.body.body, "base64").toString("utf8"),
+    );
+    expect(
+      (await request(system.app).get(`/api/subscriptions/${profile}/preview`))
+        .status,
+    ).toBe(401);
+    await agent
+      .delete(`/api/subscriptions/${p.body.id}`)
+      .set("X-CSRF-Token", csrf);
+  });
   it("simple VMess and empty feeds never expose structured producer output", async () => {
     const p = await post("/api/subscriptions", { name: "Format regression" });
     const path = new URL(
@@ -399,6 +462,87 @@ describe("API and domain regression", () => {
   });
 });
 describe("isolated rate limits and token AEAD", () => {
+  it("six-protocol canonical feed uses current config, ordered duplicate sidecars and Unicode", async () => {
+    const s = await createApp(options);
+    try {
+      const selected = [
+        fixtures[0][1].replace("#", "&vendor=%2f&vendor=second&flag#"),
+        fixtures[6][1],
+        ...fixtures.slice(7).map((f) => f[1]),
+      ];
+      const envelopes = selected.map(parseNode);
+      envelopes[0].normalized_config.port = 8443;
+      const ids = envelopes.map((n) => s.store.addNode(n));
+      const a = request.agent(s.app);
+      const login = await a
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const p = await a
+        .post("/api/subscriptions")
+        .set("X-CSRF-Token", login.body.csrf)
+        .send({ name: "六协议虚构订阅" });
+      await a
+        .put(`/api/subscriptions/${p.body.id}/nodes`)
+        .set("X-CSRF-Token", login.body.csrf)
+        .send({ node_ids: [...ids].reverse() });
+      const path = new URL(
+        (await a.get(`/api/subscriptions/${p.body.id}/url`)).body.url,
+      ).pathname;
+      const r = await request(s.app).get(path).set("Accept", "text/html");
+      expect(r.status).toBe(200);
+      expect(r.text).toMatch(
+        /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+      );
+      const decoded = Buffer.from(r.text, "base64").toString("utf8");
+      expect(Buffer.from(decoded, "utf8").toString("base64")).toBe(r.text);
+      const lines = decoded.split("\n");
+      expect(lines).toEqual([...envelopes].reverse().map(generateURI));
+      expect(
+        lines.map((line) => parseNode(line).normalized_config.type),
+      ).toEqual(["tuic", "hysteria2", "ss", "trojan", "vmess", "vless"]);
+      expect(decoded).not.toMatch(/\r|\uFEFF|proxies:|<!doctype|<html/i);
+      const vl = new URL(lines[5]);
+      expect(vl.port).toBe("8443");
+      expect(decodeURIComponent(vl.hash.slice(1))).toBe("日本 测试");
+      expect(vl.searchParams.getAll("vendor")).toEqual(["/", "second"]);
+      expect(lines[5]).toContain("vendor=%2f&vendor=second&flag");
+      for (const [field, value] of Object.entries({
+        encryption: "none",
+        security: "reality",
+        flow: "xtls-rprx-vision",
+        type: "tcp",
+        headerType: "none",
+        sni: "example.com",
+        fp: "chrome",
+        pbk: "fake-public-key",
+        sid: "abcd",
+        spx: "/synthetic",
+      }))
+        expect(vl.searchParams.get(field)).toBe(value);
+      const vm = JSON.parse(
+        Buffer.from(lines[4].slice(8), "base64").toString("utf8"),
+      );
+      expect(vm).toMatchObject({
+        v: "2",
+        ps: "虚构 VMess",
+        add: "example.com",
+        id: envelopes[1].normalized_config.uuid,
+        net: "tcp",
+        tls: "tls",
+        sni: "example.com",
+      });
+      expect(Number(vm.port)).toBe(443);
+      expect(Number(vm.aid)).toBe(0);
+      // Pinned Sub-Store uses an empty type for plain TCP; other producers use none.
+      expect(["", "none"]).toContain(vm.type);
+      for (const format of ["v2ray", "shadowrocket", "auto"])
+        expect(
+          (await request(s.app).get(path + "?format=" + format)).text,
+        ).toBe(r.text);
+    } finally {
+      s.store.close();
+    }
+  });
   it("login limit", async () => {
     const s = await createApp({ ...options, loginLimit: 2 });
     for (let i = 0; i < 2; i++)

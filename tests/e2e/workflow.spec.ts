@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { vless, vmess } from "../fixtures";
+import QRCode from "qrcode";
 test("complete browser workflow with synthetic nodes", async ({
   page,
   context,
@@ -67,17 +68,54 @@ test("complete browser workflow with synthetic nodes", async ({
   );
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
   await expect(page.locator(".toast")).toContainText("节点关联与顺序已保存");
-  const raw = page.locator(".link-row").filter({ hasText: "Raw URI" });
-  await raw.getByRole("button", { name: "复制链接" }).click();
+  const universal = page.locator(".link-row").filter({ hasText: "通用订阅" });
+  await expect(page.locator(".link-row")).toHaveCount(1);
+  await expect(page.getByText("Raw URI", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Shadowrocket", { exact: true })).toHaveCount(0);
+  await universal.getByRole("button", { name: "复制订阅链接" }).click();
   await expect(page.locator(".toast")).toContainText("已复制");
   const url = await page.evaluate(() => navigator.clipboard.readText());
+  expect(new URL(url).search).toBe("");
+  expect(new URL(url).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{43}$/);
   const before = await context.request.get(url);
   expect(before.status()).toBe(200);
-  expect((await before.text()).split("\n")[0]).toMatch(/^vmess:/);
-  await raw.getByRole("button", { name: "预览" }).click();
+  expect(
+    Buffer.from(await before.text(), "base64")
+      .toString("utf8")
+      .split("\n")[0],
+  ).toMatch(/^vmess:/);
+  await universal.getByRole("button", { name: "二维码" }).click();
   await expect(
-    page.getByRole("heading", { name: "实际订阅输出" }),
+    page.getByRole("dialog").getByRole("link", { name: "订阅链接" }),
+  ).toHaveAttribute("href", url);
+  const modules = QRCode.create(url).modules;
+  // Browser canvas and Node PNG encoders differ; compare the actual QR module pixels.
+  const pixels = await page
+    .getByRole("img", { name: "订阅二维码" })
+    .evaluate(async (element, size) => {
+      const img = element as HTMLImageElement;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const scale = canvas.width / (size + 4);
+      return Array.from({ length: size * size }, (_, i) => {
+        const x = Math.floor(((i % size) + 2.5) * scale);
+        const y = Math.floor((Math.floor(i / size) + 2.5) * scale);
+        return ctx.getImageData(x, y, 1, 1).data[0] < 128 ? 1 : 0;
+      });
+    }, modules.size);
+  expect(pixels).toEqual(Array.from(modules.data));
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await universal.getByRole("button", { name: "预览" }).click();
+  await expect(
+    page.getByRole("heading", { name: "通用订阅预览" }),
   ).toBeVisible();
+  await expect(page.getByText("节点数量：2", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "订阅节点顺序" }).locator("li").first(),
+  ).toHaveText("VMESS · E2E VMess");
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("button", { name: "重新生成 Token" }).click();
   await page
@@ -88,8 +126,10 @@ test("complete browser workflow with synthetic nodes", async ({
   expect((await context.request.get(url)).status()).toBe(404);
   await page.getByLabel("启用订阅", { exact: true }).uncheck();
   await page.getByRole("button", { name: "保存信息" }).click();
-  await raw.getByRole("button", { name: "复制链接" }).click();
+  await universal.getByRole("button", { name: "复制订阅链接" }).click();
   const rotated = await page.evaluate(() => navigator.clipboard.readText());
+  expect(rotated).not.toBe(url);
+  expect(new URL(rotated).search).toBe("");
   expect((await context.request.get(rotated)).status()).toBe(404);
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "E2E VLESS", exact: true }).click();

@@ -28,10 +28,13 @@ if (branch !== "master" && !(detached && branch === ""))
   throw new Error("Expected master branch");
 const files = verifyInventory();
 const v = version();
-if (!/^\d+\.\d+\.\d+$/.test(v)) throw new Error("Invalid product SemVer");
+if (!/^\d+\.[0-9]\.[0-9]$/.test(v))
+  throw new Error("Invalid decimal product version");
 for (const [file, text] of [
   ["README.md", "Private Subscription Manager " + v],
   ["apps/api/src/app.ts", `version: "${v}"`],
+  ["apps/api/src/main.ts", `version: "${v}"`],
+  ["apps/api/src/app.ts", `private-subscription-manager-${v}-source.tar.gz`],
   ["docker-compose.yml", "private-subscription-manager:" + v],
 ])
   if (!readFileSync(file, "utf8").includes(text))
