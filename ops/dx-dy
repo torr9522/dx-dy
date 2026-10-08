@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.1.9"
+readonly DXDY_MANAGER_VERSION="0.2.0"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.1.9 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.2.0 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"

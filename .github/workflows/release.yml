@@ -30,9 +30,7 @@ jobs:
           node-version: 26.10.0
           cache: pnpm
       - name: Validate direct version tag
-        run: |
-          test "${GITHUB_REF_NAME}" = "v$(node -p 'require("./package.json").version')"
-          case "${GITHUB_REF_NAME}" in *-rc.*) exit 1;; esac
+        run: node scripts/ci-ref-check.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Build native artifact

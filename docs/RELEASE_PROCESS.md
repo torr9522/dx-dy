@@ -18,13 +18,13 @@ git add --all && git commit
 DXDY_PRIVATE_IDENTITIES_FILE=/private/path.json pnpm release:check --full --public
 ```
 
-The final command requires a clean committed tree, repeats validation in a detached checkout, creates deterministic source archives, builds target-specific amd64 and arm64 artifacts and starts the matching bundled Node runtime with production dependencies. Docker/GHCR is not a release gate.
+The final command requires a clean committed tree, repeats validation in a detached checkout, creates deterministic source archives, builds target-specific amd64 and arm64 artifacts and starts the matching bundled Node runtime with production dependencies. Docker/GHCR is not a release gate. GitHub validation distinguishes master pushes, pull requests and tag pushes; a direct tag must match the package version and its target must equal current `origin/master`.
 
 ## Tag And Publication
 
 Create `git tag -a vX.Y.Z -m ...`, confirm its peeled target equals frozen HEAD, then repeat secret/identity scans including the tag. Push `master` only to the verified `origin`, wait for CI, then push the single tag. The tag workflow builds both native artifacts and creates one stable GitHub Release.
 
-Verify unauthenticated downloads of `install.sh`, `dx-dy`, both Linux tarballs, the source tarball, `release-manifest.json` and `SHA256SUMS`. Check manifest commit/version/runtime/architecture/hashes and ensure no instance identity or secret appears. GHCR is neither produced nor checked from 0.1.9.
+Verify unauthenticated downloads of `install.sh`, `dx-dy`, both Linux tarballs, the source tarball, `release-manifest.json` and `SHA256SUMS`. Check manifest commit/version/runtime/architecture/hashes and ensure no instance identity or secret appears. GHCR is neither produced nor checked from 0.1.9 onward.
 
 ## Staging And Failure Policy
 

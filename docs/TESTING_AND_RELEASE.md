@@ -24,6 +24,13 @@ pnpm release:check --full --public
 
 Installer fixtures cover Debian 12, Ubuntu 22.04/24.04 and both architectures. They assert the fresh path contains no GHCR, Podman or Nerdctl dependency and creates native paths. A clean real Debian 12 host remains the final physical acceptance environment.
 
+Installer query-path tests run `-h`, `--help`, `--version` and an invalid option
+with an unsupported/missing OS fixture, non-root identity where available and
+sentinel package/service/account commands. They require zero sentinel calls and
+an unchanged fixture tree. CI ref-policy tests cover master push, pull request
+base, detached direct tag, invalid/RC tag, off-master tag and ordinary local
+detached contexts.
+
 ## Native Dependency Audit
 
 The runtime uses Node `26.10.0`. SQLite is built-in `node:sqlite`. The only production native addon is `argon2@0.45.1`, loaded through `node-gyp-build`; official linux-x64 and linux-arm64 glibc prebuilds are selected in target-specific production dependency deployments. Tailwind, Lightning CSS and Rolldown native modules are build-time dependencies and are not required by the running server.
@@ -46,4 +53,4 @@ Historical 0.1.0-0.1.7 RC tags remain. From 0.1.8 onward:
 6. push only `master`, wait for CI, then push the reviewed tag;
 7. verify the stable GitHub Release and anonymous downloads of installer, manager, manifest, checksums, source and both native artifacts.
 
-Release workflow permissions are `contents: read` for builders and `contents: write` only for publication. It has no packages permission, deployment secret or GHCR step. Any fix after public `v0.1.9` becomes `0.2.0`.
+Release workflow permissions are `contents: read` for builders and `contents: write` only for publication. It has no packages permission, deployment secret or GHCR step. Any fix after public `v0.2.0` becomes `0.2.1`.

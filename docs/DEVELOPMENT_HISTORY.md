@@ -73,3 +73,13 @@ Added a hardened systemd service, dedicated account, localhost-only listener,
 host Caddy integration, atomic version-directory updates and database/link
 rollback. The guarded 0.1.8 migration path creates portable and encrypted
 backups and retains the legacy stack. Business schema and output are unchanged.
+
+## 0.2.0 - Release Hygiene
+
+Made installer help and version queries exit before every privileged or
+state-changing preflight step, with non-root and command-sentinel regression
+coverage. Replaced branch-name assumptions in CI with event/ref-aware policy:
+master pushes and pull requests are validated from their GitHub context, while
+direct version tags are validated in detached HEAD and must target the current
+`origin/master` commit. Runtime architecture, schema, backup formats and
+business behavior are unchanged.

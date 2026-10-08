@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_VERSION="0.1.9"
+readonly DXDY_VERSION="0.2.0"
 readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -26,6 +26,34 @@ trap cleanup EXIT
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+usage() {
+  cat <<'EOF'
+Usage: install.sh [OPTIONS]
+
+Install dx-dy as a native systemd service with host Caddy and SQLite.
+
+Supported OS:
+  Debian 12
+  Ubuntu 22.04
+  Ubuntu 24.04
+
+Supported arch:
+  amd64
+  arm64
+
+Options:
+  -h, --help  Show this help and exit
+  --version   Show the installer version and exit
+EOF
+}
+parse_args() {
+  case "${1:-}" in
+    "") [[ $# -eq 0 ]] || { usage >&2; return 2; } ;;
+    -h|--help) [[ $# -eq 1 ]] || { printf 'ERROR: --help does not accept arguments.\n' >&2; usage >&2; return 2; }; usage; exit 0 ;;
+    --version) [[ $# -eq 1 ]] || { printf 'ERROR: --version does not accept arguments.\n' >&2; usage >&2; return 2; }; printf 'dx-dy installer %s\n' "$DXDY_VERSION"; exit 0 ;;
+    *) printf 'ERROR: unknown option: %s\n' "$1" >&2; usage >&2; return 2 ;;
+  esac
+}
 valid_hostname() {
   [[ ${#1} -le 253 && "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
 }
@@ -302,6 +330,7 @@ initialize_and_start() {
 }
 
 main() {
+  parse_args "$@"
   info "dx-dy Native Installer" "Version $DXDY_VERSION"
   require_root; detect_platform; preflight; install_dependencies
   if [[ "$LEGACY_MODE" == 1 ]]; then

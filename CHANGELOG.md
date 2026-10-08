@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
+### Fixed
+
+- Made installer `-h`, `--help` and `--version` pure query paths that run before root, platform, network, package, Caddy, systemd, account, domain and secret setup. Unknown options now fail before installation preflight.
+- Made release validation aware of master pushes, pull requests and detached tag checkouts. Direct release tags must match the product version and target the current `origin/master` commit.
+
+### Compatibility
+
+- Native systemd/Caddy/SQLite deployment, Node 26.10.0, database schemas, backup formats and all business behavior are unchanged. No database migration was added.
+
 ## [0.1.9] - 2026-10-08
 
 ### Changed

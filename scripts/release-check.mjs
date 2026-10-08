@@ -18,6 +18,7 @@ import {
 } from "./release-utils.mjs";
 import { secretScan } from "./secret-scan.mjs";
 import { verifySource } from "./verify-source.mjs";
+import { validateRepositoryRef } from "./ci-ref-check.mjs";
 
 const full = process.argv.includes("--full");
 const publicMode = process.argv.includes("--public");
@@ -29,10 +30,10 @@ if (git("status", "--porcelain"))
   throw new Error(
     "Release gate requires clean committed Git, including untracked source",
   );
-const branch = git("branch", "--show-current");
 const releaseHead = git("rev-parse", "HEAD");
-if (branch !== "master" && !(detached && branch === ""))
-  throw new Error("Expected master branch");
+const metadata = JSON.parse(readFileSync("package.json", "utf8"));
+const v = version();
+validateRepositoryRef({ version: v, allowLocalDetached: detached });
 const forbiddenTracked = git("ls-files", "-z")
   .split("\0")
   .filter(Boolean)
@@ -40,7 +41,6 @@ const forbiddenTracked = git("ls-files", "-z")
 if (forbiddenTracked.length)
   throw new Error("Tracked runtime/backup artifact: " + forbiddenTracked[0]);
 const files = verifyInventory();
-const v = version();
 if (!/^\d+\.[0-9]\.[0-9]$/.test(v))
   throw new Error("Invalid decimal product version");
 for (const [file, text] of [
@@ -65,7 +65,6 @@ if (
   )
 )
   throw new Error("Pinned provenance missing");
-const metadata = JSON.parse(readFileSync("package.json", "utf8"));
 if (
   execFileSync("pnpm", ["--version"], { encoding: "utf8" }).trim() !==
   metadata.packageManager.split("@")[1]

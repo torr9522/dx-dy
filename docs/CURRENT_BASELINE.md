@@ -2,18 +2,18 @@
 
 ## Release Identity
 
-- Current release: **0.1.9**
+- Current release: **0.2.0**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-After publication, resolve the immutable release commit with `git rev-parse v0.1.9^{}`. This document intentionally does not embed a self-referential HEAD SHA.
+After publication, resolve the immutable release commit with `git rev-parse v0.2.0^{}`. This document intentionally does not embed a self-referential HEAD SHA.
 
 ## Persistence And Invariants
 
 - SQLite WAL; schemas `001_initial.sql` and `002_node_collections.sql`
-- Migration in 0.1.9: **NONE**
+- Migration in 0.2.0: **NONE**
 - Node/Subscription and Node/Collection are independent many-to-many relations
 - **NO AUTO SUBSCRIPTION**: Collection changes never synchronize a Subscription
 - Canonical `/s/:token` is standard Base64 of UTF-8 LF-separated share URIs
@@ -45,4 +45,4 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Next Version
 
-`0.2.0` is the next code-change version **only after `v0.1.9` is released and a real source change is made**. Never move an existing public tag.
+`0.2.1` is the next code-change version **only after `v0.2.0` is released and a real source change is made**. Never move an existing public tag.

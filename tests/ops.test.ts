@@ -87,7 +87,7 @@ describe("native installer", () => {
       path.join(root, "etc/caddy/dx-dy.caddy"),
       "utf8",
     );
-    expect(config).toContain("DXDY_VERSION=0.1.9");
+    expect(config).toContain("DXDY_VERSION=0.2.0");
     expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
     expect(config).toContain(`DXDY_ARCH=${arch}`);
     expect(env).toContain("HOST=127.0.0.1");
@@ -100,10 +100,10 @@ describe("native installer", () => {
     expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
     expect(caddy).not.toContain("app:3000");
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.1.9",
+      "releases/0.2.0",
     );
     expect(
-      existsSync(path.join(root, "opt/dx-dy/releases/0.1.9/runtime/bin/node")),
+      existsSync(path.join(root, "opt/dx-dy/releases/0.2.0/runtime/bin/node")),
     ).toBe(true);
   });
 

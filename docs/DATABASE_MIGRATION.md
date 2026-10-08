@@ -11,7 +11,7 @@ The application applies numbered migrations in order and records them in `schema
 Use a database backup for routine data recovery when the matching external `APP_MASTER_KEY` is already protected separately:
 
 ```sh
-pnpm db:backup -- ./dx-dy-0.1.9-YYYYMMDD-HHMMSS.db
+pnpm db:backup -- ./dx-dy-0.2.0-YYYYMMDD-HHMMSS.db
 ```
 
 The command uses the SQLite Backup API, validates `integrity_check` and `foreign_key_check`, produces one independent SQLite file, and removes active administrator sessions. Nodes, normalized/original data, sidecars, Tags, Collections, memberships, subscriptions, ordered `subscription_nodes`, settings, Token hashes/ciphertexts, administrators and migration history remain in the snapshot.
@@ -24,7 +24,7 @@ Use a full migration backup when moving to another server and preserving all exi
 
 ```sh
 read -rsp 'Backup password: ' BACKUP_PASSWORD; export BACKUP_PASSWORD
-pnpm migration:export -- ./dx-dy-0.1.9-YYYYMMDD-HHMMSS.psmbackup
+pnpm migration:export -- ./dx-dy-0.2.0-YYYYMMDD-HHMMSS.psmbackup
 unset BACKUP_PASSWORD
 ```
 
