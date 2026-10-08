@@ -215,6 +215,10 @@ describe("API and domain regression", () => {
         (await request(isolated.app).get("/").set("Host", "evil.test.local"))
           .status,
       ).toBe(421);
+      await request(isolated.app)
+        .get("/health")
+        .set("Host", "127.0.0.1:3000")
+        .expect(200);
       const tokenBefore = isolated.store.get(
         "SELECT token_hash,token_ciphertext FROM subscriptions WHERE id=?",
         p.body.id,

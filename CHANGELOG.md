@@ -23,6 +23,7 @@
 
 - Full migration packages protect the SQLite snapshot and `APP_MASTER_KEY` with scrypt-derived AES-256-GCM authenticated encryption; Tokens remain encrypted in SQLite.
 - Subscription-only hosts reject the administrator SPA and API, while administrator mutation Origin checks remain bound to `ADMIN_BASE_URL`.
+- Loopback access is limited to `/health` so container health checks remain functional in dual-domain mode.
 - Database, migration bundle and instance-key artifacts are excluded from Git, Docker context and corresponding-source archives.
 
 ### Validation

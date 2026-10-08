@@ -156,6 +156,10 @@ export async function createApp(options: Options) {
     `${subscriptionBase()}/s/${token}`;
   app.use((req, res, next) => {
     const host = String(req.headers.host || "").toLowerCase();
+    const loopbackHealth =
+      req.path === "/health" &&
+      /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host);
+    if (loopbackHealth) return next();
     const subscriptionHost = new URL(subscriptionBase()).host.toLowerCase();
     const sameDomain = adminHost === subscriptionHost;
     const storedLegacyHosts = store.settings().subscription_legacy_hosts;
