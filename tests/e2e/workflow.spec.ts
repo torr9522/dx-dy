@@ -325,6 +325,7 @@ test("complete browser workflow with synthetic nodes", async ({
   await page.getByLabel("启用订阅", { exact: true }).uncheck();
   await page.getByRole("button", { name: "保存信息" }).click();
   await universal.getByRole("button", { name: "复制订阅链接" }).click();
+  await expect(page.locator(".toast")).toContainText("已复制到剪贴板");
   const rotated = await page.evaluate(() => navigator.clipboard.readText());
   expect(rotated).not.toBe(url);
   expect(new URL(rotated).search).toBe("");
@@ -343,4 +344,163 @@ test("complete browser workflow with synthetic nodes", async ({
     path: "test-results/nodes-mobile.png",
     fullPage: true,
   });
+});
+
+test("node collections organize nodes without becoming subscription authority", async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("Synthetic-e2e-password-123!");
+  await page.getByRole("button", { name: "安全登录" }).click();
+  await expect(
+    page.getByRole("heading", { name: "总览", exact: true }),
+  ).toBeVisible();
+  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf,
+    headers = { "X-CSRF-Token": csrf };
+  const imported = await (
+    await context.request.post("/api/nodes/import", {
+      headers,
+      data: {
+        items: [
+          { uri: vless, name: "Collection VLESS" },
+          { uri: vmess, name: "Collection VMess" },
+        ],
+      },
+    })
+  ).json();
+  await page.reload();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  for (const name of ["我个人", "朋友1"]) {
+    await page.getByRole("button", { name: "新建集合" }).click();
+    await page.getByLabel("集合名称").fill(name);
+    await page.getByLabel("集合备注").fill("E2E collection");
+    await page.getByRole("button", { name: "保存集合" }).click();
+    await expect(
+      page.getByRole("button", { name: new RegExp(name) }).first(),
+    ).toBeVisible();
+  }
+  await page
+    .getByRole("button", { name: "Collection VLESS", exact: true })
+    .click();
+  await page.getByRole("checkbox", { name: "我个人", exact: true }).check();
+  await page.getByRole("checkbox", { name: "朋友1", exact: true }).check();
+  await page.getByLabel("标签（逗号分隔）").fill("美国, AI");
+  await page.getByRole("button", { name: "保存更改" }).click();
+  await page
+    .getByRole("button", { name: "Collection VMess", exact: true })
+    .click();
+  await page.getByRole("checkbox", { name: "我个人", exact: true }).check();
+  await page.getByLabel("标签（逗号分隔）").fill("日本");
+  await page.getByRole("button", { name: "保存更改" }).click();
+  await page.getByRole("button", { name: /朋友1 1/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Collection VLESS", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Collection VMess", { exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByLabel("标签筛选").selectOption("AI");
+  await expect(
+    page.getByRole("button", { name: "Collection VLESS", exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("标签筛选").selectOption("");
+  await page.screenshot({
+    path: "test-results/collections-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".collection-nav")).toBeVisible();
+  await page.screenshot({
+    path: "test-results/collections-mobile.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const profile = await (
+    await context.request.post("/api/subscriptions", {
+      headers,
+      data: { name: "Collection selector E2E" },
+    })
+  ).json();
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".profile-card")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await page.getByLabel("选择器集合").selectOption({ label: "朋友1" });
+  await page.getByRole("checkbox", { name: /^Collection VLESS / }).check();
+  await page.getByLabel("选择器集合").selectOption({ label: "我个人" });
+  await page.getByRole("checkbox", { name: /^Collection VMess / }).check();
+  await expect(
+    page.getByRole("checkbox", { name: /^Collection VLESS / }),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "保存节点与顺序" }).click();
+  const collections = await (
+    await context.request.get("/api/collections")
+  ).json();
+  const personal = collections.find(
+      (c: { name: string }) => c.name === "我个人",
+    ),
+    friend = collections.find((c: { name: string }) => c.name === "朋友1");
+  await context.request.delete(`/api/collections/${friend.id}`, { headers });
+  expect(
+    (await (await context.request.get(`/api/subscriptions`)).json()).find(
+      (s: { id: number }) => s.id === profile.id,
+    ).node_ids,
+  ).toEqual(imported.map((n: { id: number }) => n.id));
+  await page.reload();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page
+    .getByRole("button", { name: new RegExp(`编辑集合 ${personal.name}`) })
+    .click();
+  await page.getByRole("button", { name: "删除集合" }).click();
+  await expect(page.getByRole("dialog")).toContainText("不会影响已有订阅");
+  await page.getByRole("button", { name: "确认", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Collection VLESS", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Collection VMess", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(page.getByLabel("Admin Base URL")).toHaveValue(
+    "http://127.0.0.1:3100",
+  );
+  await expect(page.getByLabel("订阅域名")).toHaveValue(
+    "http://127.0.0.1:3100",
+  );
+  await page.getByLabel("订阅域名").fill("http://localhost:3999/");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(page.locator(".toast")).toContainText("订阅域名已更新");
+  await expect(page.getByLabel("订阅域名")).toHaveValue(
+    "http://localhost:3999",
+  );
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  const card = page.locator(".profile-card").filter({ hasText: profile.name });
+  await card.getByRole("button", { name: "复制订阅链接", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(
+    /^http:\/\/localhost:3999\/s\//,
+  );
+  await card.getByRole("button", { name: "二维码", exact: true }).click();
+  await expect(page.getByAltText("订阅二维码")).toHaveAttribute(
+    "data-subscription-url",
+    /^http:\/\/localhost:3999\/s\//,
+  );
+  await page.getByRole("button", { name: "关闭" }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByLabel("订阅域名").fill("http://127.0.0.1:3100");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(page.locator(".toast")).toContainText("订阅域名已更新");
+  await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
+  for (const n of imported)
+    await context.request.delete(`/api/nodes/${n.id}`, {
+      headers,
+      data: { confirm: true },
+    });
 });

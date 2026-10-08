@@ -1,4 +1,4 @@
-# Private Subscription Manager 0.1.3
+# Private Subscription Manager 0.1.4
 
 单管理员的私人节点资产库、多订阅 Profile 与订阅分发系统。**不是机场**：无普通用户、注册、套餐、支付、订单、流量计费或运营模块。
 
@@ -6,11 +6,14 @@
 
 - 六协议 URI 粘贴、批量逐行预览、失败/警告/重复提示、事务导入。
 - 全局节点库与 Profile 多对多，pivot 排序；共享节点编辑自动同步。
+- Node Collections 多对多管理导航；集合用于人员/节点池归类，Tag 用于属性筛选，集合绝不是订阅权限或自动分发规则。
 - 结构化 Drawer、高级 JSON、重新导入差异确认、恢复原始参数。
 - original_uri / normalized_config / ordered raw sidecar 分离。
 - 随机 Token、SHA-256 lookup、AES-256-GCM 密文保存、轮换/禁用/删除。
 - 一个 Profile、一个正式 `/s/<TOKEN>` 通用标准 Base64 URI 订阅链接。
 - 中文后台，搜索/筛选、拖拽排序、QR、Light/Dark/System、密码修改。
+- WAL-safe 可迁移数据库快照、加密单文件实例迁移包、前向 migration 与新 schema 拒绝保护。
+- 管理域和订阅域分离；订阅专用 Host 不暴露后台，管理域保留旧 `/s/*` 链接兼容。
 
 ## 协议与客户端
 
@@ -32,13 +35,14 @@ pnpm install --frozen-lockfile
 pnpm adapter:build
 export APP_MASTER_KEY=$(openssl rand -hex 32)
 export ADMIN_INITIAL_PASSWORD=$(openssl rand -base64 24)
-export PUBLIC_BASE_URL=http://localhost:5173
+export ADMIN_BASE_URL=http://localhost:5173
+export SUBSCRIPTION_BASE_URL=http://localhost:5173
 pnpm dev
 # Another terminal:
 pnpm dev:web
 ```
 
-使用 Vite 的开发反代时，PUBLIC_BASE_URL 设成浏览器实际访问 origin（例如 http://localhost:5173）。管理员用户名默认 admin。初始化密码只在数据库为空时使用，必须至少20字符。已有数据库启动不需要初始密码。
+使用 Vite 的开发反代时，两个 URL 可设成浏览器实际访问 origin（例如 `http://localhost:5173`）。管理员用户名默认 admin。初始化密码只在数据库为空时使用，必须至少20字符。已有数据库启动不需要初始密码。
 
 ```sh
 pnpm lint
@@ -55,7 +59,9 @@ E2E 使用隔离的本地测试数据库与虚构凭据，需要 Playwright Chro
 在源码根目录生成 `.env`（不会覆盖现有文件）：
 
 ```sh
-PUBLIC_BASE_URL=https://sub.example.com node scripts/init-env.mjs
+ADMIN_BASE_URL=https://panel.example.com \
+SUBSCRIPTION_BASE_URL=https://sub.example.com \
+node scripts/init-env.mjs
 ```
 
 替换示例为自己的域名。也可以把 `.env.example` 复制到 `.env`，用 `openssl rand -hex 32` 生成 APP_MASTER_KEY、`openssl rand -base64 24` 生成初始密码。`.env` 权限600，不提交。初始化工具不会输出密码；由管理员安全读取本地文件，首次登录后修改。只有一个管理员，用户名默认 admin；首次启动自动执行 migration 并初始化管理员，已有数据库不会重建管理员。
@@ -67,21 +73,37 @@ docker compose up -d
 
 Debian 的 legacy Compose 可使用 `docker-compose`。应用端口只发布到127.0.0.1:3000，容器非root、只读根文件系统，数据库持久化到app-data volume。`GET /health` 返回状态与版本。
 
-使用 `docker/Caddyfile` 配置 Caddy，将 `PSM_DOMAIN` 设置为自己的域名（作为 Caddy 服务环境变量），或在配置副本中替换示例域名。开放80/443，域名解析正确后自动取得可信证书。不要原样部署示例域名。没有 access log，并排除可能包含敏感 URL 的代理错误日志。不要开启记录 /s/ 原始 URI 的外部 CDN/WAF/代理日志。
+使用 `docker/Caddyfile` 配置 Caddy：`PSM_ADMIN_DOMAIN` 指向后台域名，`PSM_SUBSCRIPTION_DOMAIN` 指向订阅域名。订阅 Host 仅开放 `/s/*` 和 `/health`；后台 Host 继续开放 `/s/*`，用于旧客户端链接兼容。开放80/443，DNS 正确后 Caddy 自动取得可信证书。单域兼容部署应改用一个站点块反代全部路由，且两个应用 URL 使用相同 origin。不要开启记录 `/s/` 原始 URI 的代理、CDN 或 WAF access log。
 
-非 Docker 生产运行：`pnpm build`，设置 `APP_MASTER_KEY`、初始化密码、`PUBLIC_BASE_URL`、`COOKIE_SECURE=true`、`DATABASE_PATH`、反代对应的 `TRUST_PROXY`，再 `pnpm start`。使用进程管理器与 HTTPS 反代；Node 不自动读取 `.env`，可用 Node `--env-file` 或系统服务注入环境。数据默认本地 `data/`，Compose 使用持久化 `app-data` volume 下 `/data/app.sqlite`。不要把数据库放在源码归档或公网静态目录。
+非 Docker 生产运行：`pnpm build`，设置 `APP_MASTER_KEY`、初始化密码、`ADMIN_BASE_URL`、首次订阅域名 `SUBSCRIPTION_BASE_URL`、`COOKIE_SECURE=true`、`DATABASE_PATH` 与 `TRUST_PROXY`，再 `pnpm start`。正式数据库路径统一为 `/data/private-subscription-manager.db`，Compose 使用持久化 `app-data` volume。不要把数据库放在源码归档或公网静态目录。
+
+`ADMIN_BASE_URL` 始终由部署环境控制。`SUBSCRIPTION_BASE_URL` 只在数据库尚无该设置时作为 bootstrap default；初始化后数据库中的 `subscription_base_url` 是运行时唯一真相，管理员可在“设置 → 订阅域名”修改，不需重新构建或重启。输入仅允许 HTTPS origin（开发环境可用 localhost HTTP），系统负责追加 `/s/<TOKEN>`。换服务器而不换订阅域名时不要修改此设置，只切 DNS；主动换域名时系统保留旧订阅 Host 的 `/s/*` 兼容记录，但旧 DNS/TLS/代理仍需继续运行一段过渡期。
 
 ## 数据、备份、升级
 
-迁移位于 migrations，schema_migrations记录版本；每个migration在事务内执行，失败不启动。已有nodes表时在迁移前执行 SQLite backup。
+迁移位于 `migrations/`，`schema_migrations` 记录有序版本；migration 在事务内执行，失败回滚并阻止启动。迁移前自动用 SQLite Backup API 创建一致性快照。数据库包含未知或更高 migration 时明确拒绝启动，不自动降级。
 
 容器中：
 
 ```sh
-docker compose exec app node dist/backup.mjs /data/backups/manual.sqlite
+docker compose exec app node dist/database.mjs backup /data/backups/manual.db
 ```
 
-使用SQLite backup API，不直接复制运行中的WAL数据库。备份同时保护APP_MASTER_KEY：丢失key后数据库Token无法解密复制（可重新轮换）；旧Token哈希lookup仍需要原数据。不要删除volume。升级前备份、保留.env和volume，build并up后验证health和真实订阅。
+这会从在线 WAL 数据库生成单文件一致性 SQLite 快照，并清除 active admin sessions。数据库备份不包含 `APP_MASTER_KEY`；恢复时必须提供匹配的 key，否则加密 Token 无法继续使用。
+
+跨服务器迁移使用受密码保护的单文件包：
+
+```sh
+BACKUP_PASSWORD='use-a-long-backup-password' \
+pnpm migration:export -- ./private-subscription-manager-0.1.4.psmbackup
+
+# 停止应用写入后恢复；工具会校验、备份当前 DB、前向迁移、清除会话并原子替换。
+BACKUP_PASSWORD='use-a-long-backup-password' \
+INSTANCE_ENV_FILE=.env \
+pnpm db:restore -- ./private-subscription-manager-0.1.4.psmbackup
+```
+
+`.psmbackup` 使用 scrypt 和 AES-256-GCM 加密，内含数据库与 instance master key；它等价于完整账户凭证，必须像私钥一样保存。不要复制在线 `.db`、`-wal` 或 `-shm` 文件。完整备份、恢复、Docker volume 操作、schema 兼容与 DNS 无感迁移步骤见 [数据库与实例迁移](docs/DATABASE_MIGRATION.md)。
 
 ## 安全
 
@@ -97,7 +119,7 @@ docker compose exec app node dist/backup.mjs /data/backups/manual.sqlite
 
 产品版本来源为 `package.json`。使用 `master` 主线和 annotated RC tags；stable tag 与 remote push 必须用户明确批准。
 
-每轮实际修改版本固定 +0.0.1，十进制进位（0.1.9 → 0.2.0），下一轮为 0.1.4；不能用重复 RC 代替任务版本递增。
+每轮实际修改版本固定 +0.0.1，十进制进位（0.1.9 → 0.2.0），下一轮为 0.1.5；不能用重复 RC 代替任务版本递增。
 
 ```sh
 pnpm release:check

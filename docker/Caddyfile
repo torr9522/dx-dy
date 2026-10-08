@@ -6,10 +6,20 @@
         exclude http.log.error
     }
 }
-{$PSM_DOMAIN:sub.example.com} {
+{$PSM_ADMIN_DOMAIN:panel.example.com} {
     # Keep subscription bytes uncompressed for native client compatibility.
     @compressible not path /s/*
     encode @compressible zstd gzip
     reverse_proxy 127.0.0.1:3000
+    # /s/* remains available here for legacy client links during domain moves.
     # Deliberately no access log directive, so /s/<token> is never persisted.
+}
+
+{$PSM_SUBSCRIPTION_DOMAIN:sub.example.com} {
+    @subscription path /s/* /health
+    handle @subscription {
+        reverse_proxy 127.0.0.1:3000
+    }
+    respond 404
+    # This host never exposes the admin SPA or API.
 }

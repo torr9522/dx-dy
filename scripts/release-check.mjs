@@ -9,7 +9,14 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
-import { git, run, version, verifyInventory, quote } from "./release-utils.mjs";
+import {
+  forbidden,
+  git,
+  run,
+  version,
+  verifyInventory,
+  quote,
+} from "./release-utils.mjs";
 import { secretScan } from "./secret-scan.mjs";
 import { verifySource } from "./verify-source.mjs";
 
@@ -26,6 +33,12 @@ const branch = git("branch", "--show-current");
 const releaseHead = git("rev-parse", "HEAD");
 if (branch !== "master" && !(detached && branch === ""))
   throw new Error("Expected master branch");
+const forbiddenTracked = git("ls-files", "-z")
+  .split("\0")
+  .filter(Boolean)
+  .filter(forbidden);
+if (forbiddenTracked.length)
+  throw new Error("Tracked runtime/backup artifact: " + forbiddenTracked[0]);
 const files = verifyInventory();
 const v = version();
 if (!/^\d+\.[0-9]\.[0-9]$/.test(v))

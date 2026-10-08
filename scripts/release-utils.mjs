@@ -9,7 +9,7 @@ export const git = (...args) =>
 export const version = () =>
   JSON.parse(readFileSync("package.json", "utf8")).version;
 export const forbidden = (file) =>
-  /(^|\/)(?:\.env(?:\..*)?|node_modules|data|backups|logs|secrets?|dist|coverage|playwright-report|test-results)(\/|$)|\.(?:sqlite\w*(?:-.*)?|db(?:-.*)?|secret|tar|tar\.gz|tgz)$|(^|\/)temporary-nodes/.test(
+  /(^|\/)(?:\.env(?:\..*)?|node_modules|data|backups|logs|secrets?|dist|coverage|playwright-report|test-results)(\/|$)|\.(?:sqlite\w*(?:-.*)?|db(?:-.*)?|secret|tar|tar\.gz|tgz|psmbackup|instance-key)$|(^|\/)temporary-nodes/.test(
     file,
   ) && file !== ".env.example";
 export function sourceFiles() {

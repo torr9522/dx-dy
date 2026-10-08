@@ -9,6 +9,7 @@ import { rateLimit } from "express-rate-limit";
 import argon2 from "argon2";
 import { z, ZodError } from "zod";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { Store, now } from "./db";
 import {
@@ -37,12 +38,43 @@ export type Options = {
   initialPassword: string;
   username?: string;
   secure?: boolean;
-  publicBase: string;
+  adminBase: string;
+  subscriptionBase: string;
   trustProxy?: number;
   loginLimit?: number;
   subscriptionLimit?: number;
   webDir?: string;
 };
+export function normalizeSubscriptionBase(
+  input: string,
+  allowInsecureLocalhost = false,
+) {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new ApiError(400, "SUBSCRIPTION_BASE_URL", "订阅域名格式不正确");
+  }
+  const local =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(allowInsecureLocalhost && local))
+    throw new ApiError(400, "SUBSCRIPTION_BASE_URL", "订阅域名必须使用 HTTPS");
+  if (
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new ApiError(
+      400,
+      "SUBSCRIPTION_BASE_URL",
+      "订阅域名只能包含协议、主机名和可选端口",
+    );
+  return url.origin;
+}
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -61,6 +93,16 @@ export async function createApp(options: Options) {
   const key = Buffer.from(options.masterKey, "hex");
   const store = new Store(options.database);
   await store.migrate();
+  if (!store.settings().instance_id) store.set("instance_id", randomUUID());
+  const persistedSubscriptionBase = store.settings().subscription_base_url;
+  const normalizedSubscriptionBase = normalizeSubscriptionBase(
+    persistedSubscriptionBase
+      ? String(persistedSubscriptionBase)
+      : options.subscriptionBase,
+    !options.secure,
+  );
+  if (persistedSubscriptionBase !== normalizedSubscriptionBase)
+    store.set("subscription_base_url", normalizedSubscriptionBase);
   if (!store.get("SELECT id FROM admins")) {
     if (options.initialPassword.length < 20)
       throw new Error("Initial password must be at least 20 characters");
@@ -108,6 +150,36 @@ export async function createApp(options: Options) {
   });
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  const adminHost = new URL(options.adminBase).host.toLowerCase();
+  const subscriptionBase = () => String(store.settings().subscription_base_url);
+  const buildSubscriptionUrl = (token: string) =>
+    `${subscriptionBase()}/s/${token}`;
+  app.use((req, res, next) => {
+    const host = String(req.headers.host || "").toLowerCase();
+    const subscriptionHost = new URL(subscriptionBase()).host.toLowerCase();
+    const sameDomain = adminHost === subscriptionHost;
+    const storedLegacyHosts = store.settings().subscription_legacy_hosts;
+    const legacyHosts = Array.isArray(storedLegacyHosts)
+      ? storedLegacyHosts.map(String).map((value) => value.toLowerCase())
+      : [];
+    const subscriptionOnlyHost =
+      host === subscriptionHost || legacyHosts.includes(host);
+    if (
+      !sameDomain &&
+      subscriptionOnlyHost &&
+      host !== adminHost &&
+      req.path !== "/health" &&
+      !req.path.startsWith("/s/")
+    )
+      return res
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "接口不存在" } });
+    if (!sameDomain && host !== adminHost && !subscriptionOnlyHost)
+      return res
+        .status(421)
+        .json({ error: { code: "HOST", message: "主机不允许" } });
+    next();
+  });
   const limiter = (limit: number) =>
     rateLimit({
       windowMs: 15 * 60 * 1000,
@@ -137,13 +209,13 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ status: "ok", database: "ok", version: "0.1.3" });
+    res.json({ status: "ok", database: "ok", version: "0.1.4" });
   });
   app.post(
     "/api/auth/login",
     limiter(options.loginLimit ?? 15),
     async (req, res) => {
-      if (req.headers.origin && req.headers.origin !== options.publicBase)
+      if (req.headers.origin && req.headers.origin !== options.adminBase)
         return fail(403, "ORIGIN", "来源不允许");
       const input = z
         .object({
@@ -201,7 +273,7 @@ export async function createApp(options: Options) {
         )
       )
         return next(new ApiError(403, "CSRF", "安全校验失败，请刷新登录状态"));
-      if (req.headers.origin && req.headers.origin !== options.publicBase)
+      if (req.headers.origin && req.headers.origin !== options.adminBase)
         return next(new ApiError(403, "ORIGIN", "来源不允许"));
     }
     store.run(
@@ -247,6 +319,102 @@ export async function createApp(options: Options) {
     res.clearCookie("psm_session", cookie).json({ ok: true });
   });
   app.get("/api/nodes", (_req, res) => res.json(store.nodes()));
+  const collectionSchema = z.object({
+    name: z.string().trim().min(1).max(100),
+    remark: z.string().max(2000).default(""),
+  });
+  const requireCollections = (ids: number[]) => {
+    if (
+      ids.some(
+        (collectionId) =>
+          !store.get(
+            "SELECT id FROM node_collections WHERE id=?",
+            collectionId,
+          ),
+      )
+    )
+      fail(400, "COLLECTION", "含不存在的节点集合");
+  };
+  app.get("/api/collections", (_req, res) => res.json(store.collections()));
+  app.post("/api/collections", (req, res) => {
+    const x = collectionSchema.parse(req.body),
+      t = now();
+    if (store.get("SELECT id FROM node_collections WHERE name=?", x.name))
+      return fail(409, "COLLECTION_NAME", "集合名称已存在");
+    const position = Number(
+      store.get("SELECT COALESCE(MAX(position),-1)+1 p FROM node_collections")
+        ?.p,
+    );
+    const r = store.run(
+      "INSERT INTO node_collections(name,remark,position,created_at,updated_at) VALUES(?,?,?,?,?)",
+      x.name,
+      x.remark,
+      position,
+      t,
+      t,
+    );
+    res
+      .status(201)
+      .json(
+        store.collections().find((c) => c.id === Number(r.lastInsertRowid)),
+      );
+  });
+  app.patch("/api/collections/:id", (req, res) => {
+    const collectionId = id(req),
+      x = collectionSchema.parse(req.body);
+    if (!store.get("SELECT id FROM node_collections WHERE id=?", collectionId))
+      return fail(404, "NOT_FOUND", "集合不存在");
+    if (
+      store.get(
+        "SELECT id FROM node_collections WHERE name=? AND id<>?",
+        x.name,
+        collectionId,
+      )
+    )
+      return fail(409, "COLLECTION_NAME", "集合名称已存在");
+    store.run(
+      "UPDATE node_collections SET name=?,remark=?,updated_at=? WHERE id=?",
+      x.name,
+      x.remark,
+      now(),
+      collectionId,
+    );
+    res.json(store.collections().find((c) => c.id === collectionId));
+  });
+  app.put("/api/collections/order", (req, res) => {
+    const ids = z
+        .object({
+          ids: z
+            .array(z.number().int().positive())
+            .max(200)
+            .refine((v) => new Set(v).size === v.length),
+        })
+        .parse(req.body).ids,
+      existing = store.collections().map((c) => c.id);
+    if (
+      ids.length !== existing.length ||
+      ids.some((i) => !existing.includes(i))
+    )
+      return fail(400, "ORDER", "集合顺序必须包含全部集合");
+    store.transaction(() =>
+      ids.forEach((collectionId, position) =>
+        store.run(
+          "UPDATE node_collections SET position=?,updated_at=? WHERE id=?",
+          position,
+          now(),
+          collectionId,
+        ),
+      ),
+    );
+    res.json(store.collections());
+  });
+  app.delete("/api/collections/:id", (req, res) => {
+    const collectionId = id(req);
+    if (!store.get("SELECT id FROM node_collections WHERE id=?", collectionId))
+      return fail(404, "NOT_FOUND", "集合不存在");
+    store.run("DELETE FROM node_collections WHERE id=?", collectionId);
+    res.json({ ok: true });
+  });
   app.post("/api/nodes/preview", (req, res) => {
     const { text } = z
       .object({ text: z.string().min(1).max(200000) })
@@ -256,8 +424,12 @@ export async function createApp(options: Options) {
     res.json(preview(text, store.nodes()));
   });
   app.post("/api/nodes/import", (req, res) => {
-    const { items } = z
+    const { items, collection_ids } = z
       .object({
+        collection_ids: z
+          .array(z.number().int().positive())
+          .max(100)
+          .default([]),
         items: z
           .array(
             z.object({
@@ -269,12 +441,19 @@ export async function createApp(options: Options) {
           .max(300),
       })
       .parse(req.body);
+    requireCollections(collection_ids);
     const parsed = items.map((x) => {
       const e = parseURI(x.uri);
       if (x.name) e.normalized_config.name = x.name;
       return e;
     });
-    const ids = store.transaction(() => parsed.map((e) => store.addNode(e)));
+    const ids = store.transaction(() =>
+      parsed.map((e) => {
+        const nodeId = store.addNode(e);
+        store.setCollections(nodeId, collection_ids);
+        return nodeId;
+      }),
+    );
     res.status(201).json(ids.map((n) => store.findNode(n)));
   });
   const getNode = (req: Request) =>
@@ -285,9 +464,13 @@ export async function createApp(options: Options) {
   app.patch("/api/nodes/:id", (req, res) => {
     const n = getNode(req);
     const x = nodeEditSchema.parse(req.body);
+    if (x.collection_ids) requireCollections(x.collection_ids);
     const e = editConfig(n, x.normalized_config);
     generateURI(e);
-    store.updateNode(n.id, e, x.remark, x.tags, x.enabled);
+    store.transaction(() => {
+      store.updateNode(n.id, e, x.remark, x.tags, x.enabled);
+      if (x.collection_ids) store.setCollections(n.id, x.collection_ids);
+    });
     res.json(store.findNode(n.id));
   });
   app.post("/api/nodes/:id/reimport-preview", (req, res) => {
@@ -424,8 +607,7 @@ export async function createApp(options: Options) {
   app.get("/api/subscriptions/:id/url", (req, res) => {
     const p = getProfile(req);
     const token = decryptToken(String(p.token_ciphertext), key);
-    const base = String(store.settings().public_base_url || options.publicBase);
-    res.json({ url: `${base}/s/${token}` });
+    res.json({ url: buildSubscriptionUrl(token) });
   });
   const render = (nodes: Envelope[], format: string) => ({
     body:
@@ -471,38 +653,58 @@ export async function createApp(options: Options) {
         .slice(0, 8),
     });
   });
-  app.get("/api/settings", (_req, res) =>
-    res.json({
-      site_name: "私人节点库",
-      public_base_url: options.publicBase,
-      default_format: "v2ray",
-      ...store.settings(),
-    }),
-  );
+  const publicSettings = () => {
+    const settings = store.settings();
+    return {
+      site_name: String(settings.site_name || "私人节点库"),
+      admin_base_url: options.adminBase,
+      subscription_base_url: String(settings.subscription_base_url),
+      default_format: String(settings.default_format || "v2ray"),
+    };
+  };
+  app.get("/api/settings", (_req, res) => res.json(publicSettings()));
   app.put("/api/settings", (req, res) => {
     const x = z
       .object({
         site_name: z.string().min(1).max(80),
-        public_base_url: z
-          .url()
-          .refine(
-            (v) =>
-              /^https?:\/\//.test(v) &&
-              !new URL(v).username &&
-              !new URL(v).password &&
-              !new URL(v).search &&
-              !new URL(v).hash &&
-              new URL(v).pathname === "/",
-          ),
         default_format: z.enum(["raw", "v2ray", "shadowrocket"]),
+        subscription_base_url: z.string().min(1).max(2048),
       })
       .parse(req.body);
-    store.transaction(() =>
-      Object.entries(x).forEach(([k, v]) =>
-        store.set(k, k === "public_base_url" ? v.replace(/\/$/, "") : v),
-      ),
+    const nextBase = normalizeSubscriptionBase(
+      x.subscription_base_url,
+      !options.secure,
     );
-    res.json({ ok: true });
+    const previousHost = new URL(subscriptionBase()).host;
+    const nextHost = new URL(nextBase).host;
+    const storedLegacyHosts = store.settings().subscription_legacy_hosts;
+    const legacyHosts = Array.isArray(storedLegacyHosts)
+      ? storedLegacyHosts.map(String)
+      : [];
+    if (
+      previousHost !== nextHost &&
+      previousHost !== adminHost &&
+      !legacyHosts.includes(previousHost)
+    )
+      legacyHosts.push(previousHost);
+    store.transaction(() => {
+      store.set("site_name", x.site_name);
+      store.set("default_format", x.default_format);
+      store.set("subscription_base_url", nextBase);
+      store.set("subscription_legacy_hosts", legacyHosts);
+    });
+    if (previousHost !== nextHost)
+      console.info(
+        JSON.stringify({
+          event: "subscription_base_url_changed",
+          old_host: previousHost,
+          new_host: nextHost,
+        }),
+      );
+    res.json({
+      ok: true,
+      subscription_base_url: nextBase,
+    });
   });
   app.get(
     "/s/:token",
@@ -534,7 +736,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "private-subscription-manager-0.1.3-source.tar.gz",
+        "private-subscription-manager-0.1.4-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

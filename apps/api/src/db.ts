@@ -1,5 +1,11 @@
-import { DatabaseSync, backup } from "node:sqlite";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  integrity,
+  migrationFiles,
+  schemaVersions,
+  snapshot,
+} from "./database-safety";
 import path from "node:path";
 import {
   envelopeSchema,
@@ -20,38 +26,43 @@ export class Store {
     );
   }
   async migrate(dir = path.resolve("migrations")) {
+    const supported = migrationFiles(dir);
+    if (
+      this.get("SELECT name FROM sqlite_master WHERE name='schema_migrations'")
+    )
+      schemaVersions(this.db, supported);
     this.db.exec(
       "CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
     );
-    const pending = readdirSync(dir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort()
-      .filter(
-        (f) =>
-          !this.db
-            .prepare("SELECT version FROM schema_migrations WHERE version=?")
-            .get(f),
-      );
+    const pending = supported.filter(
+      (f) =>
+        !this.db
+          .prepare("SELECT version FROM schema_migrations WHERE version=?")
+          .get(f),
+    );
     if (
       pending.length &&
-      this.db
-        .prepare("SELECT name FROM sqlite_master WHERE name=?")
-        .get("nodes")
+      this.file !== ":memory:" &&
+      this.get("SELECT name FROM sqlite_master WHERE name='nodes'")
     ) {
       const target = path.resolve(
         path.dirname(this.file),
         "backups/pre-migration-" + Date.now() + ".sqlite",
       );
       mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      await backup(this.db, target);
+      await snapshot(this.db, target);
     }
-    for (const f of pending)
+    if (pending.length)
       this.transaction(() => {
-        this.db.exec(readFileSync(path.join(dir, f), "utf8"));
-        this.db
-          .prepare("INSERT INTO schema_migrations VALUES(?,?)")
-          .run(f, now());
+        for (const f of pending) {
+          this.db.exec(readFileSync(path.join(dir, f), "utf8"));
+          this.db
+            .prepare("INSERT INTO schema_migrations VALUES(?,?)")
+            .run(f, now());
+        }
+        integrity(this.db);
       });
+    integrity(this.db);
   }
   transaction<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -92,6 +103,10 @@ export class Store {
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       references: Number(row.references || 0),
+      collection_ids: this.all(
+        "SELECT collection_id FROM node_collection_members WHERE node_id=? ORDER BY collection_id",
+        Number(row.id),
+      ).map((r) => Number(r.collection_id)),
     };
   }
   nodes(): NodeRecord[] {
@@ -105,6 +120,29 @@ export class Store {
       id,
     );
     return r ? this.node(r) : undefined;
+  }
+  collections() {
+    return this.all(
+      "SELECT c.*, (SELECT COUNT(*) FROM node_collection_members m WHERE m.collection_id=c.id) AS node_count FROM node_collections c ORDER BY position,id",
+    ).map((r) => ({
+      id: Number(r.id),
+      name: String(r.name),
+      remark: String(r.remark),
+      position: Number(r.position),
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+      node_count: Number(r.node_count),
+    }));
+  }
+  setCollections(nodeId: number, ids: number[]) {
+    this.run("DELETE FROM node_collection_members WHERE node_id=?", nodeId);
+    for (const collectionId of ids)
+      this.run(
+        "INSERT INTO node_collection_members VALUES(?,?,?)",
+        collectionId,
+        nodeId,
+        now(),
+      );
   }
   addNode(e: Envelope, remark = "", tags: string[] = [], enabled = true) {
     const t = now();

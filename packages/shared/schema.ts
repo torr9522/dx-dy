@@ -93,6 +93,11 @@ export const nodeEditSchema = z.object({
   remark: z.string().max(2000).default(""),
   tags: z.array(z.string().min(1).max(40)).max(20).default([]),
   enabled: z.boolean().default(true),
+  collection_ids: z
+    .array(z.number().int().positive())
+    .max(100)
+    .refine((v) => new Set(v).size === v.length)
+    .optional(),
 });
 export type NodeRecord = Envelope & {
   id: number;
@@ -104,6 +109,16 @@ export type NodeRecord = Envelope & {
   created_at: string;
   updated_at: string;
   references: number;
+  collection_ids: number[];
+};
+export type NodeCollection = {
+  id: number;
+  name: string;
+  remark: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  node_count: number;
 };
 export const profileSchema = z.object({
   name: z.string().trim().min(1).max(100),

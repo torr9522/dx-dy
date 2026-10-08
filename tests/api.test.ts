@@ -14,7 +14,8 @@ const options: Options = {
   database: ":memory:",
   masterKey: "1".repeat(64),
   initialPassword: password,
-  publicBase: "http://localhost:3000",
+  adminBase: "http://localhost:3000",
+  subscriptionBase: "http://localhost:3000",
 };
 describe("API and domain regression", () => {
   let system: Awaited<ReturnType<typeof createApp>>,
@@ -41,8 +42,269 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.3",
+      version: "0.1.4",
     });
+  });
+  it("collections are many-to-many management filters and never subscription authority", async () => {
+    const imported = (
+      await post("/api/nodes/import", { items: [{ uri: vless }] })
+    ).body[0];
+    const subscription = (
+      await post("/api/subscriptions", { name: "Collection boundary" })
+    ).body;
+    await agent
+      .put(`/api/subscriptions/${subscription.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: [imported.id] });
+    const personal = (
+      await post("/api/collections", { name: "Personal", remark: "owner" })
+    ).body;
+    const friend = (
+      await post("/api/collections", { name: "Friend", remark: "shared" })
+    ).body;
+    expect(
+      (await agent.get("/api/collections")).body.map(
+        (c: { name: string }) => c.name,
+      ),
+    ).toEqual(["Personal", "Friend"]);
+    const before = system.store.profile(
+      system.store.get(
+        "SELECT * FROM subscriptions WHERE id=?",
+        subscription.id,
+      )!,
+    );
+    const node = system.store.findNode(imported.id)!;
+    await agent
+      .patch(`/api/nodes/${node.id}`)
+      .set("X-CSRF-Token", csrf)
+      .send({
+        normalized_config: node.normalized_config,
+        remark: node.remark,
+        tags: ["US", "AI"],
+        enabled: true,
+        collection_ids: [personal.id, friend.id],
+      })
+      .expect(200);
+    expect(system.store.findNode(node.id)?.collection_ids).toEqual([
+      personal.id,
+      friend.id,
+    ]);
+    expect(
+      system.store
+        .nodes()
+        .filter(
+          (n) => n.collection_ids.includes(friend.id) && n.tags.includes("AI"),
+        ),
+    ).toHaveLength(1);
+    expect(
+      system.store.profile(
+        system.store.get(
+          "SELECT * FROM subscriptions WHERE id=?",
+          subscription.id,
+        )!,
+      ),
+    ).toEqual(before);
+    await agent
+      .patch(`/api/nodes/${node.id}`)
+      .set("X-CSRF-Token", csrf)
+      .send({
+        normalized_config: node.normalized_config,
+        remark: node.remark,
+        tags: ["US", "AI"],
+        enabled: true,
+        collection_ids: [personal.id],
+      })
+      .expect(200);
+    expect(
+      system.store.profile(
+        system.store.get(
+          "SELECT * FROM subscriptions WHERE id=?",
+          subscription.id,
+        )!,
+      ),
+    ).toEqual(before);
+    await agent
+      .put("/api/collections/order")
+      .set("X-CSRF-Token", csrf)
+      .send({ ids: [friend.id, personal.id] })
+      .expect(200);
+    await agent
+      .patch(`/api/collections/${personal.id}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ name: "Mine", remark: "renamed" })
+      .expect(200);
+    await agent
+      .delete(`/api/collections/${personal.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+    expect(system.store.findNode(node.id)).toBeDefined();
+    expect(
+      system.store.profile(
+        system.store.get(
+          "SELECT * FROM subscriptions WHERE id=?",
+          subscription.id,
+        )!,
+      ),
+    ).toEqual(before);
+    await agent
+      .delete(`/api/collections/${friend.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+    await agent
+      .delete(`/api/subscriptions/${subscription.id}`)
+      .set("X-CSRF-Token", csrf)
+      .expect(200);
+    await agent
+      .delete(`/api/nodes/${node.id}`)
+      .set("X-CSRF-Token", csrf)
+      .send({ confirm: true })
+      .expect(200);
+  });
+  it("separate subscription base controls URLs and subscription host hides admin", async () => {
+    const isolated = await createApp({
+      ...options,
+      adminBase: "https://admin.test.local",
+      subscriptionBase: "https://sub.test.local",
+    });
+    try {
+      const a = request.agent(isolated.app),
+        login = await a
+          .post("/api/auth/login")
+          .set("Host", "admin.test.local")
+          .set("Origin", "https://admin.test.local")
+          .send({ username: "admin", password });
+      const p = await a
+        .post("/api/subscriptions")
+        .set("Host", "admin.test.local")
+        .set("X-CSRF-Token", login.body.csrf)
+        .send({ name: "Domain test" });
+      const url = (
+        await a
+          .get(`/api/subscriptions/${p.body.id}/url`)
+          .set("Host", "admin.test.local")
+      ).body.url;
+      expect(url).toMatch(/^https:\/\/sub\.test\.local\/s\//);
+      const subscriptionPath = new URL(url).pathname;
+      const canonical = await request(isolated.app)
+        .get(subscriptionPath)
+        .set("Host", "sub.test.local");
+      const legacy = await request(isolated.app)
+        .get(subscriptionPath)
+        .set("Host", "admin.test.local");
+      expect(canonical.status).toBe(200);
+      expect(legacy.status).toBe(200);
+      expect(canonical.headers["content-type"]).toBe(
+        legacy.headers["content-type"],
+      );
+      expect(canonical.headers["cache-control"]).toBe(
+        legacy.headers["cache-control"],
+      );
+      expect(canonical.text).toBe(legacy.text);
+      expect(
+        (await request(isolated.app).get("/").set("Host", "sub.test.local"))
+          .status,
+      ).toBe(404);
+      expect(
+        (
+          await request(isolated.app)
+            .get("/api/auth/me")
+            .set("Host", "sub.test.local")
+        ).status,
+      ).toBe(404);
+      expect(
+        (await request(isolated.app).get("/").set("Host", "evil.test.local"))
+          .status,
+      ).toBe(421);
+      const tokenBefore = isolated.store.get(
+        "SELECT token_hash,token_ciphertext FROM subscriptions WHERE id=?",
+        p.body.id,
+      );
+      const relationsBefore = isolated.store.all(
+        "SELECT * FROM subscription_nodes WHERE subscription_id=?",
+        p.body.id,
+      );
+      await a
+        .put("/api/settings")
+        .set("Host", "admin.test.local")
+        .set("Origin", "https://admin.test.local")
+        .set("X-CSRF-Token", login.body.csrf)
+        .send({
+          site_name: "Domain test",
+          default_format: "v2ray",
+          subscription_base_url: "https://sub2.test.local/",
+        })
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.subscription_base_url).toBe(
+            "https://sub2.test.local",
+          );
+        });
+      const changedUrl = (
+        await a
+          .get(`/api/subscriptions/${p.body.id}/url`)
+          .set("Host", "admin.test.local")
+      ).body.url;
+      expect(changedUrl).toBe(url.replace("sub.test.local", "sub2.test.local"));
+      expect(
+        isolated.store.get(
+          "SELECT token_hash,token_ciphertext FROM subscriptions WHERE id=?",
+          p.body.id,
+        ),
+      ).toEqual(tokenBefore);
+      expect(
+        isolated.store.all(
+          "SELECT * FROM subscription_nodes WHERE subscription_id=?",
+          p.body.id,
+        ),
+      ).toEqual(relationsBefore);
+      await request(isolated.app)
+        .get(subscriptionPath)
+        .set("Host", "sub2.test.local")
+        .expect(200);
+      const previousCanonical = await request(isolated.app)
+        .get(subscriptionPath)
+        .set("Host", "sub.test.local");
+      expect(previousCanonical.status).toBe(200);
+      expect(previousCanonical.text).toBe(canonical.text);
+      await request(isolated.app)
+        .get("/")
+        .set("Host", "sub.test.local")
+        .expect(404);
+      for (const invalid of [
+        "dy.example.com",
+        "http://dy.example.com",
+        "javascript:alert(1)",
+        "file:///tmp/a",
+        "ftp://dy.example.com",
+        "/s/test",
+        "https://user:pass@dy.example.com",
+        "https://dy.example.com/s/",
+        "https://dy.example.com?x=1",
+        "https://dy.example.com#x",
+      ])
+        await a
+          .put("/api/settings")
+          .set("Host", "admin.test.local")
+          .set("Origin", "https://admin.test.local")
+          .set("X-CSRF-Token", login.body.csrf)
+          .send({
+            site_name: "Domain test",
+            default_format: "v2ray",
+            subscription_base_url: invalid,
+          })
+          .expect(400);
+      await request(isolated.app)
+        .put("/api/settings")
+        .set("Host", "admin.test.local")
+        .send({
+          site_name: "Domain test",
+          default_format: "v2ray",
+          subscription_base_url: "https://unauthorized.test",
+        })
+        .expect(401);
+    } finally {
+      isolated.store.close();
+    }
   });
   it("unauthorized admin request fails", async () => {
     expect((await request(system.app).get("/api/nodes")).status).toBe(401);
@@ -466,7 +728,7 @@ describe("API and domain regression", () => {
       (
         await agent.put("/api/settings").set("X-CSRF-Token", csrf).send({
           site_name: "测试",
-          public_base_url: "http://localhost:3000",
+          subscription_base_url: "http://localhost:3000/",
           default_format: "raw",
         })
       ).status,

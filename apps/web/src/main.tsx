@@ -37,6 +37,7 @@ import {
   ChevronUp,
   ChevronDown,
   ExternalLink,
+  Pencil,
 } from "lucide-react";
 import QRCode from "qrcode";
 import type {
@@ -44,13 +45,15 @@ import type {
   Profile,
   NormalizedNode,
   Envelope,
+  NodeCollection,
 } from "../../../packages/shared/schema";
 import { api, setCsrf } from "./api";
 import { getField, setField, nodeMatches } from "./fields";
 import "./style.css";
 type SettingsData = {
   site_name: string;
-  public_base_url: string;
+  admin_base_url: string;
+  subscription_base_url: string;
   default_format: string;
 };
 type Preview = {
@@ -144,9 +147,11 @@ function App() {
     [page, setPage] = useState("dashboard");
   const [nodes, setNodes] = useState<NodeRecord[]>([]),
     [profiles, setProfiles] = useState<Profile[]>([]),
+    [collections, setCollections] = useState<NodeCollection[]>([]),
     [settings, setSettings] = useState<SettingsData>({
       site_name: "私人节点库",
-      public_base_url: "",
+      admin_base_url: "",
+      subscription_base_url: "",
       default_format: "v2ray",
     });
   const [toast, setToast] = useState(""),
@@ -156,6 +161,10 @@ function App() {
     [editing, setEditing] = useState<NodeRecord | null>(null),
     [profile, setProfile] = useState<Profile | null>(null),
     [newProfile, setNewProfile] = useState(false);
+  const [activeCollection, setActiveCollection] = useState<number | null>(null),
+    [collectionEditor, setCollectionEditor] = useState<
+      NodeCollection | "new" | null
+    >(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const confirmationFocus = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
@@ -170,14 +179,16 @@ function App() {
     setTimeout(() => setToast(""), 4500);
   };
   const refresh = async () => {
-    const [n, p, s] = await Promise.all([
+    const [n, p, s, c] = await Promise.all([
       api<NodeRecord[]>("/nodes"),
       api<Profile[]>("/subscriptions"),
       api<SettingsData>("/settings"),
+      api<NodeCollection[]>("/collections"),
     ]);
     setNodes(n);
     setProfiles(p);
     setSettings(s);
+    setCollections(c);
   };
   const action = async (fn: () => Promise<void>) => {
     setPending(true);
@@ -215,6 +226,13 @@ function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
+  useEffect(() => {
+    if (
+      activeCollection !== null &&
+      !collections.some((collection) => collection.id === activeCollection)
+    )
+      setActiveCollection(null);
+  }, [activeCollection, collections]);
   if (boot) return <div className="loading">正在连接私人节点库…</div>;
   if (!user)
     return (
@@ -234,8 +252,11 @@ function App() {
         )}
       </>
     );
-  const filtered = nodes.filter((n) =>
-    nodeMatches(n, search, filter, tag, status),
+  const filtered = nodes.filter(
+    (n) =>
+      nodeMatches(n, search, filter, tag, status) &&
+      (activeCollection === null ||
+        n.collection_ids.includes(activeCollection)),
   );
   const nav = [
     ["dashboard", "Dashboard", LayoutDashboard],
@@ -278,7 +299,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.3</small>
+          <small>Private Subscription Manager v0.1.4</small>
         </div>
       </aside>
       <main>
@@ -354,6 +375,48 @@ function App() {
           )}
           {page === "nodes" && (
             <section className="card">
+              <div className="collection-nav" aria-label="节点集合导航">
+                <button
+                  className={activeCollection === null ? "active" : ""}
+                  onClick={() => setActiveCollection(null)}
+                >
+                  全部节点 <span>{nodes.length}</span>
+                </button>
+                {collections.map((c, i) => (
+                  <div className="collection-nav-item" key={c.id}>
+                    <button
+                      className={activeCollection === c.id ? "active" : ""}
+                      onClick={() => setActiveCollection(c.id)}
+                    >
+                      {c.name} <span>{c.node_count}</span>
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={`编辑集合 ${c.name}`}
+                      onClick={() => setCollectionEditor(c)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={`上移集合 ${c.name}`}
+                      disabled={!i}
+                      onClick={async () => {
+                        const ids = collections.map((x) => x.id);
+                        [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]];
+                        await api("/collections/order", "PUT", { ids });
+                        await refresh();
+                      }}
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setCollectionEditor("new")}>
+                  <Plus size={14} />
+                  新建集合
+                </button>
+              </div>
               <div className="toolbar">
                 <div className="search">
                   <Search size={16} />
@@ -529,6 +592,7 @@ function App() {
                 }}
                 onBack={() => setProfile(null)}
                 confirm={setConfirm}
+                collections={collections}
               />
             ) : (
               <div className="profile-grid">
@@ -596,6 +660,7 @@ function App() {
         onClose={() => setImportOpen(false)}
         onSaved={refresh}
         notify={notify}
+        collections={collections}
       />
       {editing && (
         <NodeDrawer
@@ -606,6 +671,7 @@ function App() {
           notify={notify}
           copy={copy}
           confirm={setConfirm}
+          collections={collections}
         />
       )}
       <NewProfile
@@ -614,6 +680,17 @@ function App() {
         saved={refresh}
         notify={notify}
       />
+      {collectionEditor && (
+        <CollectionEditor
+          collection={collectionEditor === "new" ? null : collectionEditor}
+          close={() => setCollectionEditor(null)}
+          saved={async () => {
+            setCollectionEditor(null);
+            await refresh();
+          }}
+          confirm={setConfirm}
+        />
+      )}
       <Modal
         open={!!confirm}
         onClose={() => setConfirm(null)}
@@ -828,22 +905,140 @@ function Dashboard({
     </>
   );
 }
+function CollectionPicker({
+  collections,
+  selected,
+  setSelected,
+  label,
+}: {
+  collections: NodeCollection[];
+  selected: number[];
+  setSelected: (ids: number[]) => void;
+  label: string;
+}) {
+  return (
+    <fieldset className="collection-picker">
+      <legend>{label}</legend>
+      {collections.length ? (
+        collections.map((c) => (
+          <label key={c.id}>
+            <input
+              type="checkbox"
+              checked={selected.includes(c.id)}
+              onChange={(e) =>
+                setSelected(
+                  e.target.checked
+                    ? [...selected, c.id]
+                    : selected.filter((id) => id !== c.id),
+                )
+              }
+            />
+            {c.name}
+          </label>
+        ))
+      ) : (
+        <span className="muted">尚无节点集合</span>
+      )}
+    </fieldset>
+  );
+}
+function CollectionEditor({
+  collection,
+  close,
+  saved,
+  confirm,
+}: {
+  collection: NodeCollection | null;
+  close: () => void;
+  saved: () => Promise<void>;
+  confirm: ConfirmSetter;
+}) {
+  const [name, setName] = useState(collection?.name || ""),
+    [remark, setRemark] = useState(collection?.remark || ""),
+    [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      open
+      onClose={close}
+      title={collection ? "编辑节点集合" : "新建节点集合"}
+      description="集合用于管理和筛选，不会自动改变订阅。"
+    >
+      <Field label="集合名称">
+        <input
+          aria-label="集合名称"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+      </Field>
+      <Field label="备注">
+        <textarea
+          aria-label="集合备注"
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+        />
+      </Field>
+      <div className="modal-actions">
+        {collection && (
+          <button
+            className="danger-text"
+            onClick={() =>
+              confirm({
+                title: "删除节点集合",
+                text: `只删除集合“${collection.name}”及其节点关联；不会删除任何全局节点，也不会影响已有订阅。`,
+                successMessage: "节点集合已删除",
+                run: async () => {
+                  await api(`/collections/${collection.id}`, "DELETE", {});
+                  await saved();
+                },
+              })
+            }
+          >
+            删除集合
+          </button>
+        )}
+        <button
+          disabled={busy || !name.trim()}
+          className="primary"
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await api(
+                collection ? `/collections/${collection.id}` : "/collections",
+                collection ? "PATCH" : "POST",
+                { name, remark },
+              );
+              await saved();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          保存集合
+        </button>
+      </div>
+    </Modal>
+  );
+}
 function ImportDialog({
   open,
   onClose,
   onSaved,
   notify,
+  collections,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
   notify: (s: string) => void;
+  collections: NodeCollection[];
 }) {
   const [text, setText] = useState(""),
     [rows, setRows] = useState<Preview[]>([]),
     [selected, setSelected] = useState<Set<number>>(new Set()),
     [names, setNames] = useState<Record<number, string>>({}),
     [busy, setBusy] = useState(false);
+  const [collectionIds, setCollectionIds] = useState<number[]>([]);
   const work = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -905,6 +1100,12 @@ function ImportDialog({
       </div>
       {rows.length > 0 && (
         <>
+          <CollectionPicker
+            collections={collections}
+            selected={collectionIds}
+            setSelected={setCollectionIds}
+            label="导入到节点集合（可多选）"
+          />
           <div className="import-summary">
             {rows.filter((r) => r.status === "success").length} 成功 ·{" "}
             {rows.filter((r) => r.status === "warning").length} 警告 ·{" "}
@@ -1000,6 +1201,7 @@ function ImportDialog({
               onClick={() =>
                 work(async () => {
                   await api("/nodes/import", "POST", {
+                    collection_ids: collectionIds,
                     items: rows
                       .filter((r) => selected.has(r.index) && r.envelope)
                       .map((r) => ({
@@ -1038,6 +1240,7 @@ function NodeDrawer({
   notify,
   copy,
   confirm,
+  collections,
 }: {
   node: NodeRecord;
   onClose: () => void;
@@ -1045,6 +1248,7 @@ function NodeDrawer({
   notify: (s: string) => void;
   copy: (s: string) => Promise<void>;
   confirm: ConfirmSetter;
+  collections: NodeCollection[];
 }) {
   const [config, setConfig] = useState<NormalizedNode>(
       structuredClone(node.normalized_config),
@@ -1052,6 +1256,7 @@ function NodeDrawer({
     [remark, setRemark] = useState(node.remark),
     [tags, setTags] = useState(node.tags.join(", ")),
     [enabled, setEnabled] = useState(node.enabled),
+    [collectionIds, setCollectionIds] = useState(node.collection_ids),
     [tab, setTab] = useState("form"),
     [newUri, setNewUri] = useState(""),
     [diff, setDiff] = useState<
@@ -1286,6 +1491,12 @@ function NodeDrawer({
           <Field label="标签（逗号分隔）">
             <input value={tags} onChange={(e) => setTags(e.target.value)} />
           </Field>
+          <CollectionPicker
+            collections={collections}
+            selected={collectionIds}
+            setSelected={setCollectionIds}
+            label="节点集合（可多选）"
+          />
           <label className="checkbox">
             <input
               type="checkbox"
@@ -1454,6 +1665,7 @@ function NodeDrawer({
                     .map((t) => t.trim())
                     .filter(Boolean),
                   enabled,
+                  collection_ids: collectionIds,
                 });
                 await onSaved();
                 notify("节点已更新，关联订阅自动同步");
@@ -1741,7 +1953,12 @@ function SubscriptionActions({
         title="订阅二维码"
         description="扫码获取订阅凭证，请勿公开截图。"
       >
-        <img className="qr" src={qr} alt="订阅二维码" />
+        <img
+          className="qr"
+          src={qr}
+          alt="订阅二维码"
+          data-subscription-url={url}
+        />
         <a href={url} className="mono" rel="noreferrer">
           订阅链接
         </a>
@@ -1757,6 +1974,7 @@ function ProfileDetail({
   onSaved,
   onBack,
   confirm,
+  collections,
 }: {
   initial: Profile;
   nodes: NodeRecord[];
@@ -1765,12 +1983,14 @@ function ProfileDetail({
   onSaved: () => Promise<void>;
   onBack: () => void;
   confirm: ConfirmSetter;
+  collections: NodeCollection[];
 }) {
   const [profile, setProfile] = useState(initial),
     [ids, setIds] = useState(initial.node_ids),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [tag, setTag] = useState(""),
+    [collectionId, setCollectionId] = useState<number | null>(null),
     [busy, setBusy] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1858,6 +2078,20 @@ function ProfileDetail({
           />
           <div className="row-actions">
             <select
+              aria-label="选择器集合"
+              value={collectionId ?? ""}
+              onChange={(e) =>
+                setCollectionId(e.target.value ? Number(e.target.value) : null)
+              }
+            >
+              <option value="">全部集合</option>
+              {collections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
               aria-label="选择器协议"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -1882,7 +2116,12 @@ function ProfileDetail({
           </div>
           <div className="node-picker">
             {nodes
-              .filter((n) => nodeMatches(n, search, filter, tag, ""))
+              .filter(
+                (n) =>
+                  nodeMatches(n, search, filter, tag, "") &&
+                  (collectionId === null ||
+                    n.collection_ids.includes(collectionId)),
+              )
               .map((n) => (
                 <label key={n.id} className="picker-node">
                   <input
@@ -2021,6 +2260,7 @@ function SettingsPage({
   const [settings, setSettings] = useState(initial),
     [current, setCurrent] = useState(""),
     [password, setPassword] = useState("");
+  useEffect(() => setSettings(initial), [initial]);
   return (
     <div className="settings-grid">
       <form
@@ -2028,9 +2268,22 @@ function SettingsPage({
         onSubmit={async (e) => {
           e.preventDefault();
           try {
-            await api("/settings", "PUT", settings);
+            const previous = initial.subscription_base_url;
+            const result = await api<{ subscription_base_url: string }>(
+              "/settings",
+              "PUT",
+              settings,
+            );
+            setSettings({
+              ...settings,
+              subscription_base_url: result.subscription_base_url,
+            });
             await onSave();
-            notify("设置已保存");
+            notify(
+              previous === result.subscription_base_url
+                ? "设置已保存"
+                : "订阅域名已更新",
+            );
           } catch (err) {
             notify((err as Error).message);
           }
@@ -2045,15 +2298,33 @@ function SettingsPage({
             }
           />
         </Field>
-        <Field label="Public Base URL">
+        <Field label="Admin Base URL（部署环境）">
           <input
+            aria-label="Admin Base URL"
             type="url"
-            value={settings.public_base_url}
-            onChange={(e) =>
-              setSettings({ ...settings, public_base_url: e.target.value })
-            }
+            value={settings.admin_base_url}
+            readOnly
           />
         </Field>
+        <Field label="订阅域名">
+          <input
+            aria-label="订阅域名"
+            type="url"
+            value={settings.subscription_base_url}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                subscription_base_url: e.target.value,
+              })
+            }
+            required
+          />
+        </Field>
+        <div className="notice">
+          用于生成复制链接和二维码。修改不会改变现有
+          Token，但以后生成的链接会使用新域名；请先确保新域名已正确解析并启用
+          HTTPS。客户端中已保存的旧地址不会自动修改。
+        </div>
         <button className="primary">保存设置</button>
       </form>
       <form

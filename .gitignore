@@ -16,6 +16,8 @@ secret
 *.tar.gz
 *.tgz
 *.sqlite*
+*.psmbackup
+*.instance-key
 coverage/
 playwright-report/
 test-results/

@@ -8,11 +8,12 @@ RUN pnpm build && pnpm prune --prod
 
 FROM node:26.10.0-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production DATABASE_PATH=/data/app.sqlite PORT=3000 HOST=0.0.0.0
+ENV NODE_ENV=production DATABASE_PATH=/data/private-subscription-manager.db PORT=3000 HOST=0.0.0.0
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
+COPY --from=build /usr/bin/flock /usr/bin/flock
 RUN mkdir /data && chown node:node /data
 USER node
 EXPOSE 3000

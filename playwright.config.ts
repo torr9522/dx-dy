@@ -13,10 +13,11 @@ export default defineConfig({
     env: {
       PORT: "3100",
       HOST: "127.0.0.1",
-      DATABASE_PATH: `test-results/e2e-${Date.now()}.sqlite`,
+      DATABASE_PATH: `test-results/e2e-${Date.now()}.db`,
       APP_MASTER_KEY: "2".repeat(64),
       ADMIN_INITIAL_PASSWORD: "Synthetic-e2e-password-123!",
-      PUBLIC_BASE_URL: "http://127.0.0.1:3100",
+      ADMIN_BASE_URL: "http://127.0.0.1:3100",
+      SUBSCRIPTION_BASE_URL: "http://127.0.0.1:3100",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "0",
     },

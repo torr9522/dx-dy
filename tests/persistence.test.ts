@@ -20,7 +20,7 @@ it("WAL persistence, backup and versioned idempotent migrations", async () => {
     const next = new Store(file);
     await next.migrate();
     expect(next.nodes()).toHaveLength(1);
-    expect(next.all("SELECT * FROM schema_migrations")).toHaveLength(1);
+    expect(next.all("SELECT * FROM schema_migrations")).toHaveLength(2);
     next.close();
     const b = new DatabaseSync(path.join(dir, "backup.sqlite"));
     expect(b.prepare("SELECT COUNT(*) AS n FROM nodes").get()?.n).toBe(1);
@@ -34,7 +34,7 @@ it("failed migration rolls back all schema changes", async () => {
   const s = new Store(":memory:");
   try {
     writeFileSync(
-      path.join(dir, "001.sql"),
+      path.join(dir, "001_failure.sql"),
       "CREATE TABLE test(id INTEGER); INVALID SQL;",
     );
     await expect(s.migrate(dir)).rejects.toThrow();
