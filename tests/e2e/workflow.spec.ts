@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { vless, vmess } from "../fixtures";
+import { fixtures, vless, vmess } from "../fixtures";
 import QRCode from "qrcode";
 for (const width of [1280, 390, 320]) {
   test(`subscription card quick actions at ${width}px`, async ({
@@ -250,17 +250,7 @@ test("complete browser workflow with synthetic nodes", async ({
     .filter({ hasText: "E2E VMess" })
     .getByRole("checkbox")
     .check();
-  const a = page.getByLabel("拖动 E2E VLESS"),
-    b = page.getByLabel("拖动 E2E VMess");
-  const first = await a.boundingBox(),
-    second = await b.boundingBox();
-  if (!first || !second) throw new Error("Missing handles");
-  await page.mouse.move(first.x + 8, first.y + 8);
-  await page.mouse.down();
-  await page.mouse.move(second.x + 8, second.y + second.height + 6, {
-    steps: 15,
-  });
-  await page.mouse.up();
+  await page.getByLabel("下移 E2E VLESS").click();
   await expect(page.locator(".selected-node").first()).toContainText(
     "E2E VMess",
   );
@@ -346,6 +336,110 @@ test("complete browser workflow with synthetic nodes", async ({
   });
 });
 
+test("filtered selection accumulates, supports rows and visible shift ranges", async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("Synthetic-e2e-password-123!");
+  await page.getByRole("button", { name: "安全登录" }).click();
+  await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
+  const headers = { "X-CSRF-Token": csrf };
+  const imported = await (
+    await context.request.post("/api/nodes/import", {
+      headers,
+      data: {
+        items: fixtures.slice(0, 6).map(([, uri], index) => ({
+          uri,
+          name: `Selection ${index < 3 ? "JP" : "US"} ${index + 1}`,
+        })),
+      },
+    })
+  ).json();
+  await page.reload();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  const search = page.getByLabel("搜索全部节点", { exact: true });
+  await search.fill("Selection JP");
+  await page.getByRole("checkbox", { name: "全选当前节点" }).check();
+  await expect(
+    page.getByText("已选择 3 个节点", { exact: true }),
+  ).toBeVisible();
+  await search.fill("Selection US");
+  await page
+    .locator("tr.selectable-row")
+    .filter({ hasText: "Selection US 4" })
+    .locator("td")
+    .nth(2)
+    .click();
+  await expect(
+    page.getByText("已选择 4 个节点", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "查看已选择 4 个" }).click();
+  const review = page.getByRole("dialog", { name: "查看已选择节点" });
+  await expect(
+    review.getByText("Selection JP 1", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    review.getByText("Selection US 4", { exact: true }),
+  ).toBeVisible();
+  await review.getByRole("button", { name: "关闭" }).click();
+  await search.fill("");
+  const master = page.getByRole("checkbox", { name: "全选当前节点" });
+  await expect(master).not.toBeChecked();
+  expect(
+    await master.evaluate((input: HTMLInputElement) => input.indeterminate),
+  ).toBe(true);
+  await page.getByRole("button", { name: "清空选择" }).click();
+
+  const rows = page.locator("tr.selectable-row");
+  await rows.nth(0).getByRole("checkbox").check();
+  await rows
+    .nth(4)
+    .getByRole("checkbox")
+    .click({ modifiers: ["Shift"] });
+  for (let index = 0; index < 5; index++)
+    await expect(rows.nth(index).getByRole("checkbox")).toBeChecked();
+  const sixthCheckbox = rows.nth(5).getByRole("checkbox");
+  await expect(sixthCheckbox).not.toBeChecked();
+  await rows
+    .nth(5)
+    .getByRole("button", { name: /管理 .* 的节点集合/ })
+    .click();
+  await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
+  await expect(sixthCheckbox).not.toBeChecked();
+  await rows.nth(5).locator("td").nth(2).click();
+  await expect(sixthCheckbox).toBeChecked();
+  await sixthCheckbox.uncheck();
+  await expect(sixthCheckbox).not.toBeChecked();
+  await expect(
+    page.getByText("已选择 5 个节点", { exact: true }),
+  ).toBeVisible();
+
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bulk = page.getByRole("toolbar", { name: "节点批量操作" });
+    const box = await bulk.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+    await expect(page.getByRole("button", { name: "清空选择" })).toBeVisible();
+    await page.screenshot({
+      path: `test-results/selection-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.getByRole("button", { name: "清空选择" }).click();
+  for (const node of imported)
+    await context.request.delete(`/api/nodes/${node.id}`, {
+      headers,
+      data: { confirm: true },
+    });
+});
+
 test("node collections organize nodes without becoming subscription authority", async ({
   page,
   context,
@@ -408,10 +502,10 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.getByLabel("搜索节点库", { exact: true }).fill("Collection");
   await page.getByLabel("搜索节点库协议").selectOption("vless");
   await page.getByLabel("搜索节点库标签").selectOption("AI");
-  await page.getByRole("checkbox", { name: "添加 Collection VLESS" }).check();
+  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
   await page.getByLabel("搜索节点库协议").selectOption("");
   await page.getByLabel("搜索节点库标签").selectOption("");
-  await page.getByRole("checkbox", { name: "添加 Collection VMess" }).check();
+  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
   await page.getByRole("button", { name: "添加 2 个节点" }).click();
   await expect(page.getByRole("button", { name: /E2E-G 2/ })).toBeVisible();
   await page.getByLabel("搜索 E2E-G 中节点", { exact: true }).fill("VLESS");
@@ -448,7 +542,11 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.getByRole("button", { name: /E2E-G 1/ }).click();
   await page.getByRole("button", { name: "从节点库添加节点" }).click();
   await expect(page.getByText("已在 E2E-G 中")).toBeVisible();
-  await page.getByRole("checkbox", { name: "添加 Collection VLESS" }).check();
+  await page.getByLabel("搜索节点库", { exact: true }).fill("Collection");
+  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
+  await expect(
+    page.getByText("已选择 1 个节点", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "添加 1 个节点" }).click();
   await page.screenshot({
     path: "test-results/collections-desktop.png",
@@ -481,20 +579,28 @@ test("node collections organize nodes without becoming subscription authority", 
     .getByRole("button", { name: /全部节点/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VLESS");
-  await page.getByRole("checkbox", { name: /^Collection VLESS / }).check();
+  await page.getByRole("checkbox", { name: "全选当前候选节点" }).check();
   await page
     .getByLabel("节点来源")
     .getByRole("button", { name: /E2E-G/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VMess");
-  await page.getByRole("checkbox", { name: /^Collection VMess / }).check();
+  await page.getByRole("checkbox", { name: "全选当前候选节点" }).check();
+  await page.getByRole("button", { name: "查看已选择 2 个" }).click();
+  await expect(
+    page.getByRole("dialog").getByText("Collection VLESS", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("Collection VMess", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
   await page
     .getByLabel("节点来源")
     .getByRole("button", { name: /全部节点/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VLESS");
   await expect(
-    page.getByRole("checkbox", { name: /^Collection VLESS / }),
+    page.getByRole("checkbox", { name: "选择订阅节点 Collection VLESS" }),
   ).toBeChecked();
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
   const canonicalUrl = (

@@ -49,6 +49,12 @@ import type {
 import { api, setCsrf } from "./api";
 import { getField, setField, nodeMatches } from "./fields";
 import { NodeLibrary } from "./NodeLibrary";
+import {
+  SelectedNodesDialog,
+  SelectionMaster,
+  shouldToggleRow,
+  useNodeSelection,
+} from "./nodeSelection";
 import "./style.css";
 type SettingsData = {
   site_name: string;
@@ -278,7 +284,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>Private Subscription Manager v0.1.5</small>
+          <small>Private Subscription Manager v0.1.6</small>
         </div>
       </aside>
       <main>
@@ -1681,13 +1687,16 @@ function ProfileDetail({
   collections: NodeCollection[];
 }) {
   const [profile, setProfile] = useState(initial),
-    [ids, setIds] = useState(initial.node_ids),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [tag, setTag] = useState(""),
     [status, setStatus] = useState(""),
     [collectionId, setCollectionId] = useState<number | null>(null),
+    [reviewOpen, setReviewOpen] = useState(false),
     [busy, setBusy] = useState(false);
+  const selection = useNodeSelection(initial.node_ids);
+  const ids = selection.selectedIds;
+  const setIds = selection.replace;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, {
@@ -1715,6 +1724,10 @@ function ProfileDetail({
     nodeMatches(node, search, filter, tag, status),
   );
   const selectedCollection = collections.find((c) => c.id === collectionId);
+  useEffect(
+    () => selection.resetAnchor(),
+    [search, filter, tag, status, collectionId],
+  );
   const move = (from: number, to: number) => {
     if (to >= 0 && to < ids.length) setIds(arrayMove(ids, from, to));
   };
@@ -1860,19 +1873,50 @@ function ProfileDetail({
                 : `${candidateNodes.length} / ${sourceNodes.length} 个候选节点`}
             </small>
           </div>
+          <div className="selection-toolbar">
+            <SelectionMaster
+              selected={selection.selected}
+              selectableIds={candidateNodes.map((node) => node.id)}
+              toggle={() =>
+                selection.toggleVisible(candidateNodes.map((node) => node.id))
+              }
+              label="当前候选节点"
+            />
+          </div>
           <div className="node-picker">
             {candidateNodes.map((n) => (
-              <label key={n.id} className="picker-node">
+              <div
+                key={n.id}
+                className={`picker-node selectable-row${selection.isSelected(n.id) ? " is-selected" : ""}`}
+                onMouseDown={(event) => {
+                  if (event.shiftKey && shouldToggleRow(event.target, true)) {
+                    event.preventDefault();
+                    selection.toggleOne(n.id, {
+                      shiftKey: true,
+                      visibleIds: candidateNodes.map((node) => node.id),
+                    });
+                  }
+                }}
+                onClick={(event) => {
+                  if (!event.shiftKey && shouldToggleRow(event.target))
+                    selection.toggleOne(n.id, {
+                      visibleIds: candidateNodes.map((node) => node.id),
+                    });
+                }}
+              >
                 <input
                   type="checkbox"
-                  checked={ids.includes(n.id)}
-                  onChange={(e) =>
-                    setIds(
-                      e.target.checked
-                        ? [...ids, n.id]
-                        : ids.filter((id) => id !== n.id),
-                    )
-                  }
+                  aria-label={`选择订阅节点 ${n.name}`}
+                  checked={selection.isSelected(n.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selection.toggleOne(n.id, {
+                      checked: event.currentTarget.checked,
+                      shiftKey: event.shiftKey,
+                      visibleIds: candidateNodes.map((node) => node.id),
+                    });
+                  }}
+                  onChange={() => undefined}
                 />
                 <div>
                   <strong>{n.name}</strong>
@@ -1883,7 +1927,7 @@ function ProfileDetail({
                 <span className={n.enabled ? "state enabled" : "state"}>
                   {n.enabled ? "启用" : "禁用"}
                 </span>
-              </label>
+              </div>
             ))}
             {!candidateNodes.length && (
               <div className="selector-empty">
@@ -1901,6 +1945,34 @@ function ProfileDetail({
               </div>
             )}
           </div>
+          {!!selection.selectedCount && (
+            <div
+              className="bulk-bar"
+              role="toolbar"
+              aria-label="订阅节点批量操作"
+            >
+              <strong>已选择 {selection.selectedCount} 个节点</strong>
+              <button onClick={() => setReviewOpen(true)}>
+                查看已选择 {selection.selectedCount} 个
+              </button>
+              <button onClick={selection.clearAll}>清空选择</button>
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() =>
+                  work(async () => {
+                    await api(`/subscriptions/${profile.id}/nodes`, "PUT", {
+                      node_ids: ids,
+                    });
+                    await onSaved();
+                    notify("节点关联与顺序已保存");
+                  })
+                }
+              >
+                保存
+              </button>
+            </div>
+          )}
         </section>
         <section className="card section-pad">
           <div className="section-heading">
@@ -1936,7 +2008,7 @@ function ProfileDetail({
                 <SortableNode
                   node={n}
                   key={n.id}
-                  remove={() => setIds(ids.filter((id) => id !== n.id))}
+                  remove={() => selection.removeOne(n.id)}
                   up={() => move(i, i - 1)}
                   down={() => move(i, i + 1)}
                 />
@@ -1997,6 +2069,14 @@ function ProfileDetail({
           />
         </div>
       </section>
+      <SelectedNodesDialog
+        open={reviewOpen}
+        close={() => setReviewOpen(false)}
+        nodes={nodes}
+        selected={selection.selected}
+        remove={selection.removeOne}
+        protocolLabel={labelProtocol}
+      />
     </>
   );
 }

@@ -524,6 +524,48 @@ main {
   color: var(--muted);
   font-size: 11px;
 }
+.selection-toolbar {
+  min-height: 44px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.selection-master {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.selection-master input:disabled + span {
+  color: var(--muted);
+}
+.selectable-row {
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s;
+}
+.selectable-row.is-selected,
+.selectable-row.is-selected td {
+  background: var(--accent-soft);
+}
+.node-table .selectable-row.is-selected td:first-child {
+  box-shadow: inset 3px 0 var(--accent);
+}
+.selected-search {
+  width: 100%;
+}
+.selected-row button {
+  font-size: 11px;
+  padding: 7px 9px;
+}
 .select-cell {
   width: 42px;
   padding-right: 0;
@@ -1408,6 +1450,12 @@ pre {
   .node-filters {
     padding: 8px 13px;
   }
+  .selection-toolbar {
+    padding: 8px 13px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
   .node-filters select {
     flex: 1;
   }
@@ -1434,6 +1482,15 @@ pre {
   }
   .bulk-bar {
     flex-wrap: wrap;
+    width: calc(100% - 20px);
+    max-width: none;
+    bottom: 8px;
+  }
+  .bulk-bar strong {
+    width: 100%;
+  }
+  .bulk-bar button:not(.icon-button) {
+    flex: 1 1 auto;
   }
   .search {
     width: 100%;

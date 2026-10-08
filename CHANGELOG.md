@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.1.6-rc.1] - 2026-10-08
+
+### Added
+
+- Added a shared Set-based node selection engine with tri-state current-result selection, selected totals, clear controls and searchable selected-node review.
+- Added desktop Shift-click range selection over the current visible order and row-click selection across node management workflows.
+- Added responsive sticky bulk action controls for desktop and 390px/320px mobile layouts.
+
+### Changed
+
+- Search, protocol, Tag, status and Collection source changes now preserve selections while bulk select/deselect remains scoped to the current filtered results.
+- Unified selection behavior across the global Node Library, Collection member view, Collection add dialog and subscription node selector.
+- Improved selected-row feedback and allowed non-interactive row areas to toggle selection without removing keyboard-accessible checkboxes.
+
+### Safety
+
+- Disabled nodes already in a target Collection are excluded from selection totals, select-all state and Shift ranges.
+- Selection remains transient UI state and adds no database migration or persisted selection metadata.
+- Collection selection operations continue to leave `subscription_nodes`, canonical subscription bodies, Tokens and global node records unchanged.
+
+### Validation
+
+- Added unit coverage for visible Set operations, tri-state calculation, filter accumulation, Shift ranges, disabled-node skipping, anchor reset and selected-only ordering.
+- Added Playwright coverage for filtered accumulation, indeterminate state, selected review, row and checkbox behavior, Shift range selection, disabled Collection members and 390px/320px bulk controls.
+
 ## [0.1.5-rc.1] - 2026-10-08
 
 ### Added

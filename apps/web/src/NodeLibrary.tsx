@@ -16,6 +16,12 @@ import type {
 } from "../../../packages/shared/schema";
 import { api } from "./api";
 import { nodeMatches } from "./fields";
+import {
+  SelectedNodesDialog,
+  SelectionMaster,
+  shouldToggleRow,
+  useNodeSelection,
+} from "./nodeSelection";
 
 const protocols = ["vless", "vmess", "trojan", "ss", "hysteria2", "tuic"];
 const protocolLabel = (value: string) =>
@@ -189,7 +195,8 @@ export function NodeLibrary({
   const [protocol, setProtocol] = useState("");
   const [tag, setTag] = useState("");
   const [status, setStatus] = useState("");
-  const [selected, setSelected] = useState<number[]>([]);
+  const selection = useNodeSelection();
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkMode, setBulkMode] = useState<"add" | "remove" | null>(null);
   const [quickNode, setQuickNode] = useState<NodeRecord | null>(null);
@@ -211,12 +218,12 @@ export function NodeLibrary({
       collection_ids: collectionIds,
       node_ids: nodeIds,
     });
-    setSelected([]);
+    selection.clearAll();
     await refresh();
   };
   const chooseView = (id: number | null) => {
     setActiveId(id);
-    setSelected([]);
+    selection.resetAnchor();
     setSearch("");
     setProtocol("");
     setTag("");
@@ -339,144 +346,161 @@ export function NodeLibrary({
             )}
           </div>
         ) : (
-          <div className="table-wrap">
-            <table className="node-table">
-              <thead>
-                <tr>
-                  <th className="select-cell">
-                    <input
-                      aria-label="选择当前结果"
-                      type="checkbox"
-                      checked={visible.every((node) =>
-                        selected.includes(node.id),
-                      )}
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked
-                            ? [
-                                ...new Set([
-                                  ...selected,
-                                  ...visible.map((node) => node.id),
-                                ]),
-                              ]
-                            : selected.filter(
-                                (id) => !visible.some((node) => node.id === id),
-                              ),
-                        )
+          <>
+            <div className="selection-toolbar">
+              <SelectionMaster
+                selected={selection.selected}
+                selectableIds={visible.map((node) => node.id)}
+                toggle={() =>
+                  selection.toggleVisible(visible.map((node) => node.id))
+                }
+                label="当前节点"
+              />
+            </div>
+            <div className="table-wrap">
+              <table className="node-table">
+                <thead>
+                  <tr>
+                    <th className="select-cell">选择</th>
+                    <th>名称 / 集合</th>
+                    <th>服务器</th>
+                    <th>协议 / 标签</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((node) => (
+                    <tr
+                      key={node.id}
+                      className={
+                        selection.isSelected(node.id)
+                          ? "is-selected selectable-row"
+                          : "selectable-row"
                       }
-                    />
-                  </th>
-                  <th>名称 / 集合</th>
-                  <th>服务器</th>
-                  <th>协议 / 标签</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((node) => (
-                  <tr key={node.id}>
-                    <td className="select-cell">
-                      <input
-                        aria-label={`选择 ${node.name}`}
-                        type="checkbox"
-                        checked={selected.includes(node.id)}
-                        onChange={(e) =>
-                          setSelected(
-                            e.target.checked
-                              ? [...selected, node.id]
-                              : selected.filter((id) => id !== node.id),
-                          )
+                      onMouseDown={(event) => {
+                        if (
+                          event.shiftKey &&
+                          shouldToggleRow(event.target, true)
+                        ) {
+                          event.preventDefault();
+                          selection.toggleOne(node.id, {
+                            shiftKey: true,
+                            visibleIds: visible.map((item) => item.id),
+                          });
                         }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="text-button node-title"
-                        onClick={() => edit(node)}
-                      >
-                        {node.name}
-                      </button>
-                      <div className="collection-chips">
-                        {node.collection_ids.slice(0, 2).map((id) => (
-                          <span key={id}>
-                            {collections.find((item) => item.id === id)?.name}
-                          </span>
-                        ))}
-                        {node.collection_ids.length > 2 && (
-                          <span>+{node.collection_ids.length - 2}</span>
-                        )}
+                      }}
+                      onClick={(event) => {
+                        if (!event.shiftKey && shouldToggleRow(event.target))
+                          selection.toggleOne(node.id, {
+                            visibleIds: visible.map((item) => item.id),
+                          });
+                      }}
+                    >
+                      <td className="select-cell">
+                        <input
+                          aria-label={`选择 ${node.name}`}
+                          type="checkbox"
+                          checked={selection.isSelected(node.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            selection.toggleOne(node.id, {
+                              checked: event.currentTarget.checked,
+                              shiftKey: event.shiftKey,
+                              visibleIds: visible.map((item) => item.id),
+                            });
+                          }}
+                          onChange={() => undefined}
+                        />
+                      </td>
+                      <td>
                         <button
-                          aria-label={`管理 ${node.name} 的节点集合`}
-                          onClick={() => setQuickNode(node)}
+                          className="text-button node-title"
+                          onClick={() => edit(node)}
                         >
-                          <Plus size={12} />
-                          集合
+                          {node.name}
                         </button>
-                      </div>
-                    </td>
-                    <td className="mono">
-                      {node.normalized_config.server}:
-                      {node.normalized_config.port}
-                    </td>
-                    <td>
-                      <span className={`badge ${node.protocol}`}>
-                        {protocolLabel(node.protocol)}
-                      </span>
-                      <div>
-                        {node.tags.map((item) => (
-                          <span className="tag" key={item}>
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        className={node.enabled ? "state enabled" : "state"}
-                      >
-                        {node.enabled ? "启用" : "禁用"}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        {active && (
+                        <div className="collection-chips">
+                          {node.collection_ids.slice(0, 2).map((id) => (
+                            <span key={id}>
+                              {collections.find((item) => item.id === id)?.name}
+                            </span>
+                          ))}
+                          {node.collection_ids.length > 2 && (
+                            <span>+{node.collection_ids.length - 2}</span>
+                          )}
                           <button
+                            aria-label={`管理 ${node.name} 的节点集合`}
+                            onClick={() => setQuickNode(node)}
+                          >
+                            <Plus size={12} />
+                            集合
+                          </button>
+                        </div>
+                      </td>
+                      <td className="mono">
+                        {node.normalized_config.server}:
+                        {node.normalized_config.port}
+                      </td>
+                      <td>
+                        <span className={`badge ${node.protocol}`}>
+                          {protocolLabel(node.protocol)}
+                        </span>
+                        <div>
+                          {node.tags.map((item) => (
+                            <span className="tag" key={item}>
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={node.enabled ? "state enabled" : "state"}
+                        >
+                          {node.enabled ? "启用" : "禁用"}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          {active && (
+                            <button
+                              onClick={async () => {
+                                await mutate("remove", [active.id], [node.id]);
+                                notify(`已从 ${active.name} 移除`);
+                              }}
+                            >
+                              从 {active.name} 移除
+                            </button>
+                          )}
+                          <button onClick={() => edit(node)}>编辑</button>
+                          <button
+                            aria-label={`复制 ${node.name}`}
                             onClick={async () => {
-                              await mutate("remove", [active.id], [node.id]);
-                              notify(`已从 ${active.name} 移除`);
+                              const result = await api<{ uri: string }>(
+                                `/nodes/${node.id}/uri`,
+                              );
+                              await copy(result.uri);
                             }}
                           >
-                            从 {active.name} 移除
+                            <Copy size={15} />
                           </button>
-                        )}
-                        <button onClick={() => edit(node)}>编辑</button>
-                        <button
-                          aria-label={`复制 ${node.name}`}
-                          onClick={async () => {
-                            const result = await api<{ uri: string }>(
-                              `/nodes/${node.id}/uri`,
-                            );
-                            await copy(result.uri);
-                          }}
-                        >
-                          <Copy size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
-        {!!selected.length && (
+        {!!selection.selectedCount && (
           <div className="bulk-bar" role="toolbar" aria-label="节点批量操作">
-            <strong>已选择 {selected.length} 个节点</strong>
+            <strong>已选择 {selection.selectedCount} 个节点</strong>
             {active ? (
               <button
                 onClick={() => {
-                  void mutate("remove", [active.id], selected);
+                  void mutate("remove", [active.id], selection.selectedIds);
                 }}
               >
                 从 {active.name} 移除
@@ -487,13 +511,10 @@ export function NodeLibrary({
                 <button onClick={() => setBulkMode("remove")}>移出集合</button>
               </>
             )}
-            <button
-              className="icon-button"
-              aria-label="取消选择"
-              onClick={() => setSelected([])}
-            >
-              <X size={16} />
+            <button onClick={() => setReviewOpen(true)}>
+              查看已选择 {selection.selectedCount} 个
             </button>
+            <button onClick={selection.clearAll}>清空选择</button>
           </div>
         )}
       </section>
@@ -515,15 +536,23 @@ export function NodeLibrary({
         <BulkMembershipDialog
           mode={bulkMode}
           collections={collections}
-          count={selected.length}
+          count={selection.selectedCount}
           close={() => setBulkMode(null)}
           save={async (ids) => {
-            await mutate(bulkMode, ids, selected);
+            await mutate(bulkMode, ids, selection.selectedIds);
             setBulkMode(null);
             notify(bulkMode === "add" ? "节点集合已更新" : "已从所选集合移除");
           }}
         />
       )}
+      <SelectedNodesDialog
+        open={reviewOpen}
+        close={() => setReviewOpen(false)}
+        nodes={nodes}
+        selected={selection.selected}
+        remove={selection.removeOne}
+        protocolLabel={protocolLabel}
+      />
       {quickNode && (
         <QuickMembershipDialog
           key={quickNode.id}
@@ -567,7 +596,8 @@ function AddNodesDialog({
   close: () => void;
   save: (ids: number[]) => Promise<void>;
 }) {
-  const [selected, setSelected] = useState<number[]>([]),
+  const selection = useNodeSelection(),
+    [reviewOpen, setReviewOpen] = useState(false),
     [search, setSearch] = useState(""),
     [protocol, setProtocol] = useState(""),
     [tag, setTag] = useState(""),
@@ -577,6 +607,22 @@ function AddNodesDialog({
       nodes.filter((node) => nodeMatches(node, search, protocol, tag, status)),
     [nodes, search, protocol, tag, status],
   );
+  const disabledIds = useMemo(
+    () =>
+      new Set(
+        nodes
+          .filter(
+            (node) =>
+              collection?.id && node.collection_ids.includes(collection.id),
+          )
+          .map((node) => node.id),
+      ),
+    [nodes, collection?.id],
+  );
+  const selectableVisibleIds = visible
+    .map((node) => node.id)
+    .filter((id) => !disabledIds.has(id));
+  useEffect(() => selection.resetAnchor(), [search, protocol, tag, status]);
   return (
     <LibraryModal
       open={open}
@@ -596,27 +642,65 @@ function AddNodesDialog({
         setStatus={setStatus}
         searchLabel="搜索节点库"
       />
+      <div className="selection-toolbar">
+        <SelectionMaster
+          selected={selection.selected}
+          selectableIds={selectableVisibleIds}
+          toggle={() => selection.toggleVisible(selectableVisibleIds)}
+          label="当前可选节点"
+        />
+        <small>
+          {selectableVisibleIds.length} 个可选
+          {visible.length - selectableVisibleIds.length
+            ? ` · ${visible.length - selectableVisibleIds.length} 个已在集合中`
+            : ""}
+        </small>
+      </div>
       <div className="picker-list">
         {visible.map((node) => {
           const exists =
             !!collection && node.collection_ids.includes(collection.id);
           return (
-            <label
-              className={exists ? "picker-node already-member" : "picker-node"}
+            <div
+              className={`${exists ? "picker-node already-member" : "picker-node selectable-row"}${selection.isSelected(node.id) ? " is-selected" : ""}`}
               key={node.id}
+              onMouseDown={(event) => {
+                if (
+                  !exists &&
+                  event.shiftKey &&
+                  shouldToggleRow(event.target, true)
+                ) {
+                  event.preventDefault();
+                  selection.toggleOne(node.id, {
+                    shiftKey: true,
+                    visibleIds: visible.map((item) => item.id),
+                    disabledIds,
+                  });
+                }
+              }}
+              onClick={(event) => {
+                if (!exists && !event.shiftKey && shouldToggleRow(event.target))
+                  selection.toggleOne(node.id, {
+                    visibleIds: visible.map((item) => item.id),
+                    disabledIds,
+                  });
+              }}
             >
               <input
                 type="checkbox"
                 aria-label={`添加 ${node.name}`}
                 disabled={exists}
-                checked={exists || selected.includes(node.id)}
-                onChange={(e) =>
-                  setSelected(
-                    e.target.checked
-                      ? [...selected, node.id]
-                      : selected.filter((id) => id !== node.id),
-                  )
-                }
+                checked={exists || selection.isSelected(node.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  selection.toggleOne(node.id, {
+                    checked: event.currentTarget.checked,
+                    shiftKey: event.shiftKey,
+                    visibleIds: visible.map((item) => item.id),
+                    disabledIds,
+                  });
+                }}
+                onChange={() => undefined}
               />
               <div>
                 <strong>{node.name}</strong>
@@ -631,20 +715,36 @@ function AddNodesDialog({
                   已在 {collection?.name} 中
                 </span>
               )}
-            </label>
+            </div>
           );
         })}
       </div>
       <div className="modal-actions sticky">
-        <span>已选择 {selected.length} 个节点</span>
+        <span>已选择 {selection.selectedCount} 个节点</span>
+        {!!selection.selectedCount && (
+          <>
+            <button onClick={() => setReviewOpen(true)}>
+              查看已选择 {selection.selectedCount} 个
+            </button>
+            <button onClick={selection.clearAll}>清空选择</button>
+          </>
+        )}
         <button
           className="primary"
-          disabled={!selected.length}
-          onClick={() => save(selected)}
+          disabled={!selection.selectedCount}
+          onClick={() => save(selection.selectedIds)}
         >
-          添加 {selected.length} 个节点
+          添加 {selection.selectedCount} 个节点
         </button>
       </div>
+      <SelectedNodesDialog
+        open={reviewOpen}
+        close={() => setReviewOpen(false)}
+        nodes={nodes}
+        selected={selection.selected}
+        remove={selection.removeOne}
+        protocolLabel={protocolLabel}
+      />
     </LibraryModal>
   );
 }

@@ -1,4 +1,4 @@
-# Private Subscription Manager 0.1.5
+# Private Subscription Manager 0.1.6
 
 单管理员的私人节点资产库、多订阅 Profile 与订阅分发系统。**不是机场**：无普通用户、注册、套餐、支付、订单、流量计费或运营模块。
 
@@ -18,6 +18,8 @@
 ### 节点库与节点集合
 
 “全部节点”是 Global Node Library / Master Pool：每个节点只在这里保存一份。“节点集合”是从 Master Pool 中挑选出的管理视图，一个节点可以同时属于多个集合。管理员可在集合中搜索、按协议或 Tag 筛选并批量添加/移除节点，也可在全部节点中批量管理集合关联。
+
+节点列表顶部的“全选当前结果”只选择当前 search/filter/source 匹配的可选节点；再次点击只取消这些当前结果。切换搜索、协议、Tag、状态或订阅候选来源时，先前选择会保留并持续显示总数。可随时查看或搜索全部已选节点、单个取消或清空选择；桌面端支持 Shift 连选当前可见范围，移动端可完整使用总选框和批量操作栏。选择状态仅存在于当前浏览器编辑会话，不写入数据库。
 
 Collection 不是 Subscription，也不是访问权限或自动分发规则。集合只帮助缩小订阅编辑器中的候选范围；切换来源不会清除已选择节点，保存订阅时仍然只写入 `subscription_nodes`。向集合添加节点、从集合移除节点、重命名或删除集合，都不会改变任何已有订阅。
 
@@ -101,12 +103,12 @@ docker compose exec app node dist/database.mjs backup /data/backups/manual.db
 
 ```sh
 BACKUP_PASSWORD='use-a-long-backup-password' \
-pnpm migration:export -- ./private-subscription-manager-0.1.5.psmbackup
+pnpm migration:export -- ./private-subscription-manager-0.1.6.psmbackup
 
 # 停止应用写入后恢复；工具会校验、备份当前 DB、前向迁移、清除会话并原子替换。
 BACKUP_PASSWORD='use-a-long-backup-password' \
 INSTANCE_ENV_FILE=.env \
-pnpm db:restore -- ./private-subscription-manager-0.1.5.psmbackup
+pnpm db:restore -- ./private-subscription-manager-0.1.6.psmbackup
 ```
 
 `.psmbackup` 使用 scrypt 和 AES-256-GCM 加密，内含数据库与 instance master key；它等价于完整账户凭证，必须像私钥一样保存。不要复制在线 `.db`、`-wal` 或 `-shm` 文件。完整备份、恢复、Docker volume 操作、schema 兼容与 DNS 无感迁移步骤见 [数据库与实例迁移](docs/DATABASE_MIGRATION.md)。
@@ -125,7 +127,7 @@ pnpm db:restore -- ./private-subscription-manager-0.1.5.psmbackup
 
 产品版本来源为 `package.json`。使用 `master` 主线和 annotated RC tags；stable tag 与 remote push 必须用户明确批准。
 
-每轮实际修改版本固定 +0.0.1，十进制进位（0.1.9 → 0.2.0），下一轮为 0.1.6；不能用重复 RC 代替任务版本递增。
+每轮实际修改版本固定 +0.0.1，十进制进位（0.1.9 → 0.2.0），下一轮为 0.1.7；不能用重复 RC 代替任务版本递增。
 
 ```sh
 pnpm release:check

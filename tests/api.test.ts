@@ -43,7 +43,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get("/health")).body).toEqual({
       status: "ok",
       database: "ok",
-      version: "0.1.5",
+      version: "0.1.6",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
