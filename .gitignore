@@ -4,8 +4,17 @@ dist/
 .env.*
 !.env.example
 data/
+backups/
 logs/
 secrets/
+secret
+*.secret
+*.db
+*.db-*
+*.sqlite3
+*.tar
+*.tar.gz
+*.tgz
 *.sqlite*
 coverage/
 playwright-report/

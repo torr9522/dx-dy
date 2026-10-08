@@ -6,7 +6,7 @@
         exclude http.log.error
     }
 }
-panel.example.com {
+{$PSM_DOMAIN:sub.example.com} {
     # Keep subscription bytes uncompressed for native client compatibility.
     @compressible not path /s/*
     encode @compressible zstd gzip

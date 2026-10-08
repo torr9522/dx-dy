@@ -19,7 +19,12 @@
     "test:e2e": "playwright test",
     "build": "pnpm adapter:build && vite build --config apps/web/vite.config.ts && esbuild apps/api/src/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs && esbuild scripts/backup.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/backup.mjs && node scripts/source.mjs",
     "start": "node dist/server.mjs",
-    "backup": "tsx scripts/backup.ts"
+    "backup": "tsx scripts/backup.ts",
+    "source:manifest": "node scripts/update-source-manifest.mjs",
+    "source:archive": "node scripts/source.mjs",
+    "source:verify": "node scripts/verify-source.mjs",
+    "secret:scan": "node scripts/secret-scan.mjs",
+    "release:check": "node scripts/release-check.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

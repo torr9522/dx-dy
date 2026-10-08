@@ -1,5 +1,33 @@
-// Include only source directories; never environment files, databases or runtime fixtures.
-import {mkdirSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-mkdirSync('dist',{recursive:true});
-execFileSync('tar',['-czf','dist/source.tar.gz','--exclude=generated','--exclude=__pycache__','apps','packages','vendor','migrations','scripts','tests','docker','LICENSE','THIRD_PARTY_NOTICES.md','README.md','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','eslint.config.mjs','vitest.config.ts','playwright.config.ts','Dockerfile','docker-compose.yml','.gitignore','.env.example','.dockerignore']);
+// Inventory originates from Git, never a recursive development-directory scan.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
+import { verifyInventory, version } from "./release-utils.mjs";
+const files = verifyInventory();
+const tar = execFileSync(
+  "tar",
+  [
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=0644",
+    "--format=gnu",
+    "-cf",
+    "-",
+    "--",
+    ...files,
+  ],
+  { maxBuffer: 20 * 1024 * 1024 },
+);
+const archive = gzipSync(tar, { level: 9 });
+mkdirSync("dist", { recursive: true });
+for (const file of [
+  "dist/source.tar.gz",
+  `dist/private-subscription-manager-${version()}-source.tar.gz`,
+])
+  writeFileSync(file, archive, { mode: 0o644 });
+console.log(
+  "Deterministic tracked-source archive generated; " + files.length + " files.",
+);

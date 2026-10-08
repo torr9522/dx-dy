@@ -25,11 +25,12 @@ Node 26.10.0、TypeScript strict、Express、React、Tailwind、Radix、SQLite (
 ## 本地开发
 
 ```sh
+# Node 26.10.0 and pnpm 12.6.0 are required (packageManager is pinned).
 pnpm install --frozen-lockfile
 pnpm adapter:build
 export APP_MASTER_KEY=$(openssl rand -hex 32)
 export ADMIN_INITIAL_PASSWORD=$(openssl rand -base64 24)
-export PUBLIC_BASE_URL=http://localhost:3000
+export PUBLIC_BASE_URL=http://localhost:5173
 pnpm dev
 # Another terminal:
 pnpm dev:web
@@ -49,7 +50,13 @@ E2E 使用隔离的本地测试数据库与虚构凭据，需要 Playwright Chro
 
 ## Docker Compose
 
-把 `.env.example` 复制到 `.env`，生成 APP_MASTER_KEY（32 bytes hex）和20+字符随机初始密码，填入 HTTPS public URL。`.env` 权限600，不提交。
+在源码根目录生成 `.env`（不会覆盖现有文件）：
+
+```sh
+PUBLIC_BASE_URL=https://sub.example.com node scripts/init-env.mjs
+```
+
+替换示例为自己的域名。也可以把 `.env.example` 复制到 `.env`，用 `openssl rand -hex 32` 生成 APP_MASTER_KEY、`openssl rand -base64 24` 生成初始密码。`.env` 权限600，不提交。初始化工具不会输出密码；由管理员安全读取本地文件，首次登录后修改。只有一个管理员，用户名默认 admin；首次启动自动执行 migration 并初始化管理员，已有数据库不会重建管理员。
 
 ```sh
 docker compose build
@@ -58,7 +65,9 @@ docker compose up -d
 
 Debian 的 legacy Compose 可使用 `docker-compose`。应用端口只发布到127.0.0.1:3000，容器非root、只读根文件系统，数据库持久化到app-data volume。`GET /health` 返回状态与版本。
 
-使用 `docker/Caddyfile` 配置 Caddy，开放80/443，域名解析正确后自动取得可信证书。没有 access log，并排除可能包含敏感 URL 的代理错误日志。不要开启记录 /s/ 原始 URI 的外部 CDN/WAF/代理日志。管理员初始化凭据保存在 root-only 配置，首次登录后修改密码。
+使用 `docker/Caddyfile` 配置 Caddy，将 `PSM_DOMAIN` 设置为自己的域名（作为 Caddy 服务环境变量），或在配置副本中替换示例域名。开放80/443，域名解析正确后自动取得可信证书。不要原样部署示例域名。没有 access log，并排除可能包含敏感 URL 的代理错误日志。不要开启记录 /s/ 原始 URI 的外部 CDN/WAF/代理日志。
+
+非 Docker 生产运行：`pnpm build`，设置 `APP_MASTER_KEY`、初始化密码、`PUBLIC_BASE_URL`、`COOKIE_SECURE=true`、`DATABASE_PATH`、反代对应的 `TRUST_PROXY`，再 `pnpm start`。使用进程管理器与 HTTPS 反代；Node 不自动读取 `.env`，可用 Node `--env-file` 或系统服务注入环境。数据默认本地 `data/`，Compose 使用持久化 `app-data` volume 下 `/data/app.sqlite`。不要把数据库放在源码归档或公网静态目录。
 
 ## 数据、备份、升级
 
@@ -81,3 +90,16 @@ docker compose exec app node dist/backup.mjs /data/backups/manual.sqlite
 ## License / 对应源码
 
 本项目 AGPL-3.0-only。见 LICENSE 与 THIRD_PARTY_NOTICES.md。网络用户可在 `/source.tar.gz` 获取实际构建所用对应源码（排除secret、数据库与用户节点）。许可证和Sub-Store固定来源必须保留。
+
+## 开发与发布
+
+产品版本来源为 `package.json`。使用 `master` 主线和 annotated RC tags；stable tag 与 remote push 必须用户明确批准。
+
+```sh
+pnpm release:check
+pnpm release:check --full
+```
+
+详见 [发布流程](docs/RELEASE_PROCESS.md) 和 [发布清单](docs/RELEASE_CHECKLIST.md)。一键 gate 包括秘密扫描、frozen install、质量检查及安全源码包；full 增加干净 checkout、无缓存 Docker 构建与隔离持久化验证。
+
+`pnpm source:archive` 按 Git 来源清单生成安全、确定性的源码包，`pnpm source:verify` 验证内容。源码清单在 stage 新文件后用 `pnpm source:manifest` 更新并提交。正常构建只依赖已提交 vendor，不需要额外 upstream 仓库；仅更新 adapter 时设置 `SUB_STORE_SOURCE`。
