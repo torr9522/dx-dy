@@ -9,14 +9,14 @@
 - 结构化 Drawer、高级 JSON、重新导入差异确认、恢复原始参数。
 - original_uri / normalized_config / ordered raw sidecar 分离。
 - 随机 Token、SHA-256 lookup、AES-256-GCM 密文保存、轮换/禁用/删除。
-- Raw、V2Ray Base64、Shadowrocket 原生 producer/无损 URI 兼容路径。
+- Raw、V2Ray Base64、Shadowrocket 标准 Base64 URI 订阅。
 - 中文后台，搜索/筛选、拖拽排序、QR、Light/Dark/System、密码修改。
 
 ## 协议与客户端
 
 VLESS (TLS/Reality/Vision/TCP/WS/gRPC/HTTPUpgrade/XHTTP)、VMess legacy JSON、Trojan、SS SIP002、Hysteria2、TUIC v5。固定 Sub-Store 源码提供 parser/producer。未知 query 保存原始编码与重复项；已知字段以当前结构化值为准。
 
-目标客户端 Shadowrocket、v2rayN、v2rayNG。服务器格式与 round-trip 验证不能替代设备级验收。Shadowrocket YAML 不表示任意完整规则配置；含 SpiderX、未知字段、XHTTP 时显式回退 URI/Base64。没有 Clash rules、策略组、DNS 模板。v0.1 不安装 Xray Core。
+目标客户端 Shadowrocket、v2rayN、v2rayNG。服务器格式与 round-trip 验证不能替代设备级验收。Shadowrocket 与 V2Ray 当前共用标准 Base64 URI feed：当前 URI 按订阅顺序以 LF 拼接，UTF-8 后整体标准 Base64。Sub-Store structured Shadowrocket producer 仅保留内部用途，不用于公网订阅响应。没有 Clash rules、策略组、DNS 模板。v0.1 不安装 Xray Core。
 
 ## 技术栈
 

@@ -135,6 +135,14 @@ export function generateURI(node: Envelope): string {
   }
   const [base, fragment = ""] = generated.split("#");
   const generatedEntries = queryEntries(generated);
+  // Explicit TCP no-camouflage default for share-link consumers. It follows
+  // current transport, never a stale original headerType after a form edit.
+  if (
+    config.type === "vless" &&
+    config.network === "tcp" &&
+    !generatedEntries.some((e) => e.decodedKey === "headerType")
+  )
+    generatedEntries.push(...queryEntries("vless://unused?headerType=none"));
   const extras = node.unknown_params.query.filter(
     (e) => !e.owned && !ownedKeys.has(e.decodedKey.toLowerCase()),
   );
@@ -156,35 +164,25 @@ export function generateURI(node: Envelope): string {
 export function generateV2RayLine(node: Envelope) {
   return generateURI(node);
 }
-export function generateShadowrocket(nodes: Envelope[]): {
+export function generateBase64Subscription(nodes: Envelope[]) {
+  return Buffer.from(nodes.map(generateURI).join("\n"), "utf8").toString(
+    "base64",
+  );
+}
+export function generateShadowrocket(nodes: Envelope[]) {
+  return {
+    body: generateBase64Subscription(nodes),
+    contentType: "text/plain; charset=utf-8",
+    mode: "shadowrocket-base64",
+  };
+}
+// Structured producer output is not the Subscribe URL wire format.
+// Keep the audited producer available internally, never on the public feed.
+export function generateShadowrocketStructured(nodes: Envelope[]): {
   body: string;
   contentType: string;
   mode: string;
 } {
-  if (!nodes.length)
-    return {
-      body: "proxies: []\n",
-      contentType: "text/yaml; charset=utf-8",
-      mode: "yaml",
-    };
-  // Sub-Store's Shadowrocket YAML is lossy for unknown fields and complex XHTTP.
-  if (
-    nodes.some(
-      (n) =>
-        n.unsupported_fields.length ||
-        n.normalized_config.network === "xhttp" ||
-        (
-          n.normalized_config["reality-opts"] as
-            | Record<string, Json>
-            | undefined
-        )?.["_spider-x"],
-    )
-  )
-    return {
-      body: Buffer.from(nodes.map(generateURI).join("\n")).toString("base64"),
-      contentType: "text/plain; charset=utf-8",
-      mode: "uri-fallback",
-    };
   const body = shadowrocket(
     nodes.map((n) => configSchema.parse(n.normalized_config)),
   );

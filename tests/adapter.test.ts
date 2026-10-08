@@ -4,6 +4,7 @@ import {
   generateURI,
   preview,
   generateShadowrocket,
+  generateShadowrocketStructured,
   editConfig,
 } from "../packages/proxy-adapter";
 import { fixtures, vless, vmess, uuid } from "./fixtures";
@@ -128,7 +129,7 @@ describe("protocol adapter", () => {
     expect(p[0].envelope).not.toBeNull();
   });
   it("Shadowrocket native producer retains Reality and TLS", () => {
-    const p = generateShadowrocket([
+    const p = generateShadowrocketStructured([
       parseNode(vless.replace("&spx=%2Fsynthetic", "")),
       parseNode(vmess),
     ]);
@@ -142,7 +143,7 @@ describe("protocol adapter", () => {
   });
   it("SpiderX uses lossless fallback rather than stripped Shadowrocket YAML", () => {
     const p = generateShadowrocket([parseNode(vless)]);
-    expect(p.mode).toBe("uri-fallback");
+    expect(p.mode).toBe("shadowrocket-base64");
     expect(Buffer.from(p.body, "base64").toString()).toContain(
       "spx=%2Fsynthetic",
     );
@@ -150,9 +151,32 @@ describe("protocol adapter", () => {
   it("Shadowrocket unknown/XHTTP uses explicit lossless URI fallback", () => {
     const n = parseNode(vless.replace("#", "&vendor=x#"));
     const out = generateShadowrocket([n]);
-    expect(out.mode).toBe("uri-fallback");
+    expect(out.mode).toBe("shadowrocket-base64");
     expect(Buffer.from(out.body, "base64").toString()).toContain("vendor=x");
   });
-  it("empty Shadowrocket is an empty list", () =>
-    expect(parseYaml(generateShadowrocket([]).body).proxies).toEqual([]));
+  it("empty Shadowrocket is an empty Base64 subscription", () =>
+    expect(generateShadowrocket([]).body).toBe(""));
+  it.each([
+    ["Reality Vision without SpiderX", vless.replace("&spx=%2Fsynthetic", "")],
+    ["VMess TLS", vmess],
+    ["Unicode and SpiderX", vless],
+    ["unknown repeated sidecar", vless.replace("#", "&vendor=1&vendor=2#")],
+  ])("Shadowrocket %s always uses standard Base64 URI feed", (_name, input) => {
+    const n = parseNode(input);
+    const output = generateShadowrocket([n]);
+    expect(output.contentType).toBe("text/plain; charset=utf-8");
+    expect(output.body).toMatch(/^[A-Za-z0-9+/]*={0,2}$/);
+    const decoded = Buffer.from(output.body, "base64").toString("utf8");
+    expect(Buffer.from(decoded).toString("base64")).toBe(output.body);
+    expect(decoded).not.toMatch(/^proxies:/);
+    expect(decoded).not.toContain("\r");
+    expect(decoded.charCodeAt(0)).not.toBe(0xfeff);
+    expect(parseNode(decoded).normalized_config).toEqual(n.normalized_config);
+    expect(decoded).toBe(generateURI(n));
+    if (
+      n.normalized_config.type === "vless" &&
+      n.normalized_config.network === "tcp"
+    )
+      expect(new URL(decoded).searchParams.get("headerType")).toBe("none");
+  });
 });

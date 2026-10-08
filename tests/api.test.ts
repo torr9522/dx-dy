@@ -163,9 +163,17 @@ describe("API and domain regression", () => {
     const sr = await request(system.app).get(path + "?format=shadowrocket");
     expect(sr.headers["content-type"]).toContain("text/plain");
     const lines = Buffer.from(sr.text, "base64").toString().split("\n");
+    expect(sr.text).toBe(v.text);
+    expect(sr.text).toMatch(/^[A-Za-z0-9+/]*={0,2}$/);
+    expect(Buffer.from(lines.join("\n")).toString("base64")).toBe(sr.text);
+    expect(lines.join("\n")).not.toMatch(/^proxies:/);
     expect(lines).toHaveLength(2);
     expect(parseNode(lines[0]).normalized_config["reality-opts"]).toMatchObject(
       { "_spider-x": "/synthetic" },
+    );
+    const expected = system.store.authorized(profile);
+    expect(lines.map((line) => parseNode(line).normalized_config)).toEqual(
+      expected.map((node) => node.normalized_config),
     );
   });
   it("UA auto detection and explicit format priority", async () => {
@@ -173,11 +181,64 @@ describe("API and domain regression", () => {
     const r = await request(system.app)
       .get(path)
       .set("User-Agent", "Shadowrocket");
-    expect(r.headers["x-subscription-format"]).toBe("uri-fallback");
+    expect(r.headers["x-subscription-format"]).toBe("shadowrocket-base64");
     const raw = await request(system.app)
       .get(path + "?format=raw")
       .set("User-Agent", "Shadowrocket");
     expect(raw.headers["x-subscription-format"]).toBe("raw");
+  });
+  it.each(["Shadowrocket/2.2.60", "shadowrocket/3.0", "SHADOWROCKET"])(
+    "version-independent UA %s uses Base64 without admin cookies",
+    async (ua) => {
+      const path = new URL(url).pathname;
+      const automatic = await request(system.app)
+        .get(path)
+        .set("User-Agent", ua);
+      const explicit = await request(system.app).get(
+        path + "?format=shadowrocket",
+      );
+      const override = await request(system.app)
+        .get(path + "?format=v2ray")
+        .set("User-Agent", ua);
+      expect(automatic.status).toBe(200);
+      expect(automatic.headers.location).toBeUndefined();
+      expect(automatic.text).toBe(explicit.text);
+      expect(override.text).toBe(explicit.text);
+      expect(override.headers["x-subscription-format"]).toBe("v2ray");
+    },
+  );
+  it("simple VMess and empty feeds never expose structured producer output", async () => {
+    const p = await post("/api/subscriptions", { name: "Format regression" });
+    const path = new URL(
+      (await agent.get(`/api/subscriptions/${p.body.id}/url`)).body.url,
+    ).pathname;
+    const empty = await request(system.app).get(path + "?format=shadowrocket");
+    expect(empty.status).toBe(200);
+    expect(empty.text).toBe("");
+    expect(empty.headers["content-type"]).toContain("text/plain");
+    await agent
+      .put(`/api/subscriptions/${p.body.id}/nodes`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: [nodes[1]] });
+    const vm = await request(system.app).get(path + "?format=shadowrocket");
+    expect(vm.status).toBe(200);
+    expect(vm.text).not.toMatch(/^proxies:/);
+    expect(
+      parseNode(Buffer.from(vm.text, "base64").toString()).normalized_config
+        .type,
+    ).toBe("vmess");
+    await agent
+      .delete(`/api/subscriptions/${p.body.id}`)
+      .set("X-CSRF-Token", csrf);
+  });
+  it("invalid subscription never falls through to SPA HTML", async () => {
+    const result = await request(system.app)
+      .get("/s/" + randomToken())
+      .set("Accept", "text/html");
+    expect(result.status).toBe(404);
+    expect(result.headers.location).toBeUndefined();
+    expect(result.headers["content-type"]).toContain("application/json");
+    expect(result.text).not.toMatch(/<!doctype|<html/i);
   });
   it("reorder is persisted without names", async () => {
     const result = await agent
@@ -209,6 +270,12 @@ describe("API and domain regression", () => {
     });
     for (const p of [profile, second])
       expect(system.store.authorized(p)).toHaveLength(1);
+    const sr = await request(system.app).get(
+      new URL(url).pathname + "?format=shadowrocket",
+    );
+    expect(Buffer.from(sr.text, "base64").toString().split("\n")).toHaveLength(
+      1,
+    );
   });
   it("reimport preview, confirmed reimport and original restore", async () => {
     const n = nodes[0];
@@ -231,6 +298,13 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get(new URL(url).pathname)).status).toBe(
       404,
     );
+    expect(
+      (
+        await request(system.app).get(
+          new URL(url).pathname + "?format=shadowrocket",
+        )
+      ).status,
+    ).toBe(404);
     url = (await agent.get(`/api/subscriptions/${profile}/url`)).body.url;
     expect((await request(system.app).get(new URL(url).pathname)).status).toBe(
       200,
@@ -244,6 +318,11 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get(new URL(url).pathname)).status).toBe(
       404,
     );
+    const sr = await request(system.app).get(
+      new URL(url).pathname + "?format=shadowrocket",
+    );
+    expect(sr.status).toBe(404);
+    expect(sr.text).not.toMatch(/^proxies:|<!doctype|<html/i);
     await patch(`/api/subscriptions/${profile}`, {
       name: "Synthetic",
       enabled: true,
@@ -290,14 +369,11 @@ describe("API and domain regression", () => {
     );
     expect(
       (
-        await agent
-          .put("/api/settings")
-          .set("X-CSRF-Token", csrf)
-          .send({
-            site_name: "测试",
-            public_base_url: "http://localhost:3000",
-            default_format: "raw",
-          })
+        await agent.put("/api/settings").set("X-CSRF-Token", csrf).send({
+          site_name: "测试",
+          public_base_url: "http://localhost:3000",
+          default_format: "raw",
+        })
       ).status,
     ).toBe(200);
   });

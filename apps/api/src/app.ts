@@ -27,6 +27,7 @@ import {
   editConfig,
   generateURI,
   generateShadowrocket,
+  generateBase64Subscription,
   parseNode,
   preview,
 } from "../../../packages/proxy-adapter";
@@ -432,9 +433,7 @@ export async function createApp(options: Options) {
       : {
           body:
             format === "v2ray"
-              ? Buffer.from(nodes.map(generateURI).join("\n")).toString(
-                  "base64",
-                )
+              ? generateBase64Subscription(nodes)
               : nodes.map(generateURI).join("\n"),
           contentType: "text/plain; charset=utf-8",
           mode: format,
@@ -557,18 +556,16 @@ export async function createApp(options: Options) {
         console.error(
           JSON.stringify({ event: "request_error", code: "INTERNAL" }),
         );
-      res
-        .status(status)
-        .json({
-          error: {
-            code: known ? error.code : invalid ? "VALIDATION" : "INTERNAL",
-            message: known
-              ? error.message
-              : invalid
-                ? "输入参数不合法"
-                : "操作失败，请检查输入或稍后重试",
-          },
-        });
+      res.status(status).json({
+        error: {
+          code: known ? error.code : invalid ? "VALIDATION" : "INTERNAL",
+          message: known
+            ? error.message
+            : invalid
+              ? "输入参数不合法"
+              : "操作失败，请检查输入或稍后重试",
+        },
+      });
     },
   );
   return { app, store };

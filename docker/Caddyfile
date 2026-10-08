@@ -7,7 +7,9 @@
     }
 }
 panel.example.com {
-    encode zstd gzip
+    # Keep subscription bytes uncompressed for native client compatibility.
+    @compressible not path /s/*
+    encode @compressible zstd gzip
     reverse_proxy 127.0.0.1:3000
     # Deliberately no access log directive, so /s/<token> is never persisted.
 }

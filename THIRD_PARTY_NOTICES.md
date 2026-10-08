@@ -9,7 +9,7 @@
 - Copied closure: `backend/src/core/proxy-utils/parsers/` (including Peggy grammars), `preprocessors/`, `producers/{uri,shadowrocket,utils}.js`, `{transport-path,xhttp-utils,ech-utils,vmess-security}.js`, `backend/src/utils/{index,yaml}.js`.
 - Extracted from `backend/src/core/proxy-utils/index.js`: `formatTransportPath`, `lastParse` normalizer. Added dependency imports and a Node X509Certificate fingerprint adapter in place of jsrsasign. Local CA-file access is disabled by the runtime shim. The rest of the copied files are unchanged.
 - Build adaptation: `@/core/app` resolves to a local silent diagnostic shim. No Sub-Store HTTP server, downloader, processor/script runtime, geo database or remote fetching is included. Diagnostics never include the original upstream message, URI or credentials.
-- Application adaptation: a typed envelope validates normalized fields; ordered raw query entries and VMess extra fields are preserved. Known fields take precedence. Shadowrocket's native producer is used when representable; unknown/XHTTP/SpiderX nodes use its URI compatibility path rather than lossy YAML.
+- Application adaptation: a typed envelope validates normalized fields; ordered raw query entries and VMess extra fields are preserved. Known fields take precedence. Public Shadowrocket and V2Ray subscriptions share a standard Base64 URI feed. The native structured Shadowrocket producer remains available as an explicitly named internal adapter, never as the public Subscribe URL response.
 - Reproduction: `pnpm adapter:build` uses the committed vendored sources. `pnpm vendor` refreshes them only from the exact audited commit and requires the local upstream path (or SUB_STORE_SOURCE).
 
 ## UI
