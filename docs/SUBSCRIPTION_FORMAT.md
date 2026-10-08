@@ -14,7 +14,7 @@ Public success: 200, `text/plain; charset=utf-8`, `private, no-store`, no wrappe
 
 The 0.1.1 investigation found no demonstrated root cause of the reported iPhone update failure. No node serializer, protocol field, Base64 variant or HTTP compatibility workaround was changed. Server-format validation is distinct from device acceptance, which remains pending. The former structured Shadowrocket branch was a design defect; the existing real two-node feed already used Base64 before that fix, so it does not prove the device failure's cause.
 
-Evidence levels: A = current source + relevant tests + history; B = explicit current source without physical client validation; C = issue/README/single implementation inference; D = speculation. Production client compatibility changes require A/B and a regression first. Issue reports alone are C, including unmerged proposals. Code findings below establish implementation behavior, not client certification.
+Evidence levels: A = current source + relevant tests + history; B = explicit current source without physical client validation; C = issue/README/single implementation inference; D = speculation. Client compatibility changes require A/B and a regression first. Issue reports alone are C, including unmerged proposals. Code findings below establish implementation behavior, not client certification.
 
 ## Pinned source comparison (2026-10-08)
 

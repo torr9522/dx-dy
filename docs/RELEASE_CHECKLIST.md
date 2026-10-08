@@ -26,7 +26,7 @@ Copy these checks into the release review; do not precheck them from an earlier 
 
 - [ ] lint, typecheck, unit/integration/frontend logic tests
 - [ ] E2E if API/frontend/runtime changed
-- [ ] Production build
+- [ ] Optimized release build
 
 ## Database
 
@@ -67,13 +67,13 @@ Copy these checks into the release review; do not precheck them from an earlier 
 ## Public release
 
 - [ ] Private pre-public bundle verified and stored outside the repository
-- [ ] Complete reachable history and local objects contain no production identities
+- [ ] Complete reachable history and local objects contain no private deployment identities
 - [ ] Historical tag names, chronology and annotated type preserved
 - [ ] Public brand, installer, manager, Docker/Caddy templates and docs consistent
 - [ ] ShellCheck and isolated installer/manager tests passed
-- [ ] CI and release workflows use least privilege and never deploy production
+- [ ] CI and release workflows use least privilege and never deploy a server
 - [ ] Multi-architecture image and release manifest paths are owner-neutral
-- [ ] No database, backup, `.env`, instance key, production log or Playwright secret artifact
+- [ ] No database, backup, `.env`, instance key, deployment log or Playwright secret artifact
 
 ## Remote — not authorized in this baseline
 

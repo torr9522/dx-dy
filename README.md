@@ -18,7 +18,7 @@ Global Node Library 和 Collections 可以保留连接配置相同的节点；�
 
 ## 一键安装
 
-正式公开仓库 owner 尚未确认，因此本地 0.1.8 准备版本不发布虚构的安装 URL。公开坐标确认后，Release 中的 `install.sh` 是普通用户的唯一入口，并会提供准确的一行安装命令。
+公开 Release 中的 `install.sh` 是普通用户的安装入口；本 README 中的命令始终指向正式仓库坐标和校验过的 Release 资产。
 
 安装器支持 Debian 12、Ubuntu 22.04/24.04 LTS，以及 amd64 和 arm64。它负责安装 Docker Engine、Docker Compose plugin、`curl`、证书、DNS 和必要系统工具；宿主机不需要 Node.js、pnpm、npm 或 Caddy binary。
 
@@ -78,7 +78,12 @@ pnpm test:e2e
 pnpm release:check --full --public
 ```
 
-Node 与 pnpm 的固定版本见 `package.json` 和 `Dockerfile`。生产配置必须保存在 Git 之外。
+Node 与 pnpm 的固定版本见 `package.json` 和 `Dockerfile`。部署配置必须保存在 Git 之外。
+
+## 项目知识与开发
+
+新开发者先阅读 [AGENTS.md](AGENTS.md) 和
+[docs/README.md](docs/README.md)。它们索引当前架构、能力树、版本历史、设计决策、协议兼容、数据库、备份、安全和 Release 流程；不依赖任何私人 AI 会话上下文。
 
 ## License 与来源
 

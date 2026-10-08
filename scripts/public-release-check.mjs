@@ -13,6 +13,7 @@ import YAML from "yaml";
 import { forbidden, git } from "./release-utils.mjs";
 
 const required = [
+  "AGENTS.md",
   "README.md",
   "LICENSE",
   "SECURITY.md",
@@ -25,6 +26,20 @@ const required = [
   "deploy/Caddyfile.dual",
   ".github/workflows/ci.yml",
   ".github/workflows/release.yml",
+  "docs/README.md",
+  "docs/CAPABILITY_TREE.md",
+  "docs/ARCHITECTURE.md",
+  "docs/DEVELOPMENT_HISTORY.md",
+  "docs/DEVELOPMENT_PROCESS.md",
+  "docs/DESIGN_DECISIONS.md",
+  "docs/PROTOCOL_COMPATIBILITY.md",
+  "docs/DATABASE_AND_MIGRATION.md",
+  "docs/BACKUP_AND_RECOVERY.md",
+  "docs/INSTALLATION_AND_OPERATIONS.md",
+  "docs/TESTING_AND_RELEASE.md",
+  "docs/SECURITY_MODEL.md",
+  "docs/KNOWN_LIMITATIONS.md",
+  "docs/CURRENT_BASELINE.md",
 ];
 for (const file of required)
   if (!existsSync(file))
@@ -34,6 +49,42 @@ if (metadata.name !== "dx-dy" || metadata.version !== "0.1.8")
   throw new Error("Public brand/version mismatch");
 if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.1.8"))
   throw new Error("README public identity mismatch");
+const agentGuide = readFileSync("AGENTS.md", "utf8");
+const baseline = readFileSync("docs/CURRENT_BASELINE.md", "utf8");
+const capabilities = readFileSync("docs/CAPABILITY_TREE.md", "utf8");
+for (const [label, content, terms] of [
+  [
+    "agent guide",
+    agentGuide,
+    ["NO AUTO SUBSCRIPTION", "0.1.9", "pnpm release:check --full --public"],
+  ],
+  [
+    "current baseline",
+    baseline,
+    ["001_initial.sql", "002_node_collections.sql", "Migration in 0.1.8: **NONE**"],
+  ],
+  [
+    "capability tree",
+    capabilities,
+    ["Semantic duplicate protection", "Full Migration", "amd64/arm64"],
+  ],
+])
+  for (const term of terms)
+    if (!content.includes(term))
+      throw new Error(`Incomplete ${label}: missing ${term}`);
+const knowledgeDocs = required.filter(
+  (file) => file === "AGENTS.md" || file === "README.md" || file.endsWith(".md"),
+);
+for (const file of knowledgeDocs) {
+  const content = readFileSync(file, "utf8");
+  for (const match of content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+    const link = match[1].split("#", 1)[0];
+    if (!link || /^(?:https?:|mailto:)/.test(link)) continue;
+    const target = path.resolve(path.dirname(file), decodeURIComponent(link));
+    if (!existsSync(target))
+      throw new Error(`Broken relative link in ${file}: ${match[1]}`);
+  }
+}
 for (const file of ["install.sh", "ops/dx-dy"]) {
   const content = readFileSync(file, "utf8");
   if (!content.startsWith("#!/usr/bin/env bash\nset -Eeuo pipefail"))
@@ -137,6 +188,6 @@ if (identityFile) {
   );
   if (identities.some((value) => objects.includes(Buffer.from(value))))
     throw new Error("Known production identity remains in Git objects");
-  console.log("Known production identity object scan: PASS");
+  console.log("Known private deployment identity object scan: PASS");
 }
 console.log("PUBLIC RELEASE GATE: PASS");

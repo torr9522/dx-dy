@@ -2,7 +2,7 @@
 
 ## Storage contract
 
-The canonical database path is `/data/private-subscription-manager.db` in every production mode. SQLite runs in WAL mode, so never copy the live database file with `cp` and never treat `-wal` or `-shm` as backup artifacts.
+The canonical container database path is `/data/private-subscription-manager.db` in every deployment mode. SQLite runs in WAL mode, so never copy the live database file with `cp` and never treat `-wal` or `-shm` as backup artifacts.
 
 The application applies numbered migrations in order and records them in `schema_migrations`. Before an existing database is migrated, it creates a consistent `backups/pre-migration-*.sqlite` snapshot. A failed migration rolls back and startup stops. A database containing a migration unknown to the running application is rejected with `Database schema is newer than this application version.` Downgrades are not attempted.
 
@@ -75,7 +75,7 @@ Restore validates the source SQLite structure, migration history, checksum, bund
 
 The backend builds every copied link and QR payload as `<subscription_base_url>/s/<TOKEN>`. Changing the setting changes only future generated URLs; it never rotates a Token or modifies nodes, Collections, subscriptions or their relations. Previous subscription hosts are retained in an internal compatibility list that permits only `/s/*` and `/health`; DNS, TLS and reverse-proxy service for those hosts must still be maintained during the transition.
 
-Use separate reverse-proxy hosts in production:
+Use separate reverse-proxy hosts in dual-domain deployments:
 
 ```caddyfile
 panel.example.com {

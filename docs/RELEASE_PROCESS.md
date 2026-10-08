@@ -10,9 +10,9 @@ Keep the existing `master` single mainline (no Git Flow). The release gate check
 
 `package.json.version` is the product version source of truth, currently **0.1.8**. README, `/health`, ready event, source download filename and Compose image version are checked against it by the release gate. Update all copies together.
 
-The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). MINOR and PATCH are single decimal digits. Versions 0.1.0 through 0.1.7 retain their historical RC tags. Starting with 0.1.8, a completed release uses one direct annotated unsigned `vX.Y.Z` tag after the full gate and production validation; no new `-rc.N` tags are created.
+The user-approved policy is decimal task versioning, not ordinary SemVer increments: every completed actual modification/fix/feature task advances by 0.0.1, carrying at ten (`0.0.9 → 0.1.0`, `0.1.9 → 0.2.0`, `0.9.9 → 1.0.0`). MINOR and PATCH are single decimal digits. Versions 0.1.0 through 0.1.7 retain their historical RC tags. Starting with 0.1.8, a completed release uses one direct annotated unsigned `vX.Y.Z` tag after the full gate and staging validation; no new `-rc.N` tags are created.
 
-After each completed task: commit + CHANGELOG + tests + production build + required Docker/deployment validation + **annotated unsigned direct version tag** + clean Git. Record both tag object SHA and peeled commit target. Never move an existing tag. Publication coordinates and tracked release metadata must be correct before the tag is created.
+After each completed task: commit + CHANGELOG + tests + optimized build + required Docker/staging validation + **annotated unsigned direct version tag** + clean Git. Record both tag object SHA and peeled commit target. Never move an existing tag. Publication coordinates and tracked release metadata must be correct before the tag is created.
 
 Remote creation, push, GitHub Release and GHCR publication require explicit user approval. Annotated unsigned tags are sufficient unless the user supplies a signing policy/key.
 
@@ -23,13 +23,13 @@ pnpm release:check
 pnpm release:check --full
 ```
 
-The normal gate requires clean Git, expected branch, version/changelog/license/provenance checks, secret scans, frozen install, reviewed dependency audit, lint, typecheck, tests, production build and source archive validation. It installs **Gitleaks 8.30.0** as development tooling with a pinned archive checksum, outside the repository. Linux x64 auto-install is supported; other systems must supply the same version via `GITLEAKS_BIN`.
+The normal gate requires clean Git, expected branch, version/changelog/license/provenance checks, secret scans, frozen install, reviewed dependency audit, lint, typecheck, tests, optimized build and source archive validation. It installs **Gitleaks 8.30.0** as development tooling with a pinned archive checksum, outside the repository. Linux x64 auto-install is supported; other systems must supply the same version via `GITLEAKS_BIN`.
 
 The full gate repeats install/quality/build in a fresh detached worktree, then performs a no-cache Docker build and isolated health/migration/backup/restart/persistence smoke test. It never deploys the image. If Docker is unavailable locally, an explicitly configured SSH build host can be used:
 
 ```sh
 RELEASE_TMPDIR=/dev/shm pnpm release:check --full
-# Optional remote Docker engine, no production Compose operations:
+# Optional remote Docker engine, no staging Compose operations:
 RELEASE_DOCKER_SSH=root@build-host.example pnpm release:check --full
 ```
 

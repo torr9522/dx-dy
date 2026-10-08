@@ -14,14 +14,14 @@
 ### Changed
 
 - Public product branding is now dx-dy; public deployment defaults contain only reserved example domains and no instance-specific identity.
-- New installations use the dx-dy standard paths while the manager continues to recognize the legacy production path.
+- New installations use the dx-dy standard paths while the manager continues to recognize the legacy deployment path.
 - Releases from 0.1.8 onward use direct annotated `vX.Y.Z` tags without an RC suffix.
 
 ### Security
 
 - Sanitized the complete public Git history before first publication while retaining all functional history and annotated historical tags.
 - Password initialization and recovery avoid process arguments; the Web application receives neither host root privileges nor a Docker socket.
-- Production configuration remains external to Git, and root-managed domain changes validate Caddy candidates before activation.
+- Deployment configuration remains external to Git, and root-managed domain changes validate Caddy candidates before activation.
 
 ### Compatibility
 
@@ -46,7 +46,7 @@
 - Duplicate detection ignores display names and node IDs; equal names with different connections remain distinct.
 - Global Node Library and Collections continue to allow duplicate node records and memberships.
 - Existing duplicate `subscription_nodes` relationships are never modified automatically; semantic keys remain transient and require no database migration.
-- The production Subscription containing four selected nodes and two equally named VMess nodes was compared safely; their current connection semantics differ, so the reported device behavior is not confirmed as a semantic-duplicate root cause.
+- The staging Subscription containing four selected nodes and two equally named VMess nodes was compared safely; their current connection semantics differ, so the reported device behavior is not confirmed as a semantic-duplicate root cause.
 
 ### Validation
 
@@ -134,7 +134,7 @@
 - Added 0.1.3-to-0.1.4 migration, WAL snapshot, encrypted export/restore, schema guard, failure rollback, session invalidation, Token/body continuity and domain source-of-truth tests.
 - Added desktop/mobile Playwright coverage for Collections, cross-collection subscription selection, editable Subscription Domain, immediate copy/QR updates and cleanup.
 - Completed an isolated full migration simulation preserving administrator, node envelope/sidecar/Tag, Collection membership, subscription order, settings, Token and canonical body hash.
-- Passed 82 unit/integration tests and 5 Playwright workflows before the production release gate.
+- Passed 82 unit/integration tests and 5 Playwright workflows before the staging release gate.
 
 ## [0.1.3-rc.1] - 2026-10-08
 
@@ -162,7 +162,7 @@
 ### Validation
 
 - Added desktop/mobile Playwright coverage for list actions, empty/mixed profiles, canonical links, dialogs, management navigation and button containment.
-- Passed 75 unit/integration tests and all 3 Playwright flows, lint, typecheck and production build.
+- Passed 75 unit/integration tests and all 3 Playwright flows, lint, typecheck and optimized build.
 - Shadowrocket device acceptance was confirmed PASS by the user before this UI task; no protocol or subscription format changes were made.
 
 ## [0.1.1-rc.1] - 2026-10-08
@@ -184,7 +184,7 @@
 ### Validation
 
 - Regression coverage includes byte-identical aliases and UAs, empty/disabled authorization, six mixed protocols, Unicode, current edits, repeated unknown parameters, Reality/Vision/SpiderX and VMess TLS.
-- lint, typecheck, 75 unit/integration tests, production build and one complete Playwright workflow passed; QR module pixels verify the canonical URL payload.
+- lint, typecheck, 75 unit/integration tests, optimized build and one complete Playwright workflow passed; QR module pixels verify the canonical URL payload.
 - Server validation does not certify a physical client; Shadowrocket device acceptance remains pending.
 - Stable tag and remote push remain unapproved.
 
