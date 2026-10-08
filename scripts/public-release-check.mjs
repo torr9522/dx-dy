@@ -49,6 +49,18 @@ if (metadata.name !== "dx-dy" || metadata.version !== "0.1.8")
   throw new Error("Public brand/version mismatch");
 if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.1.8"))
   throw new Error("README public identity mismatch");
+const publicRepository = "torr9522/dx-dy";
+const readme = readFileSync("README.md", "utf8");
+const installer = readFileSync("install.sh", "utf8");
+if (
+  !readme.includes(
+    `https://github.com/${publicRepository}/releases/latest/download/install.sh`,
+  ) ||
+  !installer.includes(`DXDY_DEFAULT_REPOSITORY="${publicRepository}"`)
+)
+  throw new Error("Final public repository coordinate is missing");
+if (/<OWNER>|YOUR_GITHUB_USERNAME|yourname\/dx-dy/.test(readme + installer))
+  throw new Error("Placeholder repository coordinate remains");
 const agentGuide = readFileSync("AGENTS.md", "utf8");
 const baseline = readFileSync("docs/CURRENT_BASELINE.md", "utf8");
 const capabilities = readFileSync("docs/CAPABILITY_TREE.md", "utf8");

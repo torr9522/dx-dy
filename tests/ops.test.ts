@@ -83,6 +83,9 @@ describe("public installer", () => {
       expect(caddy.match(/panel\.example\.com/g)).toHaveLength(1);
     }
     expect(existsSync(path.join(root, "usr/local/bin/dx-dy"))).toBe(true);
+    expect(
+      readFileSync(path.join(config, "install.conf"), "utf8"),
+    ).toContain("DXDY_REPOSITORY=torr9522/dx-dy");
   });
 
   it("fails closed on an existing install", () => {

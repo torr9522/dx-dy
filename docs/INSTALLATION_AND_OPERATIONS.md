@@ -11,7 +11,8 @@ network/disk/ports/existing installs and bootstraps Docker Engine, Compose v2,
 curl, CA certificates, OpenSSL, archive and DNS/network tools. Host Node.js,
 pnpm, npm and Caddy are not required.
 
-The public Release command is documented in the root README. The wizard accepts
+The public Release command for `torr9522/dx-dy` is documented in the root
+README. The wizard accepts
 hostnames only, reports A/AAAA results, supports optional UFW rules with consent,
 initializes an administrator and creates a protected random `APP_MASTER_KEY`.
 An automatically generated admin password is displayed once; the master key is
@@ -68,4 +69,5 @@ requires the exact word `DELETE`.
 
 Updates query the configured GitHub repository, require a checksum-verified
 manifest and digest-pinned image, back up first and roll configuration back after
-failed health. Forks may override the repository coordinate.
+failed health. Fresh installs default to `torr9522/dx-dy`; forks may override
+the repository coordinate and Release base URL.

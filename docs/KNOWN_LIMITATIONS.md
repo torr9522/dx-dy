@@ -18,7 +18,7 @@
   and cloud firewall rules. The installer never kills conflicting services.
 - Physical fresh-VM and client behavior still require environment-specific
   acceptance; containerized/preflight tests do not replace those checks.
-- GitHub update, public Release download and anonymous GHCR behavior become
-  testable only after the first public repository/Release exists.
+- Update and installation require a reachable GitHub stable Release and public
+  GHCR package; offline installation is not provided.
 - There is no automatic downgrade. Restore and update rollbacks use backups and
   the previously pinned image/configuration.

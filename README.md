@@ -20,6 +20,10 @@ Global Node Library 和 Collections 可以保留连接配置相同的节点；�
 
 公开 Release 中的 `install.sh` 是普通用户的安装入口；本 README 中的命令始终指向正式仓库坐标和校验过的 Release 资产。
 
+```bash
+curl -fsSLo /tmp/dx-dy-install.sh https://github.com/torr9522/dx-dy/releases/latest/download/install.sh && sudo bash /tmp/dx-dy-install.sh
+```
+
 安装器支持 Debian 12、Ubuntu 22.04/24.04 LTS，以及 amd64 和 arm64。它负责安装 Docker Engine、Docker Compose plugin、`curl`、证书、DNS 和必要系统工具；宿主机不需要 Node.js、pnpm、npm 或 Caddy binary。
 
 安装流程会询问管理后台域名、是否使用独立订阅域名、管理员用户名和隐藏密码。密码留空时会生成强随机密码并只显示一次。应用密钥不会输出。
@@ -30,7 +34,7 @@ Global Node Library 和 Collections 可以保留连接配置相同的节点；�
 sudo DXDY_ASSET_DIR="$PWD" DXDY_IMAGE_REFERENCE='verified-image@sha256:verified-digest' ./install.sh
 ```
 
-这条命令是高级本地验证入口，不是公开 Release 安装命令。
+这条命令是高级本地验证入口，不是普通用户的公开 Release 安装命令。Fork 可以通过 `DXDY_REPOSITORY` 和 `DXDY_RELEASE_BASE_URL` 覆盖默认发布坐标。
 
 ## SSH 管理
 

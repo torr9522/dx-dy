@@ -72,7 +72,7 @@ Copy these checks into the release review; do not precheck them from an earlier 
 - [ ] Public brand, installer, manager, Docker/Caddy templates and docs consistent
 - [ ] ShellCheck and isolated installer/manager tests passed
 - [ ] CI and release workflows use least privilege and never deploy a server
-- [ ] Multi-architecture image and release manifest paths are owner-neutral
+- [ ] Public user URLs use the final repository coordinate; Actions remain repository-dynamic
 - [ ] No database, backup, `.env`, instance key, deployment log or Playwright secret artifact
 
 ## Remote — not authorized in this baseline

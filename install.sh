@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly DXDY_VERSION="0.1.8"
+readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 ROOT_PREFIX="${DXDY_ROOT_PREFIX:-}"
@@ -13,6 +14,11 @@ BACKUP_DIR="$ROOT_PREFIX/var/backups/dx-dy"
 MANAGER_PATH="$ROOT_PREFIX/usr/local/bin/dx-dy"
 STAGING=""
 GENERATED_PASSWORD="0"
+DXDY_REPOSITORY="${DXDY_REPOSITORY:-$DXDY_DEFAULT_REPOSITORY}"
+if [[ -z "${DXDY_RELEASE_BASE_URL:-}" && "$TEST_MODE" != 1 && \
+  ! -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/deploy/docker-compose.yml" ]]; then
+  DXDY_RELEASE_BASE_URL="https://github.com/$DXDY_REPOSITORY/releases/latest/download"
+fi
 
 cleanup() { [[ -z "$STAGING" ]] || rm -rf -- "$STAGING"; }
 trap cleanup EXIT
@@ -128,7 +134,7 @@ fetch_asset() {
   if [[ -f "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" ]]; then
     cp "${DXDY_ASSET_DIR:-$SCRIPT_DIR}/$name" "$target"
   else
-    [[ -n "${DXDY_RELEASE_BASE_URL:-}" ]] || die "DXDY_RELEASE_BASE_URL is required outside a release asset directory."
+    [[ -n "${DXDY_RELEASE_BASE_URL:-}" ]] || die "Release asset URL is unavailable."
     curl -fsSL --proto '=https' --tlsv1.2 "${DXDY_RELEASE_BASE_URL%/}/$(basename "$name")" -o "$target"
   fi
 }
