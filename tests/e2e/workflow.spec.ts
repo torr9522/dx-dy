@@ -749,6 +749,7 @@ test("node collections organize nodes without becoming subscription authority", 
     .locator(".subscription-row")
     .filter({ hasText: profile.name });
   await card.getByRole("button", { name: "复制订阅链接", exact: true }).click();
+  await expect(page.locator(".toast")).toContainText("已复制");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(
     /^http:\/\/localhost:3999\/s\//,
   );
