@@ -2,19 +2,21 @@
 
 ## Release Identity
 
-- Current release: **0.2.4**
+- Current development candidate: **0.2.5**
+- Current public stable release: **0.2.4**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-After publication, resolve the immutable release commit with `git rev-parse v0.2.4^{}`. This document intentionally does not embed a self-referential HEAD SHA.
+The 0.2.5 candidate is local-only until explicit approval. There is no v0.2.5 tag or GitHub Release.
 
 ## Persistence And Invariants
 
-- SQLite WAL; schemas `001_initial.sql` and `002_node_collections.sql`
-- Migration in 0.2.4: **NONE**
-- Node/Subscription and Node/Collection are independent many-to-many relations
+- SQLite WAL; schemas `001_initial.sql`, `002_node_collections.sql` and `003_subscription_local_nodes.sql`
+- Migration in 0.2.5: **003_subscription_local_nodes.sql**
+- Global Node/Subscription and Node/Collection remain independent many-to-many relations
+- Subscription Local Nodes belong to exactly one Subscription and share one ordered `subscription_entries` sequence with Global Nodes
 - **NO AUTO SUBSCRIPTION**: Collection changes never synchronize a Subscription
 - Canonical `/s/:token` is standard Base64 of UTF-8 LF-separated share URIs
 - Library/Collections may contain equivalent Nodes; Subscription output is semantically unique
@@ -43,6 +45,6 @@ pnpm release:check --full --public
 
 The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled runtime, verifies source/archive privacy and runs private known-identity scanning when configured.
 
-## Next Version
+## Version Boundary
 
-`0.2.5` is the next code-change version **only after `v0.2.4` is released and a real source change is made**. Never move an existing public tag. Public `v0.2.0` remains immutable; its tag-triggered workflows failed before release publication because validation fetched all tags into an Actions checkout containing a peeled local tag.
+The current work is a local 0.2.5 candidate. Do not push, tag or publish it without explicit approval. If 0.2.5 is published, the next real source change is 0.2.6.

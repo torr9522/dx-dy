@@ -48,8 +48,8 @@ credentials.
 
 - SQLite with immutable released migrations
   [`001_initial.sql`](migrations/001_initial.sql) and
-  [`002_node_collections.sql`](migrations/002_node_collections.sql). There is no
-  migration after `002` at the 0.2.4 baseline.
+  [`002_node_collections.sql`](migrations/002_node_collections.sql) and
+  [`003_subscription_local_nodes.sql`](migrations/003_subscription_local_nodes.sql).
 - Backend: Node.js/TypeScript, Express, Zod and `node:sqlite`.
 - Frontend: React/TypeScript and Vite.
 - Deployment: architecture-specific native artifact, bundled Node 26.10.0,
@@ -66,8 +66,9 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The current development/release version is `0.2.4`. After `v0.2.4` is public,
-the next real source change is `0.2.5`. Never move an existing public tag.
+The current development version is `0.2.5`; public `v0.2.4` remains the latest
+stable release until the candidate is explicitly approved. Never move an
+existing public tag. The next source change after a public `v0.2.5` is `0.2.6`.
 
 ## Git Safety And Privacy
 

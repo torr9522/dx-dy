@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-09
+
+### Added
+
+- Added Subscription Local Nodes with lossless single/bulk import, isolated CRUD, cross-source semantic duplicate protection and unified Global/Local ordering.
+- Added a compact Subscription row list with persisted enabled switches, total node counts and direct copy/QR/manage/delete actions.
+- Added a source-audited Shadowrocket named-subscription QR alongside the unchanged generic subscription QR.
+- Added migration `003_subscription_local_nodes.sql` with lossless 0.2.4 relationship and position carry-forward.
+
+### Changed
+
+- Replaced the persistent split Subscription editor with a full-width saved-node workspace and secondary Add Node pages.
+- Separated Global Node selector drafts from persisted Subscription membership; cancel/back never writes and save is the only commit boundary.
+- Portable and Full Migration backups now preserve Local Nodes, mixed order and existing Token continuity through the generic SQLite safety path.
+
+### Security
+
+- Local Node CRUD remains administrator-only; the public Subscription route exposes only rendered output and never CRUD or stored envelopes.
+- Client deep links wrap the existing Subscription URL without rotating or logging its Token.
+
 ## [0.2.4] - 2026-10-09
 
 ### Fixed

@@ -14,9 +14,12 @@ content. SQLite enables foreign keys, WAL and a busy timeout in
   lossless Nodes, Subscriptions, ordered `subscription_nodes` and settings.
 - [`002_node_collections.sql`](../migrations/002_node_collections.sql): ordered
   Collections and many-to-many members.
+- [`003_subscription_local_nodes.sql`](../migrations/003_subscription_local_nodes.sql):
+  Subscription-owned Local Nodes and one ordered Global/Local entry sequence.
 
-There is no migration after `002` in 0.2.4. Released migration files are
-immutable.
+Migration `003` copies every existing `subscription_nodes` relationship and
+position into `subscription_entries` without changing Tokens or Global Nodes.
+Released migration files are immutable.
 
 ## Forward Migration Safety
 

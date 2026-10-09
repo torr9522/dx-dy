@@ -5,6 +5,7 @@
 - Node Library, tags/status/order: [`db.ts`](../apps/api/src/db.ts), [`NodeLibrary.tsx`](../apps/web/src/NodeLibrary.tsx), [`api.test.ts`](../tests/api.test.ts).
 - Ordered Subscription many-to-many: [`001_initial.sql`](../migrations/001_initial.sql), `subscription_nodes.position`.
 - Collections many-to-many and bulk membership: [`002_node_collections.sql`](../migrations/002_node_collections.sql). Membership never deletes Nodes and means **NO AUTO SUBSCRIPTION**.
+- Subscription Local Nodes and unified Global/Local order: [`003_subscription_local_nodes.sql`](../migrations/003_subscription_local_nodes.sql). Local Nodes belong to exactly one Subscription and never enter the Global Node Library or Collections.
 - Tri-state/filter persistence/review/Shift range/row selection/disabled skip: [`nodeSelection.tsx`](../apps/web/src/nodeSelection.tsx), [`frontend.test.ts`](../tests/frontend.test.ts), Playwright.
 
 ## Protocol, Import And Subscription
@@ -25,7 +26,7 @@
 - Debian 12, Ubuntu 22.04/24.04, amd64/arm64: [`install.sh`](../install.sh), [`ops.test.ts`](../tests/ops.test.ts).
 - Bundled Node 26.10.0, architecture-specific production dependencies and artifacts: [`build-native-artifact.mjs`](../scripts/build-native-artifact.mjs).
 - systemd lifecycle, journal logs, admin recovery, domain, backup/restore, doctor, uninstall, atomic update/rollback and legacy migration: [`ops/dx-dy`](../ops/dx-dy).
-- Docker/Compose/GHCR: deprecated 0.1.8 migration/history and optional CI tooling only; not the 0.2.4 runtime.
+- Docker/Compose/GHCR: deprecated 0.1.8 migration/history and optional CI tooling only; not the 0.2.5 runtime.
 
 ## Security And Release
 

@@ -23,7 +23,7 @@ const server = app.listen(
   process.env.HOST || "127.0.0.1",
   () =>
     console.log(
-      JSON.stringify({ event: "ready", name: "dx-dy", version: "0.2.4" }),
+      JSON.stringify({ event: "ready", name: "dx-dy", version: "0.2.5" }),
     ),
 );
 for (const signal of ["SIGTERM", "SIGINT"])

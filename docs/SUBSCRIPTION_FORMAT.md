@@ -1,12 +1,32 @@
 # Universal subscription contract
 
+## Named QR and client deep-link evidence (0.2.5)
+
+Generic QR remains the plain canonical Subscription URL. Copy Link also remains
+the plain URL. A client-specific QR is additive and never changes or rotates the
+Subscription Token.
+
+| Client | Generic URL subscription | Named deep link | Evidence and decision |
+|---|---|---|---|
+| Shadowrocket | Yes | `shadowrocket://add/sub://<base64(url)>?remark=<encoded name>` | Mature 3x-ui source at `442b7fb1637d6ecf4f2c28f76092228856e766c9` constructs this exact form. Multiple independent OSS panels converge on the same `remark` form. Implemented as a separate QR; physical-device import not tested. |
+| Stash | Not certified for this feed | `stash://install-config?url=...` exists | Official Stash URL Schema documentation describes importing a configuration file. dx-dy's Universal Base64 URI feed is not claimed to be that format, so no button is exposed. |
+| Surge | Not certified for this feed | `surge:///install-config?url=...` exists | The scheme installs a Surge configuration. It is not evidence that a Universal Base64 URI feed is accepted, so no button is exposed. |
+| sing-box clients | No for this scheme | `sing-box://import-remote-profile?url=...#name` | Official sing-box docs at `6afeff4c0f7123b5782f888812e96b8c82c7b699` require a remote sing-box configuration. Not implemented for the current feed. |
+| Hiddify | Generic URL handling exists | Several import forms | Hiddify source at `98387fe96b1ce5bc01ec463ab2a0d1a6f0c42d2e` parses names, but its own share generator currently returns a URL with fragment and leaves its deep-link wrapper commented. No dedicated button is exposed. |
+| Clash-compatible clients | Format-dependent | Client-specific schemes vary | Current output is not Clash YAML. No generic Clash install scheme is advertised. |
+
+Shadowrocket encoding uses standard padded Base64 over the UTF-8 Subscription
+URL and exactly one `encodeURIComponent` pass for the Subscription name. Tests
+cover ASCII, Chinese, spaces, `&`, `#`, `%`, `+` and emoji. QR payload decoding
+is verified; real-device behavior remains explicitly unverified.
+
 One Profile has one official URL: `/s/<TOKEN>`. Client names describe compatibility, not Profile ownership or separate links. This contract is independent of User-Agent, Accept and the legacy settings.default_format value. The old setting stays readable/writable for API compatibility but has no rendering effect and no UI selector.
 
-Token hash lookup requires an enabled subscription, without an admin session or CSRF. Only explicitly assigned enabled nodes are queried, ordered by subscription_nodes.position. Current normalized_config plus the ordered unknown sidecar generate each current share URI; original_uri is archival, not the output source. Before output, one shared semantic pass preserves the first URI for each connection semantic key and suppresses later duplicates. Shared adapter functions generate LF-separated unique URI lines with no trailing LF, then UTF-8 standard padded Base64. Empty authorization gives Base64 of empty text: an empty body. VMess JSON has its own Base64 inside the URI; the outer subscription encoding is intentional.
+Token hash lookup requires an enabled subscription, without an admin session or CSRF. Only explicitly assigned enabled Global and Subscription Local Nodes are queried, ordered by `subscription_entries.position`. Current normalized_config plus the ordered unknown sidecar generate each current share URI; original_uri is archival, not the output source. Before output, one shared semantic pass preserves the first URI for each connection semantic key and suppresses later duplicates. Shared adapter functions generate LF-separated unique URI lines with no trailing LF, then UTF-8 standard padded Base64. Empty authorization gives Base64 of empty text: an empty body. VMess JSON has its own Base64 inside the URI; the outer subscription encoding is intentional.
 
 Semantic identity never uses node ID, display name, remark, Tag, Collection, position, timestamps or original URI formatting. Ordinary URI protocols remove only the display fragment from the current rendered URI. VMess decodes its rendered JSON, removes only `ps`, uses deterministic JSON key ordering and retains any rendered query suffix exactly. Unknown/private connection parameters remain significant. Unsafe canonicalization falls back to a unique opaque node identity, preferring false negatives over false-positive suppression. Keys are runtime-only and are exposed only as opaque hashes to authenticated administrators; no schema field or migration persists them.
 
-The selector rejects newly introduced semantic duplicates and save validation returns a structured 422 without changing `subscription_nodes`. Existing historical duplicate relationships remain intact until an administrator explicitly removes one and saves. Preview reports selected, emitted and suppressed counts without exposing canonical semantic input. Canonical Base64, raw and every legacy alias use the same deduplicated ordered node set; public responses contain no warning text.
+The selector and Local Node importer reject newly introduced semantic duplicates across Global and Local sources. Save validation returns a structured 422 without changing persisted entries. Existing historical duplicate relationships remain intact until an administrator explicitly removes one and saves. Preview reports selected, emitted and suppressed counts without exposing canonical semantic input. Canonical Base64, raw and every legacy alias use the same deduplicated ordered node set; public responses contain no warning text.
 
 Public success: 200, `text/plain; charset=utf-8`, `private, no-store`, no wrapper/redirect. Existing proxy compression exclusion for /s/* stays. `format=auto|v2ray|shadowrocket` are direct aliases with identical bytes and `X-Subscription-Format: universal-base64`. Only `format=raw` returns unencoded lines, for debugging. Invalid/disabled tokens give JSON 404 before SPA fallback; unknown formats give validation errors. Preview is admin-only, with an ordered protocol/name summary and optional decoded sensitive URIs. Copy and QR use the query-free canonical URL.
 

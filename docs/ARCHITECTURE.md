@@ -35,14 +35,20 @@ Caddy templates live in [`deploy/native`](../deploy/native). The application has
 ## Data Model
 
 ```text
-Node * <-> * Subscription via subscription_nodes(position)
+Node * <-> * Subscription via subscription_nodes (Global relationship mirror)
+Subscription 1 -> * subscription_entries(position) -> Global or Local Node
+Subscription 1 -> * subscription_local_nodes
 Node * <-> * Collection   via node_collection_members
 Admin 1 -> * AdminSession
 Settings(key, JSON value)
 ```
 
-Collections are organizational only. `subscription_nodes.position` controls output order. Semantic dedupe preserves the first position without modifying stored relationships.
+Collections are organizational only. `subscription_entries.position` is the
+single output order for mixed Global and Local Nodes. `subscription_nodes`
+continues to mirror Global membership for compatibility and rollback
+inspection. Semantic dedupe preserves the first position without modifying
+stored relationships.
 
 ## Build And Release
 
-GitHub Actions builds amd64 and arm64 artifacts separately on native architecture runners. Each artifact receives Node 26.10.0 and target-specific production dependencies, then launches its bundled Node and Argon2 addon on that architecture. The release job creates the source archive, manifest and checksums and publishes GitHub Release assets. GHCR is not part of the 0.2.4 distribution path.
+GitHub Actions builds amd64 and arm64 artifacts separately on native architecture runners. Each artifact receives Node 26.10.0 and target-specific production dependencies, then launches its bundled Node and Argon2 addon on that architecture. The release job creates the source archive, manifest and checksums and publishes GitHub Release assets. GHCR is not part of the 0.2.5 distribution path.

@@ -2,8 +2,9 @@
 
 ## Portable Database Backup
 
-A DB backup is a WAL-safe independent SQLite file containing Nodes, envelopes,
-Collections, memberships, ordered Subscriptions, settings, administrators,
+A DB backup is a WAL-safe independent SQLite file containing Global and
+Subscription Local Nodes, envelopes, Collections, memberships, mixed ordered
+Subscriptions, settings, administrators,
 Token hashes/ciphertexts and schema history. Active administrator sessions are
 removed.
 

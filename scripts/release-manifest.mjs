@@ -71,7 +71,7 @@ const manifest = {
   manager_asset: "dx-dy",
   manager_sha256: hashes["dx-dy"],
   minimum_schema: "001_initial.sql",
-  current_schema: "002_node_collections.sql",
+  current_schema: "003_subscription_local_nodes.sql",
   backup_format_compatibility: ["portable-sqlite", "psmbackup-v1"],
   created_at: process.env.RELEASE_CREATED_AT || new Date().toISOString(),
 };

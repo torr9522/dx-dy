@@ -27,6 +27,7 @@ for (const arch of requested ? [requested] : ["amd64", "arm64"]) {
       "app/node_modules/argon2",
       "app/migrations/001_initial.sql",
       "app/migrations/002_node_collections.sql",
+      "app/migrations/003_subscription_local_nodes.sql",
       "dx-dy.service",
       "Caddyfile.single",
       "Caddyfile.dual",

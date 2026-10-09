@@ -1,5 +1,8 @@
 # Known Limitations
 
+- Shadowrocket named-subscription deep-link syntax is verified from mature OSS implementations and by payload decode, but has not been tested on a physical iPhone in this development environment.
+- Stash and Surge installation schemes expect client configuration formats that differ from dx-dy's Universal Base64 URI feed, so 0.2.5 does not present misleading client buttons for them.
+- sing-box remote-profile import expects a sing-box configuration document, not the current Universal Base64 feed. Hiddify supports several import forms, but no extra button is exposed until its exact feed contract is accepted end to end.
 - Fresh installation is formally supported only on Debian 12, Ubuntu 22.04/24.04
   LTS and amd64/arm64. Other systems are best effort.
 - The zero-prerequisite command assumes a root shell with working Debian/Ubuntu

@@ -55,6 +55,25 @@ export function validateDatabase(
       node_collections: ["id", "name", "remark", "position"],
       node_collection_members: ["collection_id", "node_id"],
     });
+  if (versions.includes("003_subscription_local_nodes.sql"))
+    Object.assign(required, {
+      subscription_local_nodes: [
+        "id",
+        "subscription_id",
+        "original_uri",
+        "normalized_config",
+        "unknown_params",
+        "enabled",
+      ],
+      subscription_entries: [
+        "id",
+        "subscription_id",
+        "source_type",
+        "node_id",
+        "local_node_id",
+        "position",
+      ],
+    });
   for (const [table, columns] of Object.entries(required)) {
     const actual = db
       .prepare(`PRAGMA table_info(${table})`)

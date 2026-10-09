@@ -4,6 +4,14 @@ This is an engineering milestone record derived from the sanitized Git history
 and CHANGELOG. It intentionally excludes private conversations, deployment
 identities and pre-public commit mappings.
 
+## 0.2.5 - Subscription UX And Local Nodes
+
+- Added Subscription-owned Local Nodes and a unified Global/Local ordered entry model through migration 003.
+- Separated selector drafts from persisted membership and moved selection/import into secondary Subscription pages.
+- Replaced Subscription cards with a compact responsive row list and real enabled switches.
+- Added a separately labeled Shadowrocket named-subscription QR without changing Generic QR or copied URLs.
+- Kept the work as a local candidate pending explicit publication approval.
+
 ## 0.1.0 - Core Manager
 
 Established the pinned Sub-Store adapter, lossless Node envelope, secure

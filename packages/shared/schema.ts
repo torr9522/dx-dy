@@ -148,4 +148,12 @@ export type Profile = {
   created_at: string;
   updated_at: string;
   node_ids: number[];
+  node_count: number;
+};
+export type SubscriptionEntry = {
+  id: number;
+  subscription_id: number;
+  source: "global" | "local";
+  position: number;
+  node: NodeRecord;
 };

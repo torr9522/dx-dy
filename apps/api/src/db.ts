@@ -12,6 +12,7 @@ import {
   type Envelope,
   type NodeRecord,
   type Profile,
+  type SubscriptionEntry,
 } from "../../../packages/shared/schema";
 export const now = () => new Date().toISOString();
 type Row = Record<string, unknown>;
@@ -218,18 +219,227 @@ export class Store {
       id,
     );
   }
-  profile(r: Row): Profile {
+  localNode(row: Row): NodeRecord {
+    const envelope = envelopeSchema.parse({
+      ...row,
+      normalized_config: JSON.parse(String(row.normalized_config)),
+      unknown_params: JSON.parse(String(row.unknown_params)),
+      parse_warnings: JSON.parse(String(row.parse_warnings)),
+      unsupported_fields: JSON.parse(String(row.unsupported_fields)),
+    });
     return {
-      id: Number(r.id),
+      ...envelope,
+      id: Number(row.id),
+      name: String(row.name),
+      protocol: String(row.protocol),
+      remark: String(row.remark),
+      enabled: !!row.enabled,
+      tags: [],
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at),
+      references: 1,
+      collection_ids: [],
+    };
+  }
+  findLocalNode(subscriptionId: number, localNodeId: number) {
+    const row = this.get(
+      "SELECT * FROM subscription_local_nodes WHERE subscription_id=? AND id=?",
+      subscriptionId,
+      localNodeId,
+    );
+    return row ? this.localNode(row) : undefined;
+  }
+  subscriptionEntries(subscriptionId: number): SubscriptionEntry[] {
+    return this.all(
+      "SELECT * FROM subscription_entries WHERE subscription_id=? ORDER BY position,id",
+      subscriptionId,
+    )
+      .map((entry) => {
+        const source = String(entry.source_type) as "global" | "local";
+        const node =
+          source === "global"
+            ? this.findNode(Number(entry.node_id))
+            : this.findLocalNode(subscriptionId, Number(entry.local_node_id));
+        return node
+          ? {
+              id: Number(entry.id),
+              subscription_id: subscriptionId,
+              source,
+              position: Number(entry.position),
+              node,
+            }
+          : undefined;
+      })
+      .filter((entry): entry is SubscriptionEntry => !!entry);
+  }
+  private compactEntries(subscriptionId: number) {
+    const ids = this.all(
+      "SELECT id FROM subscription_entries WHERE subscription_id=? ORDER BY position,id",
+      subscriptionId,
+    ).map((row) => Number(row.id));
+    this.run(
+      "UPDATE subscription_entries SET position=position+1000000 WHERE subscription_id=?",
+      subscriptionId,
+    );
+    ids.forEach((entryId, position) =>
+      this.run(
+        "UPDATE subscription_entries SET position=? WHERE subscription_id=? AND id=?",
+        position,
+        subscriptionId,
+        entryId,
+      ),
+    );
+  }
+  private syncGlobalMirror(subscriptionId: number) {
+    this.run(
+      "DELETE FROM subscription_nodes WHERE subscription_id=?",
+      subscriptionId,
+    );
+    for (const entry of this.all(
+      "SELECT node_id,position,created_at FROM subscription_entries WHERE subscription_id=? AND source_type='global' ORDER BY position",
+      subscriptionId,
+    ))
+      this.run(
+        "INSERT INTO subscription_nodes VALUES(?,?,?,?)",
+        subscriptionId,
+        Number(entry.node_id),
+        Number(entry.position),
+        String(entry.created_at),
+      );
+  }
+  addLocalNode(subscriptionId: number, envelope: Envelope) {
+    const timestamp = now();
+    return this.transaction(() => {
+      const localNodeId = Number(
+        this.run(
+          "INSERT INTO subscription_local_nodes(subscription_id,name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          subscriptionId,
+          envelope.normalized_config.name,
+          "",
+          envelope.normalized_config.type,
+          envelope.original_uri,
+          JSON.stringify(envelope.normalized_config),
+          JSON.stringify(envelope.unknown_params),
+          envelope.parser_name,
+          envelope.parser_version,
+          JSON.stringify(envelope.parse_warnings),
+          JSON.stringify(envelope.unsupported_fields),
+          1,
+          timestamp,
+          timestamp,
+        ).lastInsertRowid,
+      );
+      const position = Number(
+        this.get(
+          "SELECT COALESCE(MAX(position),-1)+1 AS position FROM subscription_entries WHERE subscription_id=?",
+          subscriptionId,
+        )?.position,
+      );
+      const entryId = Number(
+        this.run(
+          "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'local',NULL,?,?,?)",
+          subscriptionId,
+          localNodeId,
+          position,
+          timestamp,
+        ).lastInsertRowid,
+      );
+      return { entryId, localNodeId };
+    });
+  }
+  updateLocalNode(
+    subscriptionId: number,
+    localNodeId: number,
+    envelope: Envelope,
+    remark: string,
+    enabled: boolean,
+  ) {
+    this.run(
+      "UPDATE subscription_local_nodes SET name=?,remark=?,protocol=?,original_uri=?,normalized_config=?,unknown_params=?,parse_warnings=?,unsupported_fields=?,enabled=?,updated_at=? WHERE subscription_id=? AND id=?",
+      envelope.normalized_config.name,
+      remark,
+      envelope.normalized_config.type,
+      envelope.original_uri,
+      JSON.stringify(envelope.normalized_config),
+      JSON.stringify(envelope.unknown_params),
+      JSON.stringify(envelope.parse_warnings),
+      JSON.stringify(envelope.unsupported_fields),
+      Number(enabled),
+      now(),
+      subscriptionId,
+      localNodeId,
+    );
+  }
+  reorderEntries(subscriptionId: number, entryIds: number[]) {
+    this.transaction(() => {
+      this.run(
+        "UPDATE subscription_entries SET position=position+1000000 WHERE subscription_id=?",
+        subscriptionId,
+      );
+      entryIds.forEach((entryId, position) =>
+        this.run(
+          "UPDATE subscription_entries SET position=? WHERE subscription_id=? AND id=?",
+          position,
+          subscriptionId,
+          entryId,
+        ),
+      );
+      this.syncGlobalMirror(subscriptionId);
+      this.run(
+        "UPDATE subscriptions SET updated_at=? WHERE id=?",
+        now(),
+        subscriptionId,
+      );
+    });
+  }
+  deleteEntry(subscriptionId: number, entryId: number) {
+    this.transaction(() => {
+      const entry = this.get(
+        "SELECT * FROM subscription_entries WHERE subscription_id=? AND id=?",
+        subscriptionId,
+        entryId,
+      );
+      if (!entry) return;
+      if (String(entry.source_type) === "local")
+        this.run(
+          "DELETE FROM subscription_local_nodes WHERE subscription_id=? AND id=?",
+          subscriptionId,
+          Number(entry.local_node_id),
+        );
+      else
+        this.run(
+          "DELETE FROM subscription_entries WHERE subscription_id=? AND id=?",
+          subscriptionId,
+          entryId,
+        );
+      this.compactEntries(subscriptionId);
+      this.syncGlobalMirror(subscriptionId);
+      this.run(
+        "UPDATE subscriptions SET updated_at=? WHERE id=?",
+        now(),
+        subscriptionId,
+      );
+    });
+  }
+  profile(r: Row): Profile {
+    const subscriptionId = Number(r.id);
+    return {
+      id: subscriptionId,
       name: String(r.name),
       remark: String(r.remark),
       enabled: !!r.enabled,
       created_at: String(r.created_at),
       updated_at: String(r.updated_at),
       node_ids: this.all(
-        "SELECT node_id FROM subscription_nodes WHERE subscription_id=? ORDER BY position",
-        Number(r.id),
+        "SELECT node_id FROM subscription_entries WHERE subscription_id=? AND source_type='global' ORDER BY position",
+        subscriptionId,
       ).map((x) => Number(x.node_id)),
+      node_count: Number(
+        this.get(
+          "SELECT COUNT(*) AS count FROM subscription_entries WHERE subscription_id=?",
+          subscriptionId,
+        )?.count,
+      ),
     };
   }
   profiles() {
@@ -239,30 +449,74 @@ export class Store {
   }
   assign(id: number, ids: number[]) {
     this.transaction(() => {
-      this.run("DELETE FROM subscription_nodes WHERE subscription_id=?", id);
-      ids.forEach((nodeId, pos) =>
-        this.run(
-          "INSERT INTO subscription_nodes VALUES(?,?,?,?)",
+      const selected = new Set(ids);
+      for (const row of this.all(
+        "SELECT id,node_id FROM subscription_entries WHERE subscription_id=? AND source_type='global'",
+        id,
+      ))
+        if (!selected.has(Number(row.node_id)))
+          this.run("DELETE FROM subscription_entries WHERE id=?", Number(row.id));
+      this.compactEntries(id);
+      const remaining = this.subscriptionEntries(id);
+      const existingByNodeId = new Map(
+        remaining
+          .filter((entry) => entry.source === "global")
+          .map((entry) => [entry.node.id, entry]),
+      );
+      const requestedExisting = ids
+        .map((nodeId) => existingByNodeId.get(nodeId))
+        .filter((entry): entry is SubscriptionEntry => !!entry);
+      let position = Number(
+        this.get(
+          "SELECT COALESCE(MAX(position),-1)+1 AS position FROM subscription_entries WHERE subscription_id=?",
           id,
-          nodeId,
-          pos,
-          now(),
+        )?.position,
+      );
+      const appendedEntryIds: number[] = [];
+      for (const nodeId of ids)
+        if (!existingByNodeId.has(nodeId)) {
+          appendedEntryIds.push(
+            Number(
+              this.run(
+            "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'global',?,NULL,?,?)",
+            id,
+            nodeId,
+            position++,
+            now(),
+              ).lastInsertRowid,
+            ),
+          );
+        }
+      let globalIndex = 0;
+      const order = remaining.map((entry) =>
+        entry.source === "local"
+          ? entry.id
+          : requestedExisting[globalIndex++]!.id,
+      );
+      order.push(...appendedEntryIds);
+      this.run(
+        "UPDATE subscription_entries SET position=position+1000000 WHERE subscription_id=?",
+        id,
+      );
+      order.forEach((entryId, nextPosition) =>
+        this.run(
+          "UPDATE subscription_entries SET position=? WHERE subscription_id=? AND id=?",
+          nextPosition,
+          id,
+          entryId,
         ),
       );
+      this.syncGlobalMirror(id);
       this.run("UPDATE subscriptions SET updated_at=? WHERE id=?", now(), id);
     });
   }
   authorized(id: number) {
-    return this.all(
-      "SELECT n.* FROM subscription_nodes sn JOIN nodes n ON n.id=sn.node_id WHERE sn.subscription_id=? AND n.enabled=1 ORDER BY sn.position",
-      id,
-    ).map((r) => this.node(r, []));
+    return this.subscriptionEntries(id)
+      .map((entry) => entry.node)
+      .filter((node) => node.enabled);
   }
   selectedNodes(id: number) {
-    return this.all(
-      "SELECT n.* FROM subscription_nodes sn JOIN nodes n ON n.id=sn.node_id WHERE sn.subscription_id=? ORDER BY sn.position",
-      id,
-    ).map((r) => this.node(r, []));
+    return this.subscriptionEntries(id).map((entry) => entry.node);
   }
   settings() {
     return Object.fromEntries(

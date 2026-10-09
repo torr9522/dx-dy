@@ -10,6 +10,7 @@ import {
   setGroupedSelection,
   semanticDuplicateOf,
 } from "../apps/web/src/nodeSelection";
+import { buildShadowrocketSubscriptionLink } from "../apps/web/src/subscriptionLinks";
 describe("frontend editor and filters", () => {
   it("nested edit is immutable", () => {
     const n = parseNode(vless).normalized_config;
@@ -118,4 +119,21 @@ describe("shared node selection", () => {
       selectedNodes([{ id: 1 }, { id: 2 }, { id: 3 }], new Set([3, 1])),
     ).toEqual([{ id: 1 }, { id: 3 }]);
   });
+});
+
+describe("named subscription deep links", () => {
+  it.each(["123", "中文 名称 & #%+", "emoji 😀"])(
+    "encodes the Shadowrocket URL and name once: %s",
+    (name) => {
+      const subscription = "https://sub.example.com/s/SyntheticToken_123";
+      const deepLink = buildShadowrocketSubscriptionLink(subscription, name);
+      const payload = deepLink.slice("shadowrocket://add/sub://".length);
+      const [encodedUrl, encodedRemark] = payload.split("?remark=");
+      expect(Buffer.from(encodedUrl, "base64").toString("utf8")).toBe(
+        subscription,
+      );
+      expect(decodeURIComponent(encodedRemark)).toBe(name);
+      expect(encodedRemark).toBe(encodeURIComponent(name));
+    },
+  );
 });

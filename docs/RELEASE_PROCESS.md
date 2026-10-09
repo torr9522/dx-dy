@@ -2,7 +2,7 @@
 
 `package.json.version` is the source of truth. The gate checks README, `/health`, ready event, source filename, native install metadata, installer and manager against it.
 
-Versions use decimal carry (`0.1.8 -> 0.1.9 -> 0.2.0 -> 0.2.1 -> 0.2.2 -> 0.2.3 -> 0.2.4`). Versions from 0.1.8 use direct annotated unsigned `vX.Y.Z` tags after the full gate; historical RC tags stay immutable. Never move a public tag or rewrite public history.
+Versions use decimal carry (`0.1.8 -> 0.1.9 -> 0.2.0 -> 0.2.1 -> 0.2.2 -> 0.2.3 -> 0.2.4 -> 0.2.5`). Versions from 0.1.8 use direct annotated unsigned `vX.Y.Z` tags after the full gate; historical RC tags stay immutable. Never move a public tag or rewrite public history.
 
 ## Pre-Tag
 

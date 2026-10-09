@@ -15,7 +15,11 @@ import {
   fixtures,
 } from "./fixtures";
 import { parseNode, generateURI } from "../packages/proxy-adapter";
-import type { NodeRecord } from "../packages/shared/schema";
+import type {
+  NodeRecord,
+  Profile,
+  SubscriptionEntry,
+} from "../packages/shared/schema";
 const password = "Synthetic-admin-password-123!";
 const options: Options = {
   database: ":memory:",
@@ -50,7 +54,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.4",
+      version: "0.2.5",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -950,6 +954,105 @@ describe("API and domain regression", () => {
   });
 });
 
+describe("subscription local nodes and unified ordering", () => {
+  it("isolates, orders, renders and cascades local nodes", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const post = (route: string, body: object) =>
+        agent.post(route).set("X-CSRF-Token", csrf).send(body);
+      const global = (
+        await post("/api/nodes/import", { items: [{ uri: vless }] })
+      ).body[0] as NodeRecord;
+      const subscription = (
+        await post("/api/subscriptions", { name: "Mixed entries" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [global.id] })
+        .expect(200);
+
+      await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
+        items: [{ uri: vmess, name: "Local VMess" }],
+      }).expect(201);
+      expect(system.store.nodes()).toHaveLength(1);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) AS count FROM node_collection_members",
+        )?.count,
+      ).toBe(0);
+      let entries = (
+        await agent.get(`/api/subscriptions/${subscription.id}/entries`)
+      ).body as SubscriptionEntry[];
+      expect(entries.map((entry) => entry.source)).toEqual(["global", "local"]);
+      expect((await agent.get("/api/subscriptions")).body[0].node_count).toBe(
+        2,
+      );
+
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/entries/order`)
+        .set("X-CSRF-Token", csrf)
+        .send({ entry_ids: entries.map((entry) => entry.id).reverse() })
+        .expect(200);
+      entries = (
+        await agent.get(`/api/subscriptions/${subscription.id}/entries`)
+      ).body as SubscriptionEntry[];
+      expect(entries.map((entry) => entry.source)).toEqual(["local", "global"]);
+      const url = (await agent.get(`/api/subscriptions/${subscription.id}/url`))
+        .body.url as string;
+      expect(
+        Buffer.from(
+          (await request(system.app).get(new URL(url).pathname)).text,
+          "base64",
+        )
+          .toString("utf8")
+          .split("\n")
+          .map((uri) => parseNode(uri).normalized_config.type),
+      ).toEqual(["vmess", "vless"]);
+
+      await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
+        items: [{ uri: vless, name: "Duplicate global" }],
+      }).expect(422);
+      await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
+        items: [
+          { uri: nonRfcVmess, name: "Duplicate local A" },
+          { uri: nonRfcVmess, name: "Duplicate local B" },
+        ],
+      }).expect(422);
+
+      const globalEntry = entries.find((entry) => entry.source === "global")!;
+      await agent
+        .delete(
+          `/api/subscriptions/${subscription.id}/entries/${globalEntry.id}`,
+        )
+        .set("X-CSRF-Token", csrf)
+        .send({})
+        .expect(200);
+      expect(system.store.findNode(global.id)).toBeDefined();
+      expect(system.store.subscriptionEntries(subscription.id)).toHaveLength(1);
+
+      await agent
+        .delete(`/api/subscriptions/${subscription.id}`)
+        .set("X-CSRF-Token", csrf)
+        .send({})
+        .expect(200);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) AS count FROM subscription_local_nodes WHERE subscription_id=?",
+          subscription.id,
+        )?.count,
+      ).toBe(0);
+    } finally {
+      system.store.close();
+    }
+  });
+});
+
 describe("subscription semantic duplicate protection", () => {
   it("rejects new duplicates, preserves historical relations, and dedupes every feed", async () => {
     const system = await createApp(options);
@@ -1005,6 +1108,17 @@ describe("subscription semantic duplicate protection", () => {
         subscription.id,
         imported.map((node) => node.id),
       );
+      const historicalEntries = system.store.subscriptionEntries(
+        subscription.id,
+      );
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/entries/order`)
+        .set("X-CSRF-Token", csrf)
+        .send({ entry_ids: historicalEntries.map((entry) => entry.id) })
+        .expect(422)
+        .expect(({ body }) => {
+          expect(body.error.code).toBe("DUPLICATE_SEMANTICS");
+        });
       const url = (await agent.get(`/api/subscriptions/${subscription.id}/url`))
         .body.url as string;
       const path = new URL(url).pathname;

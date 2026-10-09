@@ -70,17 +70,25 @@ describe("database migration and portability", () => {
       restarted.store.close();
     }
   });
-  it("upgrades a 0.1.3 schema transactionally and guards newer/failing schemas", async () => {
+  it("upgrades the 0.2.4 schema transactionally and guards newer/failing schemas", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "psm-migrate-")),
       oldDir = path.join(root, "old"),
       allDir = path.join(root, "all");
     mkdirSync(oldDir);
     mkdirSync(allDir);
     cpSync("migrations/001_initial.sql", path.join(oldDir, "001_initial.sql"));
+    cpSync(
+      "migrations/002_node_collections.sql",
+      path.join(oldDir, "002_node_collections.sql"),
+    );
     cpSync("migrations/001_initial.sql", path.join(allDir, "001_initial.sql"));
     cpSync(
       "migrations/002_node_collections.sql",
       path.join(allDir, "002_node_collections.sql"),
+    );
+    cpSync(
+      "migrations/003_subscription_local_nodes.sql",
+      path.join(allDir, "003_subscription_local_nodes.sql"),
     );
     const file = path.join(root, "old.db"),
       old = new Store(file);
@@ -145,7 +153,7 @@ describe("database migration and portability", () => {
       ),
     ).toBeDefined();
     await upgraded.migrate(allDir);
-    expect(upgraded.all("SELECT * FROM schema_migrations")).toHaveLength(2);
+    expect(upgraded.all("SELECT * FROM schema_migrations")).toHaveLength(3);
     integrity(upgraded.db);
     upgraded.run(
       "INSERT INTO schema_migrations VALUES(?,?)",
@@ -177,7 +185,12 @@ describe("database migration and portability", () => {
     await expect(failing.migrate(failDir)).rejects.toThrow();
     expect(
       failing.get(
-        "SELECT name FROM sqlite_master WHERE name='node_collections'",
+        "SELECT name FROM sqlite_master WHERE name='rolled_back'",
+      ),
+    ).toBeUndefined();
+    expect(
+      failing.get(
+        "SELECT name FROM sqlite_master WHERE name='subscription_entries'",
       ),
     ).toBeUndefined();
     failing.close();
@@ -240,6 +253,31 @@ describe("database migration and portability", () => {
       .put(`/api/subscriptions/${profile.id}/nodes`)
       .set("X-CSRF-Token", csrf)
       .send({ node_ids: imported.map((n: { id: number }) => n.id).reverse() });
+    const localConfig = JSON.parse(
+      Buffer.from(nonRfcVmess.slice(8), "base64").toString("utf8"),
+    );
+    localConfig.ps = "Portable local VMess";
+    localConfig.port = "8443";
+    const localUri =
+      "vmess://" + Buffer.from(JSON.stringify(localConfig)).toString("base64");
+    await agent
+      .post(`/api/subscriptions/${profile.id}/local-nodes/import`)
+      .set("X-CSRF-Token", csrf)
+      .send({ items: [{ uri: localUri }] })
+      .expect(201);
+    const mixedEntries = a.store.subscriptionEntries(profile.id);
+    await agent
+      .put(`/api/subscriptions/${profile.id}/entries/order`)
+      .set("X-CSRF-Token", csrf)
+      .send({
+        entry_ids: [
+          mixedEntries.find((entry) => entry.source === "local")!.id,
+          ...mixedEntries
+            .filter((entry) => entry.source === "global")
+            .map((entry) => entry.id),
+        ],
+      })
+      .expect(200);
     a.store.set("migration_setting", "preserved");
     const url = (await agent.get(`/api/subscriptions/${profile.id}/url`)).body
         .url,
@@ -248,7 +286,7 @@ describe("database migration and portability", () => {
       sourceNodes = a.store.nodes();
     await snapshot(a.store.db, portable, true);
     const independent = new DatabaseSync(portable, { readOnly: true });
-    expect(validateDatabase(independent)).toHaveLength(2);
+    expect(validateDatabase(independent)).toHaveLength(3);
     expect(
       independent.prepare("SELECT COUNT(*) n FROM admin_sessions").get()?.n,
     ).toBe(0);
@@ -256,6 +294,15 @@ describe("database migration and portability", () => {
       .prepare("SELECT normalized_config FROM nodes WHERE protocol='vmess'")
       .get() as { normalized_config: string };
     expect(JSON.parse(portableVmess.normalized_config).uuid).toBe(
+      nonRfcVmessUuid,
+    );
+    const portableLocal = independent
+      .prepare(
+        "SELECT original_uri,normalized_config FROM subscription_local_nodes",
+      )
+      .get() as { original_uri: string; normalized_config: string };
+    expect(portableLocal.original_uri).toBe(localUri);
+    expect(JSON.parse(portableLocal.normalized_config).uuid).toBe(
       nonRfcVmessUuid,
     );
     integrity(independent);
@@ -307,6 +354,12 @@ describe("database migration and portability", () => {
       expect(b.store.profiles()[0].node_ids).toEqual(
         imported.map((n: { id: number }) => n.id).reverse(),
       );
+      expect(
+        b.store.subscriptionEntries(profile.id).map((entry) => entry.source),
+      ).toEqual(["local", "global", "global"]);
+      expect(
+        b.store.subscriptionEntries(profile.id)[0].node.original_uri,
+      ).toBe(localUri);
       const restoredBody = (await request(b.app).get(new URL(url).pathname))
         .text;
       expect(createHash("sha256").update(restoredBody).digest("hex")).toBe(

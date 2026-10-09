@@ -49,6 +49,7 @@ import type {
 import { api, setCsrf } from "./api";
 import { getField, setField, nodeMatches } from "./fields";
 import { NodeLibrary } from "./NodeLibrary";
+import { SubscriptionDetail, SubscriptionList } from "./Subscriptions";
 import {
   SelectedNodesDialog,
   SelectionMaster,
@@ -141,6 +142,8 @@ function Modal({
     </Dialog.Root>
   );
 }
+// Kept during the 0.2.5 UI transition for legacy layout regression coverage.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function Empty({ text }: { text: string }) {
   return (
     <div className="empty">
@@ -287,7 +290,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.4</small>
+          <small>dx-dy v0.2.5</small>
         </div>
       </aside>
       <main>
@@ -374,7 +377,7 @@ function App() {
           )}
           {page === "subscriptions" &&
             (profile ? (
-              <ProfileDetail
+              <SubscriptionDetail
                 key={profile.id}
                 initial={profile}
                 nodes={nodes}
@@ -388,54 +391,14 @@ function App() {
                 collections={collections}
               />
             ) : (
-              <div className="profile-grid">
-                {profiles.length ? (
-                  profiles.map((p) => (
-                    <div className="card profile-card" key={p.id}>
-                      <div className="profile-top">
-                        <span className="profile-icon">
-                          <Layers size={22} />
-                        </span>
-                        <span className={p.enabled ? "state enabled" : "state"}>
-                          {p.enabled ? "启用" : "禁用"}
-                        </span>
-                      </div>
-                      <h2>{p.name}</h2>
-                      <p>{p.remark || "独立订阅配置"}</p>
-                      <div className="profile-meta">
-                        {p.node_ids.length} 个节点
-                        <span>{date(p.updated_at)}</span>
-                      </div>
-                      <SubscriptionActions
-                        profileId={p.id}
-                        name={p.name}
-                        copy={copy}
-                        notify={notify}
-                        compact
-                        deleteAction={
-                          <DeleteSubscriptionAction
-                            profileId={p.id}
-                            name={p.name}
-                            confirm={setConfirm}
-                            onDeleted={refresh}
-                          />
-                        }
-                      />
-                      <button
-                        className="profile-open"
-                        onClick={() => setProfile(p)}
-                      >
-                        管理订阅
-                        <ArrowRight size={16} />
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="card">
-                    <Empty text="还没有订阅" />
-                  </div>
-                )}
-              </div>
+              <SubscriptionList
+                profiles={profiles}
+                open={setProfile}
+                refresh={refresh}
+                notify={notify}
+                copy={copy}
+                confirm={setConfirm}
+              />
             ))}
           {page === "settings" && (
             <SettingsPage
@@ -1688,6 +1651,8 @@ function SubscriptionActions({
     </>
   );
 }
+// Kept during the 0.2.5 UI transition for legacy component regression coverage.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ProfileDetail({
   initial,
   nodes,
