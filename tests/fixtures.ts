@@ -19,6 +19,33 @@ export const vmess =
       insecure: "0",
     }),
   ).toString("base64");
+export const nonRfcVmessUuid = "22222222-2222-4222-f222-222222222222";
+export const nonRfcVmess =
+  "vmess://" +
+  Buffer.from(
+    JSON.stringify(
+      {
+        v: "2",
+        ps: "虚构非 RFC VMess",
+        add: "example.com",
+        port: "443",
+        id: nonRfcVmessUuid,
+        aid: "0",
+        scy: "auto",
+        net: "tcp",
+        type: "none",
+        host: "",
+        path: "",
+        tls: "tls",
+        sni: "example.com",
+        alpn: "",
+        fp: "",
+        insecure: "0",
+      },
+      null,
+      2,
+    ) + "\r\n",
+  ).toString("base64");
 export const fixtures = [
   ["Reality Vision", vless],
   [

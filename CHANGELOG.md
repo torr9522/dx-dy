@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-09
+
+### Fixed
+
+- Accept VMess 8-4-4-4-12 hexadecimal credentials used by compatible clients even when their UUID version or variant bits are not RFC-conformant.
+- Preserve VMess credential values losslessly across import, rendering, portable backup and Full Migration restore.
+- Improve VMess import failures with sanitized field-level credential diagnostics without exposing credential values.
+
+### Compatibility
+
+- VMess credential validation remains limited to exactly 32 hexadecimal digits in the standard hyphenated 8-4-4-4-12 shape; malformed or arbitrary identifiers remain rejected.
+- VLESS, TUIC and application UUID validation remains RFC-strict.
+- No database migration, backup format, subscription format, runtime dependency or installation layout changed.
+
 ## [0.2.3] - 2026-10-09
 
 ### Fixed

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ZodError } from "zod";
 import {
   parse as upstreamParse,
   uri,
@@ -7,6 +8,7 @@ import {
 import {
   configSchema,
   envelopeSchema,
+  vmessCredentialError,
   type Envelope,
   type NormalizedNode,
   type Json,
@@ -23,6 +25,17 @@ const vmessOwned = new Set(
   ),
 );
 const decode = (v: string) => decodeURIComponent(v.replace(/\+/g, " "));
+class NodeParseError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly field?: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "NodeParseError";
+  }
+}
 export function queryEntries(text: string) {
   const fragment = text.split("#")[0];
   const q = fragment.indexOf("?");
@@ -108,8 +121,25 @@ export function parseNode(input: string): Envelope {
     });
     generateURI(envelope);
     return envelope;
-  } catch {
-    throw new Error("链接解析失败：请检查协议、地址、端口、凭据和编码");
+  } catch (error) {
+    if (
+      original_uri.startsWith("vmess://") &&
+      error instanceof ZodError &&
+      error.issues.some(
+        (issue) =>
+          issue.path.join(".") === "uuid" &&
+          issue.message === vmessCredentialError,
+      )
+    )
+      throw new NodeParseError(
+        vmessCredentialError,
+        "INVALID_VMESS_CREDENTIAL",
+        "id",
+        { cause: error },
+      );
+    throw new Error("链接解析失败：请检查协议、地址、端口、凭据和编码", {
+      cause: error,
+    });
   }
 }
 export function generateURI(node: Envelope): string {
@@ -336,13 +366,18 @@ export function preview(text: string, existing: Envelope[] = []) {
           duplicate,
           error: null,
         };
-      } catch {
+      } catch (error) {
+        const known = error instanceof NodeParseError;
         return {
           index,
           status: "failure",
           envelope: null,
           duplicate: false,
-          error: "无法解析此行，请检查格式和必需参数",
+          error: known
+            ? error.message
+            : "无法解析此行，请检查格式和必需参数",
+          code: known ? error.code : "PARSE_ERROR",
+          field: known ? error.field : undefined,
         };
       }
     });

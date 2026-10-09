@@ -15,7 +15,7 @@ content. SQLite enables foreign keys, WAL and a busy timeout in
 - [`002_node_collections.sql`](../migrations/002_node_collections.sql): ordered
   Collections and many-to-many members.
 
-There is no migration after `002` in 0.2.3. Released migration files are
+There is no migration after `002` in 0.2.4. Released migration files are
 immutable.
 
 ## Forward Migration Safety

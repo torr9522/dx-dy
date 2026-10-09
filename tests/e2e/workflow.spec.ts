@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { fixtures, vless, vmess } from "../fixtures";
+import {
+  fixtures,
+  nonRfcVmess,
+  nonRfcVmessUuid,
+  vless,
+  vmess,
+} from "../fixtures";
 import QRCode from "qrcode";
 for (const width of [1280, 390, 320]) {
   test(`subscription card quick actions at ${width}px`, async ({
@@ -217,7 +223,7 @@ test("complete browser workflow with synthetic nodes", async ({
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   await page
     .getByLabel("节点链接", { exact: true })
-    .fill(vless + "\nINVALID\n" + vmess);
+    .fill(vless + "\nINVALID\n" + nonRfcVmess);
   await page.getByRole("button", { name: "解析预览", exact: true }).click();
   await expect(
     page.getByText("无法解析此行，请检查格式和必需参数"),
@@ -270,11 +276,17 @@ test("complete browser workflow with synthetic nodes", async ({
   expect(new URL(url).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{43}$/);
   const before = await context.request.get(url);
   expect(before.status()).toBe(200);
+  const firstRendered = Buffer.from(await before.text(), "base64")
+    .toString("utf8")
+    .split("\n")[0];
+  expect(firstRendered).toMatch(/^vmess:/);
   expect(
-    Buffer.from(await before.text(), "base64")
-      .toString("utf8")
-      .split("\n")[0],
-  ).toMatch(/^vmess:/);
+    JSON.parse(
+      Buffer.from(firstRendered.slice("vmess://".length), "base64").toString(
+        "utf8",
+      ),
+    ).id,
+  ).toBe(nonRfcVmessUuid);
   await universal.getByRole("button", { name: "二维码" }).click();
   await expect(
     page.getByRole("dialog").getByRole("link", { name: "订阅链接" }),

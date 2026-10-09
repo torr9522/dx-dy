@@ -18,7 +18,7 @@ the source of connection semantics.
 | Protocol | Current representation and notable coverage |
 | --- | --- |
 | VLESS | UUID, host/port, Reality/TLS/Vision flow, TCP/WS/gRPC/HTTPUpgrade/XHTTP, SNI, fingerprint, public key, short ID, SpiderX, ALPN and private query fields |
-| VMess | Base64 JSON including address/port/UUID, aid/security, transport/type/host/path, TLS/SNI/ALPN/fingerprint/insecure plus unknown JSON fields |
+| VMess | Base64 JSON including address/port, losslessly preserved 8-4-4-4-12 hexadecimal credential, aid/security, transport/type/host/path, TLS/SNI/ALPN/fingerprint/insecure plus unknown JSON fields |
 | Trojan | Password, host/port, TLS/SNI, transport and private query fields |
 | Shadowsocks | Standard userinfo cipher/password form, host/port, plugin/query data and display fragment |
 | Hysteria2 | `hysteria2://` and `hy2://`, password, host/port, TLS/SNI, bandwidth/obfuscation and retained private fields |
@@ -28,6 +28,12 @@ IPv6 authorities and percent-encoded values are covered by adapter regressions.
 The catch-all normalized schema plus ordered raw sidecar protects unrecognized
 fields from silent deletion. Preservation does not claim every private field is
 understood by every client.
+
+VMess credentials follow the ecosystem-compatible UUID-shaped representation:
+exactly 32 hexadecimal digits in 8-4-4-4-12 hyphenated form, without enforcing
+RFC UUID version or variant bits. This is scoped to VMess connection credentials;
+VLESS, TUIC and application UUIDs retain strict RFC validation. Arbitrary,
+unhyphenated, incorrectly grouped or non-hexadecimal values remain invalid.
 
 ## Rendering And Semantic Identity
 

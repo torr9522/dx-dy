@@ -24,7 +24,11 @@ import {
   validateDatabase,
   schemaVersions,
 } from "../apps/api/src/database-safety";
-import { vless, vmess } from "./fixtures";
+import {
+  nonRfcVmess,
+  nonRfcVmessUuid,
+  vless,
+} from "./fixtures";
 import { parseNode } from "../packages/proxy-adapter";
 const key = "4".repeat(64),
   password = "Synthetic-portable-password-123!";
@@ -207,7 +211,7 @@ describe("database migration and portability", () => {
       await agent
         .post("/api/nodes/import")
         .set("X-CSRF-Token", csrf)
-        .send({ items: [{ uri: vless }, { uri: vmess }] })
+        .send({ items: [{ uri: vless }, { uri: nonRfcVmess }] })
     ).body;
     const collection = (
       await agent
@@ -248,6 +252,12 @@ describe("database migration and portability", () => {
     expect(
       independent.prepare("SELECT COUNT(*) n FROM admin_sessions").get()?.n,
     ).toBe(0);
+    const portableVmess = independent
+      .prepare("SELECT normalized_config FROM nodes WHERE protocol='vmess'")
+      .get() as { normalized_config: string };
+    expect(JSON.parse(portableVmess.normalized_config).uuid).toBe(
+      nonRfcVmessUuid,
+    );
     integrity(independent);
     independent.close();
     run(["bundle", bundle], {
@@ -280,6 +290,10 @@ describe("database migration and portability", () => {
       );
       expect(b.store.settings().migration_setting).toBe("preserved");
       expect(b.store.nodes()).toEqual(sourceNodes);
+      expect(
+        b.store.nodes().find((node) => node.protocol === "vmess")
+          ?.normalized_config.uuid,
+      ).toBe(nonRfcVmessUuid);
       expect(b.store.collections()[0].name).toBe("Portable");
       expect(
         b.store

@@ -13,6 +13,8 @@
   perform live proxy connectivity tests.
 - Protocol preservation is broader than editable fields; retaining an unknown
   private parameter does not certify client support for it.
+- VMess accepts the established 8-4-4-4-12 hexadecimal credential shape without
+  requiring RFC UUID version/variant bits; this does not permit arbitrary IDs.
 - Conservative semantic fallback can miss an equivalent connection that cannot
   be safely canonicalized. It deliberately avoids suppressing distinct Nodes.
 - Web settings can change the canonical subscription origin but cannot safely

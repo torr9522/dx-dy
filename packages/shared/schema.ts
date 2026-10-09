@@ -29,6 +29,14 @@ export const jsonValue: z.ZodType<Json> = z.lazy(() =>
     ),
   ]),
 );
+export const vmessCredentialError =
+  "VMess ID 格式无效：应为 8-4-4-4-12 十六进制 credential";
+export const vmessCredentialSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    vmessCredentialError,
+  );
 export const configSchema = z
   .object({
     type: z.enum(protocols),
@@ -50,8 +58,14 @@ export const configSchema = z
   })
   .catchall(jsonValue)
   .superRefine((v, c) => {
+    if (v.type === "vmess" && !vmessCredentialSchema.safeParse(v.uuid).success)
+      c.addIssue({
+        code: "custom",
+        message: vmessCredentialError,
+        path: ["uuid"],
+      });
     if (
-      ["vless", "vmess", "tuic"].includes(v.type) &&
+      ["vless", "tuic"].includes(v.type) &&
       !z.uuid().safeParse(v.uuid).success
     )
       c.addIssue({ code: "custom", message: "UUID 格式无效", path: ["uuid"] });

@@ -7,7 +7,13 @@ import {
   encryptToken,
   randomToken,
 } from "../apps/api/src/security";
-import { vless, vmess, fixtures } from "./fixtures";
+import {
+  vless,
+  vmess,
+  nonRfcVmess,
+  nonRfcVmessUuid,
+  fixtures,
+} from "./fixtures";
 import { parseNode, generateURI } from "../packages/proxy-adapter";
 import type { NodeRecord } from "../packages/shared/schema";
 const password = "Synthetic-admin-password-123!";
@@ -44,7 +50,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.3",
+      version: "0.2.4",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -492,6 +498,30 @@ describe("API and domain regression", () => {
     });
     expect(p.status).toBe(200);
     expect(p.body[1].status).toBe("failure");
+    expect(system.store.nodes()).toHaveLength(0);
+  });
+  it("previews non-RFC UUID-shaped VMess credentials and sanitizes invalid IDs", async () => {
+    const accepted = await post("/api/nodes/preview", { text: nonRfcVmess });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body[0]).toMatchObject({
+      status: "success",
+      envelope: { normalized_config: { uuid: nonRfcVmessUuid } },
+    });
+    const object = JSON.parse(
+      Buffer.from(nonRfcVmess.slice(8), "base64").toString("utf8"),
+    );
+    object.id = "synthetic-invalid-credential";
+    const invalid =
+      "vmess://" + Buffer.from(JSON.stringify(object)).toString("base64");
+    const rejected = await post("/api/nodes/preview", { text: invalid });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body[0]).toMatchObject({
+      status: "failure",
+      code: "INVALID_VMESS_CREDENTIAL",
+      field: "id",
+      error: "VMess ID 格式无效：应为 8-4-4-4-12 十六进制 credential",
+    });
+    expect(JSON.stringify(rejected.body)).not.toContain(object.id);
     expect(system.store.nodes()).toHaveLength(0);
   });
   it("atomic batch import, shared nodes and schema metadata", async () => {

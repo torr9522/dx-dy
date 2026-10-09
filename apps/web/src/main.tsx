@@ -69,6 +69,8 @@ type Preview = {
   envelope: Envelope | null;
   duplicate: boolean;
   error: string | null;
+  code?: string;
+  field?: string;
 };
 const protocols = ["vless", "vmess", "trojan", "ss", "hysteria2", "tuic"];
 const date = (s: string) => new Date(s).toLocaleString();
@@ -285,7 +287,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.3</small>
+          <small>dx-dy v0.2.4</small>
         </div>
       </aside>
       <main>

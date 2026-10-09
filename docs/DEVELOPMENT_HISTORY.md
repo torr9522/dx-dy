@@ -137,3 +137,13 @@ ownership for the complete application data directory after restore. This keeps
 a root-run Full Migration restore from leaving its internal safety snapshots
 inaccessible to the unprivileged service account during a later portable restore.
 Schema and backup formats are unchanged.
+
+## 0.2.4 - VMess Credential Compatibility
+
+Scoped VMess credential validation to the ecosystem's lossless, hyphenated
+8-4-4-4-12 hexadecimal representation instead of applying the RFC UUID
+version/variant validator shared by VLESS and TUIC. Import preview now returns a
+stable field-level error for malformed VMess credentials without echoing the
+credential. Parser, renderer, semantic identity, portable backup and Full
+Migration regressions verify value preservation. No database migration or
+backup format change was introduced.

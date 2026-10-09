@@ -10,9 +10,95 @@ import {
   dedupeSubscriptionNodes,
   generateUniversalUriLines,
 } from "../packages/proxy-adapter";
-import { fixtures, vless, vmess, uuid } from "./fixtures";
+import {
+  fixtures,
+  nonRfcVmess,
+  nonRfcVmessUuid,
+  vless,
+  vmess,
+  uuid,
+} from "./fixtures";
 import { parse as parseYaml } from "yaml";
 describe("protocol adapter", () => {
+  it("accepts and losslessly renders UUID-shaped VMess credentials", () => {
+    for (const credential of [
+      uuid,
+      ...["a", "b", "c", "d", "e", "f"].map(
+        (variant) => `22222222-2222-4222-${variant}222-222222222222`,
+      ),
+      "AAAAAAAA-AAAA-4AAA-FAAA-AAAAAAAAAAAA",
+    ]) {
+      const object = JSON.parse(
+        Buffer.from(nonRfcVmess.slice(8), "base64").toString("utf8"),
+      );
+      object.id = credential;
+      const input =
+        "vmess://" +
+        Buffer.from(JSON.stringify(object, null, 2) + "\r\n").toString(
+          "base64",
+        );
+      const parsed = parseNode(input);
+      expect(parsed.original_uri).toBe(input);
+      expect(parsed.normalized_config.uuid).toBe(credential);
+      const rendered = JSON.parse(
+        Buffer.from(generateURI(parsed).slice(8), "base64").toString("utf8"),
+      );
+      expect(rendered.id).toBe(credential);
+      expect(parseNode(generateURI(parsed)).normalized_config.uuid).toBe(
+        credential,
+      );
+    }
+  });
+  it.each([
+    ["empty", ""],
+    ["non-hex", "22222222-2222-4222-g222-222222222222"],
+    ["wrong segment", "2222222-2222-4222-f222-222222222222"],
+    ["missing segment", "22222222-2222-4222-222222222222"],
+    ["extra segment", "22222222-2222-4222-f222-2222-22222222"],
+    ["truncated", "22222222-2222-4222-f222-22222222222"],
+    ["overlong", "22222222-2222-4222-f222-2222222222222"],
+    ["inner space", "22222222-2222-4222-f22 -222222222222"],
+    ["unhyphenated", "2222222222224222f222222222222222"],
+  ])("rejects malformed VMess credential: %s", (_name, credential) => {
+    const object = JSON.parse(
+      Buffer.from(nonRfcVmess.slice(8), "base64").toString("utf8"),
+    );
+    object.id = credential;
+    const input =
+      "vmess://" + Buffer.from(JSON.stringify(object)).toString("base64");
+    expect(() => parseNode(input)).toThrow(
+      "VMess ID 格式无效：应为 8-4-4-4-12 十六进制 credential",
+    );
+    expect(preview(input)[0]).toMatchObject({
+      status: "failure",
+      code: "INVALID_VMESS_CREDENTIAL",
+      field: "id",
+      error: "VMess ID 格式无效：应为 8-4-4-4-12 十六进制 credential",
+    });
+    if (credential)
+      expect(JSON.stringify(preview(input)[0])).not.toContain(credential);
+  });
+  it("keeps strict UUID semantics for VLESS and TUIC", () => {
+    expect(() => parseNode(vless.replace(uuid, nonRfcVmessUuid))).toThrow();
+    expect(() =>
+      parseNode(fixtures[10][1].replace(uuid, nonRfcVmessUuid)),
+    ).toThrow();
+  });
+  it("uses VMess credentials in semantic identity, not display names", () => {
+    const first = parseNode(nonRfcVmess);
+    const renamed = editConfig(first, {
+      ...first.normalized_config,
+      name: "另一个虚构名称",
+    });
+    const secondCredential = editConfig(first, {
+      ...first.normalized_config,
+      uuid: "33333333-3333-4333-f333-333333333333",
+    });
+    expect(getNodeSemanticKey(first)).toBe(getNodeSemanticKey(renamed));
+    expect(getNodeSemanticKey(first)).not.toBe(
+      getNodeSemanticKey(secondCredential),
+    );
+  });
   it("derives semantic identity from connection output, never display name", () => {
     const first = parseNode(vmess);
     const renamed = editConfig(first, {
