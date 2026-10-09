@@ -858,7 +858,7 @@ describe("API and domain regression", () => {
       error: { code: "NOT_FOUND", message: "订阅不可用" },
     });
   });
-  it("referenced node deletion requires confirmation and cascades", async () => {
+  it("referenced node deletion is blocked without changing relations", async () => {
     expect(
       (
         await agent
@@ -867,12 +867,14 @@ describe("API and domain regression", () => {
           .send({})
       ).status,
     ).toBe(409);
-    await agent
+    const confirmed = await agent
       .delete(`/api/nodes/${nodes[0]}`)
       .set("X-CSRF-Token", csrf)
       .send({ confirm: true });
-    expect(system.store.authorized(profile)).toHaveLength(1);
-    expect(system.store.authorized(second)).toHaveLength(1);
+    expect(confirmed.status).toBe(409);
+    expect(confirmed.body.error.code).toBe("REFERENCED");
+    expect(system.store.selectedNodes(profile)).toHaveLength(2);
+    expect(system.store.selectedNodes(second)).toHaveLength(2);
   });
   it("delete subscription revokes token without deleting global nodes", async () => {
     const globalNodes = system.store.all("SELECT * FROM nodes ORDER BY id");
@@ -883,7 +885,7 @@ describe("API and domain regression", () => {
     expect((await request(system.app).get(new URL(url).pathname)).status).toBe(
       404,
     );
-    expect(system.store.nodes()).toHaveLength(1);
+    expect(system.store.nodes()).toHaveLength(2);
     expect(system.store.all("SELECT * FROM nodes ORDER BY id")).toEqual(
       globalNodes,
     );
@@ -1045,6 +1047,89 @@ describe("subscription local nodes and unified ordering", () => {
         system.store.get(
           "SELECT COUNT(*) AS count FROM subscription_local_nodes WHERE subscription_id=?",
           subscription.id,
+        )?.count,
+      ).toBe(0);
+    } finally {
+      system.store.close();
+    }
+  });
+});
+
+describe("node deletion and enabled operations", () => {
+  it("protects references, deletes atomically and cleans collection memberships", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const post = (route: string, body: object) =>
+        agent.post(route).set("X-CSRF-Token", csrf).send(body);
+      const imported = (
+        await post("/api/nodes/import", {
+          items: fixtures.slice(0, 3).map(([name, uri]) => ({ name, uri })),
+        })
+      ).body as NodeRecord[];
+      const collection = (
+        await post("/api/collections", { name: "Delete cleanup" })
+      ).body as { id: number };
+      await post(`/api/collections/${collection.id}/nodes`, {
+        node_ids: imported.map((node) => node.id),
+      }).expect(200);
+      const subscription = (
+        await post("/api/subscriptions", { name: "Delete protection" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [imported[1].id] })
+        .expect(200);
+
+      await agent
+        .delete(`/api/nodes/${imported[1].id}`)
+        .set("X-CSRF-Token", csrf)
+        .send({ confirm: true })
+        .expect(409)
+        .expect(({ body }) => expect(body.error.code).toBe("REFERENCED"));
+      const blocked = await post("/api/nodes/batch-delete", {
+        node_ids: imported.map((node) => node.id),
+        confirm: true,
+      }).expect(409);
+      expect(blocked.body.error).toMatchObject({
+        code: "REFERENCED_NODES",
+        details: { referenced_count: 1 },
+      });
+      expect(system.store.nodes()).toHaveLength(3);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) count FROM node_collection_members WHERE collection_id=?",
+          collection.id,
+        )?.count,
+      ).toBe(3);
+
+      await agent
+        .patch(`/api/nodes/${imported[0].id}/enabled`)
+        .set("X-CSRF-Token", csrf)
+        .send({ enabled: false })
+        .expect(200);
+      expect(system.store.findNode(imported[0].id)?.enabled).toBe(false);
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [] })
+        .expect(200);
+      await post("/api/nodes/batch-delete", {
+        node_ids: imported.map((node) => node.id),
+        confirm: true,
+      })
+        .expect(200)
+        .expect(({ body }) => expect(body.deleted).toBe(3));
+      expect(system.store.nodes()).toHaveLength(0);
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) count FROM node_collection_members WHERE collection_id=?",
+          collection.id,
         )?.count,
       ).toBe(0);
     } finally {

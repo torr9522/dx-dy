@@ -24,11 +24,7 @@ import {
   validateDatabase,
   schemaVersions,
 } from "../apps/api/src/database-safety";
-import {
-  nonRfcVmess,
-  nonRfcVmessUuid,
-  vless,
-} from "./fixtures";
+import { nonRfcVmess, nonRfcVmessUuid, vless } from "./fixtures";
 import { parseNode } from "../packages/proxy-adapter";
 const key = "4".repeat(64),
   password = "Synthetic-portable-password-123!";
@@ -184,9 +180,7 @@ describe("database migration and portability", () => {
     const failing = new Store(failFile);
     await expect(failing.migrate(failDir)).rejects.toThrow();
     expect(
-      failing.get(
-        "SELECT name FROM sqlite_master WHERE name='rolled_back'",
-      ),
+      failing.get("SELECT name FROM sqlite_master WHERE name='rolled_back'"),
     ).toBeUndefined();
     expect(
       failing.get(
@@ -232,7 +226,7 @@ describe("database migration and portability", () => {
         .set("X-CSRF-Token", csrf)
         .send({ name: "Portable", remark: "test" })
     ).body;
-    for (const n of imported)
+    for (const [index, n] of imported.entries())
       await agent
         .patch(`/api/nodes/${n.id}`)
         .set("X-CSRF-Token", csrf)
@@ -240,7 +234,7 @@ describe("database migration and portability", () => {
           normalized_config: n.normalized_config,
           remark: n.remark,
           tags: ["portable"],
-          enabled: true,
+          enabled: index === 0,
           collection_ids: [collection.id],
         });
     const profile = (
@@ -337,6 +331,8 @@ describe("database migration and portability", () => {
       );
       expect(b.store.settings().migration_setting).toBe("preserved");
       expect(b.store.nodes()).toEqual(sourceNodes);
+      expect(b.store.findNode(imported[0].id)?.enabled).toBe(true);
+      expect(b.store.findNode(imported[1].id)?.enabled).toBe(false);
       expect(
         b.store.nodes().find((node) => node.protocol === "vmess")
           ?.normalized_config.uuid,
@@ -357,9 +353,9 @@ describe("database migration and portability", () => {
       expect(
         b.store.subscriptionEntries(profile.id).map((entry) => entry.source),
       ).toEqual(["local", "global", "global"]);
-      expect(
-        b.store.subscriptionEntries(profile.id)[0].node.original_uri,
-      ).toBe(localUri);
+      expect(b.store.subscriptionEntries(profile.id)[0].node.original_uri).toBe(
+        localUri,
+      );
       const restoredBody = (await request(b.app).get(new URL(url).pathname))
         .text;
       expect(createHash("sha256").update(restoredBody).digest("hex")).toBe(

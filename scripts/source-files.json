@@ -23,6 +23,7 @@
   "apps/api/src/security.ts",
   "apps/web/index.html",
   "apps/web/src/NodeLibrary.tsx",
+  "apps/web/src/QueuedSwitch.tsx",
   "apps/web/src/Subscriptions.tsx",
   "apps/web/src/api.ts",
   "apps/web/src/fields.ts",

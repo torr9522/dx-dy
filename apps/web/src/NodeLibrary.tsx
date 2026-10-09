@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import type {
@@ -22,6 +23,7 @@ import {
   shouldToggleRow,
   useNodeSelection,
 } from "./nodeSelection";
+import { QueuedSwitch } from "./QueuedSwitch";
 
 const protocols = ["vless", "vmess", "trojan", "ss", "hysteria2", "tuic"];
 const protocolLabel = (value: string) =>
@@ -233,6 +235,42 @@ export function NodeLibrary({
     if (activeId !== null && !collections.some((item) => item.id === activeId))
       chooseView(null);
   }, [activeId, collections]);
+  useEffect(() => {
+    const existing = new Set(nodes.map((node) => node.id));
+    const retained = selection.selectedIds.filter((id) => existing.has(id));
+    if (retained.length !== selection.selectedCount)
+      selection.replace(retained);
+  }, [
+    nodes,
+    selection.selectedIds,
+    selection.selectedCount,
+    selection.replace,
+  ]);
+
+  const deleteNodes = (selectedNodes: NodeRecord[]) => {
+    const count = selectedNodes.length;
+    confirm({
+      title: count === 1 ? "删除节点" : `删除已选（${count}）`,
+      text:
+        count === 1
+          ? `将永久删除 Global Node“${selectedNodes[0].name}”。正在被订阅使用的节点不能删除。`
+          : `将永久删除已选择的 ${count} 个 Global Nodes。只要其中任一节点仍被订阅使用，整个操作都会取消。`,
+      successMessage: count === 1 ? "节点已删除" : `已删除 ${count} 个节点`,
+      run: async () => {
+        if (count === 1)
+          await api(`/nodes/${selectedNodes[0].id}`, "DELETE", {
+            confirm: true,
+          });
+        else
+          await api("/nodes/batch-delete", "POST", {
+            node_ids: selectedNodes.map((node) => node.id),
+            confirm: true,
+          });
+        for (const node of selectedNodes) selection.removeOne(node.id);
+        await refresh();
+      },
+    });
+  };
 
   return (
     <div className="node-library card">
@@ -365,7 +403,6 @@ export function NodeLibrary({
                     <th>名称 / 集合</th>
                     <th>服务器</th>
                     <th>协议 / 标签</th>
-                    <th>状态</th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -455,14 +492,22 @@ export function NodeLibrary({
                         </div>
                       </td>
                       <td>
-                        <span
-                          className={node.enabled ? "state enabled" : "state"}
-                        >
-                          {node.enabled ? "启用" : "禁用"}
-                        </span>
-                      </td>
-                      <td>
                         <div className="row-actions">
+                          <QueuedSwitch
+                            enabled={node.enabled}
+                            label={(enabled) =>
+                              `${enabled ? "禁用" : "启用"}节点 ${node.name}`
+                            }
+                            persist={(enabled) =>
+                              api(`/nodes/${node.id}/enabled`, "PATCH", {
+                                enabled,
+                              })
+                            }
+                            changed={refresh}
+                            notify={notify}
+                            enabledMessage="节点已启用"
+                            disabledMessage="节点已禁用"
+                          />
                           {active && (
                             <button
                               onClick={async () => {
@@ -473,9 +518,18 @@ export function NodeLibrary({
                               从 {active.name} 移除
                             </button>
                           )}
-                          <button onClick={() => edit(node)}>编辑</button>
                           <button
+                            className="icon-button"
+                            aria-label={`编辑 ${node.name}`}
+                            title="编辑节点"
+                            onClick={() => edit(node)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            className="icon-button"
                             aria-label={`复制 ${node.name}`}
+                            title="复制节点链接"
                             onClick={async () => {
                               const result = await api<{ uri: string }>(
                                 `/nodes/${node.id}/uri`,
@@ -484,6 +538,14 @@ export function NodeLibrary({
                             }}
                           >
                             <Copy size={15} />
+                          </button>
+                          <button
+                            className="icon-button danger-text"
+                            aria-label={`删除 ${node.name}`}
+                            title="删除节点"
+                            onClick={() => deleteNodes([node])}
+                          >
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>
@@ -513,6 +575,17 @@ export function NodeLibrary({
             )}
             <button onClick={() => setReviewOpen(true)}>
               查看已选择 {selection.selectedCount} 个
+            </button>
+            <button
+              className="danger-text"
+              onClick={() =>
+                deleteNodes(
+                  nodes.filter((node) => selection.selected.has(node.id)),
+                )
+              }
+            >
+              <Trash2 size={14} />
+              删除已选（{selection.selectedCount}）
             </button>
             <button onClick={selection.clearAll}>清空选择</button>
           </div>

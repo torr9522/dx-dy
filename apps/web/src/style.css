@@ -1478,9 +1478,7 @@ pre {
   .node-table th:nth-child(3),
   .node-table td:nth-child(3),
   .node-table th:nth-child(4),
-  .node-table td:nth-child(4),
-  .node-table th:nth-child(5),
-  .node-table td:nth-child(5) {
+  .node-table td:nth-child(4) {
     display: none;
   }
   .node-table td:nth-child(2) {
@@ -1875,7 +1873,10 @@ pre {
   .subscription-node-row .source-badge {
     grid-column: 2;
   }
-  .subscription-node-row[data-source="local"] .subscription-node-main + .source-badge + button {
+  .subscription-node-row[data-source="local"]
+    .subscription-node-main
+    + .source-badge
+    + button {
     grid-column: 3;
     grid-row: 1;
   }

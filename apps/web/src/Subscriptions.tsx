@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   DndContext,
@@ -54,6 +54,7 @@ import {
   useNodeSelection,
 } from "./nodeSelection";
 import { buildShadowrocketSubscriptionLink } from "./subscriptionLinks";
+import { QueuedSwitch } from "./QueuedSwitch";
 
 type ConfirmSetter = (
   value: {
@@ -245,55 +246,22 @@ function EnabledSwitch({
   changed: () => Promise<void>;
   notify: (message: string) => void;
 }) {
-  const [enabled, setEnabled] = useState(profile.enabled);
-  const desired = useRef(profile.enabled);
-  const persisted = useRef(profile.enabled);
-  const working = useRef(false);
-  useEffect(() => {
-    desired.current = profile.enabled;
-    persisted.current = profile.enabled;
-    setEnabled(profile.enabled);
-  }, [profile.enabled]);
-  const flush = async () => {
-    if (working.current) return;
-    working.current = true;
-    try {
-      while (persisted.current !== desired.current) {
-        const target = desired.current;
-        await api(`/subscriptions/${profile.id}`, "PATCH", {
+  return (
+    <QueuedSwitch
+      enabled={profile.enabled}
+      label={(enabled) => `${enabled ? "禁用" : "启用"}订阅 ${profile.name}`}
+      persist={(enabled) =>
+        api(`/subscriptions/${profile.id}`, "PATCH", {
           name: profile.name,
           remark: profile.remark,
-          enabled: target,
-        });
-        persisted.current = target;
+          enabled,
+        })
       }
-      await changed();
-      notify(persisted.current ? "订阅已启用" : "订阅已禁用");
-    } catch (error) {
-      desired.current = persisted.current;
-      setEnabled(persisted.current);
-      notify((error as Error).message);
-    } finally {
-      working.current = false;
-      if (persisted.current !== desired.current) void flush();
-    }
-  };
-  return (
-    <button
-      className={`switch-control${enabled ? " is-on" : ""}`}
-      role="switch"
-      aria-checked={enabled}
-      aria-label={`${enabled ? "禁用" : "启用"}订阅 ${profile.name}`}
-      onClick={() => {
-        const next = !desired.current;
-        desired.current = next;
-        setEnabled(next);
-        void flush();
-      }}
-    >
-      <span aria-hidden="true" />
-      {enabled ? "启用" : "禁用"}
-    </button>
+      changed={changed}
+      notify={notify}
+      enabledMessage="订阅已启用"
+      disabledMessage="订阅已禁用"
+    />
   );
 }
 
@@ -451,6 +419,7 @@ function LibrarySelector({
   initialIds,
   close,
   saved,
+  finish,
   notify,
   confirm,
 }: {
@@ -460,6 +429,7 @@ function LibrarySelector({
   initialIds: number[];
   close: () => void;
   saved: () => Promise<void>;
+  finish: () => void;
   notify: (message: string) => void;
   confirm: ConfirmSetter;
 }) {
@@ -539,7 +509,7 @@ function LibrarySelector({
               });
               await saved();
               notify("节点选择已保存");
-              close();
+              finish();
             } catch (error) {
               notify((error as Error).message);
             } finally {
@@ -699,7 +669,7 @@ function LibrarySelector({
               });
               await saved();
               notify("节点选择已保存");
-              close();
+              finish();
             } catch (error) {
               notify((error as Error).message);
             } finally {
@@ -727,11 +697,13 @@ function LocalImport({
   profileId,
   close,
   saved,
+  finish,
   notify,
 }: {
   profileId: number;
   close: () => void;
   saved: () => Promise<void>;
+  finish: () => void;
   notify: (message: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -918,7 +890,7 @@ function LocalImport({
                   );
                   await saved();
                   notify(`已添加 ${selected.size} 个独立节点`);
-                  close();
+                  finish();
                 } catch (error) {
                   notify((error as Error).message);
                 } finally {
@@ -1182,6 +1154,7 @@ export function SubscriptionDetail({
           .map((entry) => entry.node.id)}
         close={() => setView("add")}
         saved={reloadEntries}
+        finish={() => setView("main")}
         notify={common.notify}
         confirm={common.confirm}
       />
@@ -1192,6 +1165,7 @@ export function SubscriptionDetail({
         profileId={profile.id}
         close={() => setView("add")}
         saved={reloadEntries}
+        finish={() => setView("main")}
         notify={common.notify}
       />
     );

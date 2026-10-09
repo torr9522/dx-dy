@@ -219,6 +219,14 @@ export class Store {
       id,
     );
   }
+  setNodeEnabled(id: number, enabled: boolean) {
+    this.run(
+      "UPDATE nodes SET enabled=?,updated_at=? WHERE id=?",
+      Number(enabled),
+      now(),
+      id,
+    );
+  }
   localNode(row: Row): NodeRecord {
     const envelope = envelopeSchema.parse({
       ...row,
@@ -455,7 +463,10 @@ export class Store {
         id,
       ))
         if (!selected.has(Number(row.node_id)))
-          this.run("DELETE FROM subscription_entries WHERE id=?", Number(row.id));
+          this.run(
+            "DELETE FROM subscription_entries WHERE id=?",
+            Number(row.id),
+          );
       this.compactEntries(id);
       const remaining = this.subscriptionEntries(id);
       const existingByNodeId = new Map(
@@ -478,11 +489,11 @@ export class Store {
           appendedEntryIds.push(
             Number(
               this.run(
-            "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'global',?,NULL,?,?)",
-            id,
-            nodeId,
-            position++,
-            now(),
+                "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'global',?,NULL,?,?)",
+                id,
+                nodeId,
+                position++,
+                now(),
               ).lastInsertRowid,
             ),
           );

@@ -157,18 +157,24 @@ test("subscription switch rolls back failures and coalesces rapid changes", asyn
   await page.unroute(`**/api/subscriptions/${profile.id}`);
 
   let writes = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
   await page.route(`**/api/subscriptions/${profile.id}`, async (route) => {
     if (route.request().method() !== "PATCH") return route.continue();
     writes += 1;
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
     await new Promise((resolve) => setTimeout(resolve, 120));
     await route.continue();
+    inFlight -= 1;
   });
   await toggle.click();
   await toggle.click();
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await expect(page.locator(".toast")).toContainText("订阅已启用");
-  expect(writes).toBeLessThanOrEqual(2);
+  expect(writes).toBeLessThanOrEqual(3);
+  expect(maxInFlight).toBe(1);
   await page.reload();
   await page.getByRole("button", { name: "订阅", exact: true }).click();
   await expect(
@@ -304,7 +310,11 @@ test("complete browser workflow with synthetic nodes", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "创建订阅", exact: true })
     .click();
-  await page.getByRole("button", { name: "管理订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: "E2E iPhone" })
+    .getByRole("button", { name: "管理订阅", exact: true })
+    .click();
   await expect(page.locator(".picker-node")).toHaveCount(0);
   await page.getByRole("button", { name: "添加节点", exact: true }).click();
   await page.getByRole("button", { name: /从节点库选择节点/ }).click();
@@ -334,7 +344,8 @@ test("complete browser workflow with synthetic nodes", async ({
     .getByRole("checkbox")
     .check();
   await page.getByRole("button", { name: "保存并返回" }).click();
-  await page.getByRole("button", { name: "返回订阅", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /已保存节点/ })).toBeVisible();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(2);
   await page.getByLabel("下移 E2E VLESS").click();
   await expect(page.locator(".subscription-node-row").first()).toContainText(
     "E2E VMess",
@@ -409,6 +420,325 @@ test("complete browser workflow with synthetic nodes", async ({
       headers,
       data: { confirm: true },
     });
+});
+
+test("global selector save returns to persisted main view and survives reload", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("Synthetic-e2e-password-123!");
+  await page.getByRole("button", { name: "安全登录" }).click();
+  await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
+  const headers = { "X-CSRF-Token": csrf };
+  const importResponse = await context.request.post("/api/nodes/import", {
+    headers,
+    data: {
+      items: fixtures.slice(1, 4).map(([name, uri]) => ({
+        name: `Persisted ${name}`,
+        uri,
+      })),
+    },
+  });
+  expect(importResponse.ok()).toBeTruthy();
+  const imported = await importResponse.json();
+  const profileResponse = await context.request.post("/api/subscriptions", {
+    headers,
+    data: { name: "Persisted selector E2E" },
+  });
+  expect(profileResponse.ok()).toBeTruthy();
+  const profile = await profileResponse.json();
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await page.getByRole("button", { name: "添加节点", exact: true }).click();
+  await page.getByRole("button", { name: /从节点库选择节点/ }).click();
+  for (const node of imported.slice(0, 2))
+    await page
+      .getByRole("checkbox", { name: `选择订阅节点 ${node.name}` })
+      .check();
+  await page.getByRole("button", { name: "保存并返回" }).click();
+  await expect(page.getByRole("heading", { name: /已保存节点/ })).toBeVisible();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(2);
+  expect(
+    (
+      await (
+        await context.request.get(`/api/subscriptions/${profile.id}/entries`)
+      ).json()
+    ).map((entry: { node: { id: number } }) => entry.node.id),
+  ).toEqual(imported.slice(0, 2).map((node: { id: number }) => node.id));
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(2);
+  const url = (
+    await (
+      await context.request.get(`/api/subscriptions/${profile.id}/url`)
+    ).json()
+  ).url;
+  expect(
+    Buffer.from(await (await context.request.get(url)).text(), "base64")
+      .toString("utf8")
+      .split("\n"),
+  ).toHaveLength(2);
+  await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
+  for (const node of imported)
+    await context.request.delete(`/api/nodes/${node.id}`, {
+      headers,
+      data: { confirm: true },
+    });
+});
+
+test("single local link returns to main, persists and stays out of Global Library", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("Synthetic-e2e-password-123!");
+  await page.getByRole("button", { name: "安全登录" }).click();
+  await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
+  const headers = { "X-CSRF-Token": csrf };
+  const profile = await (
+    await context.request.post("/api/subscriptions", {
+      headers,
+      data: { name: "Single Local E2E" },
+    })
+  ).json();
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await page.getByRole("button", { name: "添加节点", exact: true }).click();
+  await page.getByRole("button", { name: /添加节点链接/ }).click();
+  await page.getByLabel("独立节点链接").fill(nonRfcVmess);
+  await page.getByRole("button", { name: "解析预览" }).click();
+  await page.getByLabel("独立节点第 1 行名称").fill("Single Local VMess");
+  await page.getByRole("button", { name: "确认添加" }).click();
+  await expect(page.getByRole("heading", { name: /已保存节点/ })).toBeVisible();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(1);
+  await expect(page.locator(".subscription-node-row")).toContainText(
+    "独立节点",
+  );
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await expect(
+    page.getByText("Single Local VMess", { exact: true }),
+  ).toBeVisible();
+  const url = (
+    await (
+      await context.request.get(`/api/subscriptions/${profile.id}/url`)
+    ).json()
+  ).url;
+  expect(
+    Buffer.from(await (await context.request.get(url)).text(), "base64")
+      .toString("utf8")
+      .split("\n"),
+  ).toHaveLength(1);
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page
+    .getByLabel("搜索全部节点", { exact: true })
+    .fill("Single Local VMess");
+  await expect(page.getByText("没有匹配的节点")).toBeVisible();
+  await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
+});
+
+test("Node Library delete and enabled Switch are transactional and responsive", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await page
+    .getByLabel("密码", { exact: true })
+    .fill("Synthetic-e2e-password-123!");
+  await page.getByRole("button", { name: "安全登录" }).click();
+  await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
+  const headers = { "X-CSRF-Token": csrf };
+  const imported = await (
+    await context.request.post("/api/nodes/import", {
+      headers,
+      data: {
+        items: fixtures.slice(1, 5).map(([name, uri], index) => ({
+          name: `Node Ops ${index + 1} ${name}`,
+          uri: uri.replace(
+            "@example.com",
+            `@node-ops-${index + 1}.example.com`,
+          ),
+        })),
+      },
+    })
+  ).json();
+  const collection = await (
+    await context.request.post("/api/collections", {
+      headers,
+      data: { name: "Node Ops Collection" },
+    })
+  ).json();
+  await context.request.post(`/api/collections/${collection.id}/nodes`, {
+    headers,
+    data: { node_ids: imported.map((node: { id: number }) => node.id) },
+  });
+  const profile = await (
+    await context.request.post("/api/subscriptions", {
+      headers,
+      data: { name: "Node Ops Reference" },
+    })
+  ).json();
+  await context.request.put(`/api/subscriptions/${profile.id}/nodes`, {
+    headers,
+    data: { node_ids: [imported[1].id] },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByLabel("搜索全部节点", { exact: true }).fill("Node Ops");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page
+      .locator("tr")
+      .filter({ hasText: imported[0].name })
+      .getByRole("switch"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `删除 ${imported[0].name}` }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const firstRow = page.locator("tr").filter({ hasText: imported[0].name });
+  const firstSwitch = firstRow.getByRole("switch");
+  await firstSwitch.click();
+  await expect(page.locator(".toast")).toContainText("节点已禁用");
+  await page.reload();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByLabel("搜索全部节点", { exact: true }).fill("Node Ops");
+  const refreshedSwitch = page
+    .locator("tr")
+    .filter({ hasText: imported[0].name })
+    .getByRole("switch");
+  await expect(refreshedSwitch).toHaveAttribute("aria-checked", "false");
+  await page.getByLabel("搜索全部节点状态").selectOption("disabled");
+  await expect(refreshedSwitch).toBeVisible();
+  await page.getByLabel("搜索全部节点状态").selectOption("");
+  await page.route(`**/api/nodes/${imported[0].id}/enabled`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { message: "Synthetic node switch failure" },
+      }),
+    }),
+  );
+  await refreshedSwitch.click();
+  await expect(page.locator(".toast")).toContainText(
+    "Synthetic node switch failure",
+  );
+  await expect(refreshedSwitch).toHaveAttribute("aria-checked", "false");
+  await page.unroute(`**/api/nodes/${imported[0].id}/enabled`);
+  let writes = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  await page.route(`**/api/nodes/${imported[0].id}/enabled`, async (route) => {
+    writes += 1;
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await route.continue();
+    inFlight -= 1;
+  });
+  await refreshedSwitch.click();
+  await refreshedSwitch.click();
+  await refreshedSwitch.click();
+  await expect(page.locator(".toast")).toContainText("节点已启用");
+  expect(writes).toBeLessThanOrEqual(3);
+  expect(maxInFlight).toBe(1);
+  await page.unroute(`**/api/nodes/${imported[0].id}/enabled`);
+  await page.getByLabel("搜索全部节点状态").selectOption("disabled");
+  await expect(
+    page.locator("tr").filter({ hasText: imported[0].name }),
+  ).toHaveCount(0);
+  await page.getByLabel("搜索全部节点状态").selectOption("");
+
+  const thirdRow = page.locator("tr").filter({ hasText: imported[2].name });
+  await thirdRow
+    .getByRole("button", { name: `删除 ${imported[2].name}` })
+    .click();
+  await page
+    .getByRole("dialog", { name: "删除节点" })
+    .getByRole("button", { name: "取消" })
+    .click();
+  await expect(thirdRow).toBeVisible();
+  await thirdRow
+    .getByRole("button", { name: `删除 ${imported[2].name}` })
+    .click();
+  await page
+    .getByRole("dialog", { name: "删除节点" })
+    .getByRole("button", { name: "确认" })
+    .click();
+  await expect(thirdRow).toHaveCount(0);
+  expect(
+    (await (await context.request.get("/api/collections")).json()).find(
+      (item: { id: number }) => item.id === collection.id,
+    ).node_count,
+  ).toBe(3);
+
+  for (const node of [imported[0], imported[1], imported[3]])
+    await page.getByRole("checkbox", { name: `选择 ${node.name}` }).check();
+  await page.getByRole("button", { name: "删除已选（3）" }).click();
+  await page
+    .getByRole("dialog", { name: "删除已选（3）" })
+    .getByRole("button", { name: "确认" })
+    .click();
+  await expect(page.locator(".toast")).toContainText("1 个节点仍被订阅使用");
+  await expect(
+    page.getByText("已选择 3 个节点", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "删除已选（3）" })
+    .getByRole("button", { name: "取消" })
+    .click();
+  await context.request.put(`/api/subscriptions/${profile.id}/nodes`, {
+    headers,
+    data: { node_ids: [] },
+  });
+  await page.getByRole("button", { name: "删除已选（3）" }).click();
+  await page
+    .getByRole("dialog", { name: "删除已选（3）" })
+    .getByRole("button", { name: "确认" })
+    .click();
+  await expect(page.getByText("已选择 3 个节点", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("没有匹配的节点")).toBeVisible();
+
+  await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
+  await context.request.delete(`/api/collections/${collection.id}`, {
+    headers,
+  });
 });
 
 test("filtered selection accumulates, supports rows and visible shift ranges", async ({
@@ -831,7 +1161,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
     await page.getByLabel(`独立节点第 ${index + 1} 行名称`).fill(names[index]);
   await page.getByRole("button", { name: "确认添加" }).click();
   await expect(page.locator(".toast")).toContainText("已添加 6 个独立节点");
-  await page.getByRole("button", { name: "返回订阅", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /已保存节点/ })).toBeVisible();
   await expect(page.locator(".subscription-node-row")).toHaveCount(6);
   for (const name of names)
     await expect(
@@ -844,7 +1174,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
     .getByRole("checkbox", { name: "选择订阅节点 Global Library WS" })
     .check();
   await page.getByRole("button", { name: "保存并返回" }).click();
-  await page.getByRole("button", { name: "返回订阅", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /已保存节点/ })).toBeVisible();
   await expect(page.locator(".subscription-node-row")).toHaveCount(7);
   await page.getByLabel("上移 Global Library WS").click();
   await page.getByLabel("上移 Global Library WS").click();

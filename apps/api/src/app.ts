@@ -570,17 +570,58 @@ export async function createApp(options: Options) {
   });
   app.delete("/api/nodes/:id", (req, res) => {
     const n = getNode(req);
-    if (
-      n.references &&
-      !z.object({ confirm: z.literal(true) }).safeParse(req.body).success
-    )
+    if (n.references)
       return fail(
         409,
         "REFERENCED",
-        `该节点被 ${n.references} 个订阅引用，请确认删除`,
+        `该节点正在被 ${n.references} 个订阅使用，请先从订阅中移除`,
       );
+    z.object({ confirm: z.literal(true) }).parse(req.body);
     store.run("DELETE FROM nodes WHERE id=?", n.id);
     res.json({ ok: true });
+  });
+  app.post("/api/nodes/batch-delete", (req, res) => {
+    const { node_ids } = z
+      .object({
+        node_ids: z
+          .array(z.number().int().positive())
+          .min(1)
+          .max(1000)
+          .refine((values) => new Set(values).size === values.length),
+        confirm: z.literal(true),
+      })
+      .parse(req.body);
+    const byId = new Map(store.nodes().map((node) => [node.id, node]));
+    if (node_ids.some((nodeId) => !byId.has(nodeId)))
+      return fail(400, "NODE", "含不存在的节点");
+    const referenced = node_ids
+      .map((nodeId) => byId.get(nodeId)!)
+      .filter((node) => node.references > 0);
+    if (referenced.length)
+      throw new ApiError(
+        409,
+        "REFERENCED_NODES",
+        `${referenced.length} 个节点仍被订阅使用，请先从订阅中移除`,
+        {
+          referenced_count: referenced.length,
+          nodes: referenced.map((node) => ({
+            id: node.id,
+            name: node.name,
+            references: node.references,
+          })),
+        },
+      );
+    store.transaction(() => {
+      for (const nodeId of node_ids)
+        store.run("DELETE FROM nodes WHERE id=?", nodeId);
+    });
+    res.json({ ok: true, deleted: node_ids.length });
+  });
+  app.patch("/api/nodes/:id/enabled", (req, res) => {
+    const n = getNode(req);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+    store.setNodeEnabled(n.id, enabled);
+    res.json(store.findNode(n.id));
   });
   const getProfile = (req: Request) =>
     store.get("SELECT * FROM subscriptions WHERE id=?", id(req)) ||
