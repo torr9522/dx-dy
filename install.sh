@@ -83,14 +83,7 @@ install_dependencies() {
   [[ "$TEST_MODE" == 1 ]] && return
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl gnupg jq openssl tar gzip xz-utils coreutils util-linux iproute2 dnsutils libatomic1
-  if ! have caddy; then
-    install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt -o /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update
-    apt-get install -y caddy
-  fi
+  apt-get install -y ca-certificates curl jq openssl tar gzip xz-utils coreutils util-linux iproute2 dnsutils libatomic1 caddy
   if ! have systemctl || ! have caddy; then die "systemd and Caddy are required."; fi
 }
 

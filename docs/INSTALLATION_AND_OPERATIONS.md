@@ -4,7 +4,7 @@
 
 Supported hosts are Debian 12 and Ubuntu 22.04/24.04 on amd64/arm64. From a root shell, including a minimal host without curl, use the primary README bootstrap command. It uses Bash and apt to install `ca-certificates` and `curl` only when required, downloads the installer over verified HTTPS to a temporary file, executes it and removes that file on exit. Hosts that already have curl and trusted CA certificates may use the shorter process-substitution command.
 
-The installer verifies OS/architecture/network/disk/ports, installs required host libraries including `libatomic1`, downloads the matching GitHub Release artifact and SHA-256, and installs official Caddy. Node 26.10.0 is bundled in the release; Docker, Node, npm, pnpm, Git and a container runtime are not user prerequisites.
+The installer verifies OS/architecture/network/disk/ports, installs required host libraries including `libatomic1` and the distribution Caddy package, then downloads the matching GitHub Release artifact and SHA-256. Node 26.10.0 is bundled in the release; Docker, Node, npm, pnpm, Git and a container runtime are not user prerequisites. Fresh installation does not add or depend on an external Caddy package repository.
 
 Before committing installation state, the installer starts the staged bundled Node binary and imports the staged Argon2 production dependency. A missing host library or unusable native addon fails at this point without installing the manager, configuration, systemd unit or release directory.
 

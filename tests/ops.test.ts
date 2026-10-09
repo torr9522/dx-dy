@@ -262,7 +262,8 @@ describe("native installer", () => {
     const installer = readFileSync("install.sh", "utf8");
     expect(installer).not.toMatch(/ghcr\.io|podman|nerdctl/);
     expect(installer).not.toContain("install docker");
-    expect(installer).toContain("dnsutils libatomic1");
+    expect(installer).toContain("dnsutils libatomic1 caddy");
+    expect(installer).not.toContain("dl.cloudsmith.io");
     expect(installer).toContain('cd "$INSTALL_ROOT/current/app"');
   });
 

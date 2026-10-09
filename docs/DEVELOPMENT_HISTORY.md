@@ -124,3 +124,6 @@ the existing master key. Ambiguous partial installations remain rejected.
 The Caddy import is appended without an extra separator line, so repeated
 uninstall/reinstall cycles restore a previously formatted Caddyfile byte-for-byte
 instead of accumulating whitespace and formatter warnings.
+Fresh installation now obtains Caddy from the supported distribution repository;
+it no longer adds the external Cloudsmith repository whose availability blocked
+dependency bootstrap during acceptance.

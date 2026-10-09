@@ -8,6 +8,7 @@
 
 - Added a Fresh Debian/Ubuntu bootstrap command that installs `curl` and CA certificates when absent before securely downloading the public installer.
 - Added the Debian/Ubuntu `libatomic1` runtime dependency required by the bundled Node.js 26.10.0 binary on a minimal Debian 12 host.
+- Install Caddy from the supported Debian/Ubuntu repositories instead of depending on the external Cloudsmith package repository during Fresh Install.
 - Added a bundled Node and production dependency preflight before the installer commits configuration, manager, systemd or release state.
 - Removed the exact dx-dy import from the host Caddyfile during normal uninstall and Full Purge so Caddy never retains a dangling include.
 - Made Caddy import installation whitespace-neutral so repeated uninstall/reinstall cycles do not produce formatting warnings.
