@@ -117,3 +117,7 @@ import line while retaining unrelated Caddy configuration. Schema, backup
 formats and business behavior are unchanged. Native administrator, database and
 domain CLIs also run from the installed app directory, matching systemd and
 making migration discovery independent of the invoking shell directory.
+Normal uninstall followed by reinstall is now an explicit retained-data mode:
+the installer requires the program/manager/unit to be absent and the protected
+config/environment/database to be present, then reuses domains, credentials and
+the existing master key. Ambiguous partial installations remain rejected.

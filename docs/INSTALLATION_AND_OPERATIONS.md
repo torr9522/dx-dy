@@ -47,6 +47,8 @@ dx-dy uninstall
 
 `stop` stops only the application. Logs use `journalctl`. Doctor checks systemd, services, health, SQLite integrity/FKs, DNS/TLS, localhost binding, permissions, symlink/release metadata and disk. Default uninstall removes program/service/manager but preserves config, database and backups; full purge requires `DELETE`. Both modes remove the exact dx-dy import from the host Caddyfile while preserving unrelated Caddy configuration. Caddy is never uninstalled automatically.
 
+Running the installer after default uninstall enters retained-data reinstall mode. It requires the manager, program tree and systemd unit to be absent while protected config, environment and database files remain present. It restores the native program and routing while retaining domains, administrator data, subscription Tokens and `APP_MASTER_KEY`. Any ambiguous partial layout is rejected instead of guessed.
+
 ## Update And Rollback
 
 Update reads the latest public manifest, chooses the installed architecture, verifies SHA-256, creates a WAL-safe DB backup, extracts a new version directory, stops the app and atomically switches `current`. Failed start/health restores the old link and DB backup. Current, previous and a small recent set are retained.

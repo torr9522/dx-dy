@@ -18,7 +18,9 @@ CADDY_IMPORT="$CADDY_DIR/dx-dy.caddy"
 STAGING=""
 LEGACY_MODE=0
 LEGACY_RUNNING=0
+REINSTALL_MODE=0
 GENERATED_PASSWORD=0
+PRESERVED_MASTER_KEY=""
 DXDY_REPOSITORY="${DXDY_REPOSITORY:-$DXDY_DEFAULT_REPOSITORY}"
 
 cleanup() { [[ -z "$STAGING" ]] || rm -rf -- "$STAGING"; }
@@ -98,8 +100,24 @@ legacy_compose() {
 
 detect_existing() {
   if [[ -f "$CONFIG_DIR/install.conf" ]]; then
-    if grep -q '^DXDY_RELEASE_MODEL=native-systemd$' "$CONFIG_DIR/install.conf"; then die $'dx-dy native is already installed.\nUse: dx-dy update'; fi
-    if [[ -f "$INSTALL_ROOT/docker-compose.yml" ]] && have docker; then
+    if grep -q '^DXDY_RELEASE_MODEL=native-systemd$' "$CONFIG_DIR/install.conf"; then
+      if [[ -x "$MANAGER_PATH" && -L "$INSTALL_ROOT/current" && -f "$SYSTEMD_DIR/dx-dy.service" ]]; then
+        die $'dx-dy native is already installed.\nUse: dx-dy update'
+      fi
+      if [[ ! -e "$MANAGER_PATH" && ! -e "$INSTALL_ROOT" && ! -e "$SYSTEMD_DIR/dx-dy.service" && -f "$CONFIG_DIR/dx-dy.env" && -f "$DATA_DIR/dx-dy.db" ]]; then
+        REINSTALL_MODE=1
+        ADMIN_DOMAIN="$(sed -n 's/^DXDY_ADMIN_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
+        SUBSCRIPTION_DOMAIN="$(sed -n 's/^DXDY_SUBSCRIPTION_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
+        DXDY_INTERNAL_PORT="$(sed -n 's/^DXDY_INTERNAL_PORT=//p' "$CONFIG_DIR/install.conf" | head -1)"
+        PRESERVED_MASTER_KEY="$(sed -n 's/^APP_MASTER_KEY=//p' "$CONFIG_DIR/dx-dy.env" | head -1)"
+        valid_hostname "$ADMIN_DOMAIN" || die "Retained admin domain is invalid."
+        valid_hostname "$SUBSCRIPTION_DOMAIN" || die "Retained subscription domain is invalid."
+        [[ "$PRESERVED_MASTER_KEY" =~ ^[a-f0-9]{64}$ ]] || die "Retained APP_MASTER_KEY is invalid."
+        info "Retained native data detected; reinstalling without changing credentials."
+      else
+        die "An incomplete native installation exists; use a verified backup and Full Purge before reinstalling."
+      fi
+    elif [[ -f "$INSTALL_ROOT/docker-compose.yml" ]] && have docker; then
       LEGACY_MODE=1
       if legacy_compose ps -q app 2>/dev/null | grep -q .; then LEGACY_RUNNING=1; fi
     else die "An unrecognized dx-dy installation already exists."; fi
@@ -235,7 +253,7 @@ render_caddy() {
 }
 
 write_config() {
-  local master_key="${LEGACY_MASTER_KEY:-$(openssl rand -hex 32)}"
+  local master_key="${LEGACY_MASTER_KEY:-${PRESERVED_MASTER_KEY:-$(openssl rand -hex 32)}}"
   umask 077
   cat >"$STAGING/install.conf" <<EOF
 DXDY_VERSION=$DXDY_VERSION
@@ -339,6 +357,8 @@ initialize_and_start() {
   if [[ "$LEGACY_MODE" == 1 ]]; then
     [[ -f "$LEGACY_DATABASE" ]] || die "Legacy database path was not found."
     cp -a "$LEGACY_DATABASE" "$DATA_DIR/dx-dy.db"; chown dx-dy:dx-dy "$DATA_DIR/dx-dy.db"
+  elif [[ "$REINSTALL_MODE" == 1 ]]; then
+    [[ -f "$DATA_DIR/dx-dy.db" ]] || die "Retained database was not found."
   else printf '%s\n%s' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | run_app_cli admin-cli.mjs init; fi
   systemctl daemon-reload
   if ! systemctl enable --now dx-dy.service || ! systemctl enable --now caddy.service || ! systemctl reload caddy.service; then
@@ -356,7 +376,8 @@ main() {
   parse_args "$@"
   info "dx-dy Native Installer" "Version $DXDY_VERSION"
   require_root; detect_platform; preflight; install_dependencies
-  if [[ "$LEGACY_MODE" == 1 ]]; then
+  if [[ "$LEGACY_MODE" == 1 || "$REINSTALL_MODE" == 1 ]]; then
+    if [[ "$REINSTALL_MODE" == 1 ]]; then info "Reusing retained domains and administrator data."; fi
     ADMIN_DOMAIN="$(sed -n 's/^DXDY_ADMIN_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
     SUBSCRIPTION_DOMAIN="$(sed -n 's/^DXDY_SUBSCRIPTION_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"
     valid_hostname "$ADMIN_DOMAIN" || die "Legacy admin domain is invalid."
@@ -369,7 +390,7 @@ main() {
   fi
   dns_report "$ADMIN_DOMAIN"; [[ "$SUBSCRIPTION_DOMAIN" == "$ADMIN_DOMAIN" ]] || dns_report "$SUBSCRIPTION_DOMAIN"; configure_ufw
   ADMIN_USERNAME="${DXDY_ADMIN_USERNAME:-admin}"; [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || die "Invalid administrator username."
-  if [[ "$LEGACY_MODE" != 1 ]]; then
+  if [[ "$LEGACY_MODE" != 1 && "$REINSTALL_MODE" != 1 ]]; then
     if [[ -n "${DXDY_ADMIN_PASSWORD_FILE:-}" ]]; then [[ -f "$DXDY_ADMIN_PASSWORD_FILE" ]] || die "Password file does not exist."; ADMIN_PASSWORD="$(<"$DXDY_ADMIN_PASSWORD_FILE")"; else prompt_password; fi
     [[ ${#ADMIN_PASSWORD} -ge 12 ]] || die "Password must be at least 12 characters."
   fi

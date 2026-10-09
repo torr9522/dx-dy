@@ -11,6 +11,7 @@
 - Added a bundled Node and production dependency preflight before the installer commits configuration, manager, systemd or release state.
 - Removed the exact dx-dy import from the host Caddyfile during normal uninstall and Full Purge so Caddy never retains a dangling include.
 - Run installer and manager application CLIs from the installed app directory so migration discovery never depends on the invoking root shell's current directory.
+- Allow a normal-uninstall reinstall to reuse retained domains, database, administrator credentials and `APP_MASTER_KEY` while still rejecting ambiguous partial installations.
 
 ### Compatibility
 

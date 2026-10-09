@@ -308,6 +308,48 @@ describe("native installer", () => {
     expect(existsSync(path.join(fixture.root, "opt/dx-dy"))).toBe(false);
   });
 
+  it("reinstalls after normal uninstall while preserving data and credentials", () => {
+    const root = freshInstall("debian", "12", "amd64", true);
+    const config = path.join(root, "etc/dx-dy");
+    const data = path.join(root, "var/lib/dx-dy");
+    const database = path.join(data, "dx-dy.db");
+    const envFile = path.join(config, "dx-dy.env");
+    const masterKey = readFileSync(envFile, "utf8").match(
+      /^APP_MASTER_KEY=([a-f0-9]{64})$/m,
+    )?.[1];
+    expect(masterKey).toBeTruthy();
+    writeFileSync(database, "retained database");
+    rmSync(path.join(root, "opt/dx-dy"), { recursive: true, force: true });
+    rmSync(path.join(root, "usr/local/bin/dx-dy"), { force: true });
+    rmSync(path.join(root, "etc/systemd/system/dx-dy.service"), {
+      force: true,
+    });
+    rmSync(path.join(root, "etc/caddy/dx-dy.caddy"), { force: true });
+
+    const result = spawnSync("bash", ["install.sh"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        DXDY_TEST_MODE: "1",
+        DXDY_ROOT_PREFIX: root,
+        DXDY_OS_RELEASE_FILE: path.join(root, "os-release"),
+        DXDY_ARCH: "amd64",
+      },
+      encoding: "utf8",
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Retained native data detected");
+    expect(result.stdout).toContain("Reusing retained domains");
+    expect(readFileSync(database, "utf8")).toBe("retained database");
+    expect(readFileSync(envFile, "utf8")).toContain(
+      `APP_MASTER_KEY=${masterKey}`,
+    );
+    expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
+      "releases/0.2.2",
+    );
+  });
+
   it("migrates a detected 0.1.8 Compose install after portable and full backups", () => {
     const root = temp();
     const config = path.join(root, "etc/dx-dy");
