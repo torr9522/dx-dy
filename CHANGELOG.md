@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-09
+
+### Fixed
+
+- Made `dx-dy status` render an inactive systemd service exactly once instead of emitting a duplicate standalone `inactive` line.
+- Restored service ownership across the complete data directory after every manager-driven restore, so a Full Migration restore cannot leave root-owned internal snapshots that block a later portable database restore.
+
+### Compatibility
+
+- No database migration, backup format, subscription format, runtime dependency or installation layout changed.
+- Portable SQLite and Full Migration backups remain compatible with 0.1.8 through 0.2.2.
+
 ## [0.2.2] - 2026-10-09
 
 ### Fixed

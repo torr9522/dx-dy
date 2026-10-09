@@ -45,9 +45,9 @@ for (const file of required)
   if (!existsSync(file))
     throw new Error("Missing public release asset: " + file);
 const metadata = JSON.parse(readFileSync("package.json", "utf8"));
-if (metadata.name !== "dx-dy" || metadata.version !== "0.2.2")
+if (metadata.name !== "dx-dy" || metadata.version !== "0.2.3")
   throw new Error("Public brand/version mismatch");
-if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.2.2"))
+if (!readFileSync("README.md", "utf8").startsWith("# dx-dy 0.2.3"))
   throw new Error("README public identity mismatch");
 const publicRepository = "torr9522/dx-dy";
 const readme = readFileSync("README.md", "utf8");
@@ -74,7 +74,7 @@ for (const [label, content, terms] of [
   [
     "agent guide",
     agentGuide,
-    ["NO AUTO SUBSCRIPTION", "0.2.2", "pnpm release:check --full --public"],
+    ["NO AUTO SUBSCRIPTION", "0.2.3", "pnpm release:check --full --public"],
   ],
   [
     "current baseline",
@@ -82,7 +82,7 @@ for (const [label, content, terms] of [
     [
       "001_initial.sql",
       "002_node_collections.sql",
-      "Migration in 0.2.2: **NONE**",
+      "Migration in 0.2.3: **NONE**",
     ],
   ],
   [

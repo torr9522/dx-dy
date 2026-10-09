@@ -43,6 +43,11 @@ applies forward migrations, clears sessions, starts the app and checks health.
 The database CLI uses locking, integrity/foreign-key checks and atomic replacement
 so a failed candidate leaves the prior database available.
 
+After either portable or Full Migration restore, the manager normalizes the
+complete application data directory back to the unprivileged `dx-dy` account.
+This includes internal pre-restore snapshots and keeps a later restore usable
+regardless of which backup type was restored first.
+
 Restore accepts historical `.psmbackup` names and extension. Branding did not
 change the backup format. Test restore procedures regularly; possession of a
 backup alone is not proof of recoverability.

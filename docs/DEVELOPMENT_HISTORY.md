@@ -127,3 +127,13 @@ instead of accumulating whitespace and formatter warnings.
 Fresh installation now obtains Caddy from the supported distribution repository;
 it no longer adds the external Cloudsmith repository whose availability blocked
 dependency bootstrap during acceptance.
+
+## 0.2.3 - Final Fresh Recovery Hardening
+
+Final public acceptance on a reimaged Debian 12 host exercised installation,
+browser-only data creation, backup/restore, reboot, retained-data reinstall and
+Full Purge. The manager now renders inactive service state once and restores
+ownership for the complete application data directory after restore. This keeps
+a root-run Full Migration restore from leaving its internal safety snapshots
+inaccessible to the unprivileged service account during a later portable restore.
+Schema and backup formats are unchanged.

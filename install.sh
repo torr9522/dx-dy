@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_VERSION="0.2.2"
+readonly DXDY_VERSION="0.2.3"
 readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR

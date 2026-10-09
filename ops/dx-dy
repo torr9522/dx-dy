@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.2.2"
+readonly DXDY_MANAGER_VERSION="0.2.3"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.2.2 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.2.3 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
@@ -58,7 +58,11 @@ run_cli_root() {
 
 health() { curl -fsS --max-time 10 "http://127.0.0.1:$DXDY_INTERNAL_PORT/health"; }
 wait_health() { for _ in {1..45}; do health >/dev/null 2>&1 && return; sleep 2; done; return 1; }
-service_state() { systemctl is-active "$1" 2>/dev/null || printf inactive; }
+service_state() {
+  local state
+  state="$(systemctl is-active "$1" 2>/dev/null || true)"
+  printf '%s' "${state:-inactive}"
+}
 
 cmd_status() {
   load_instance
@@ -143,7 +147,9 @@ cmd_restore() {
     printf '%s' "$REPLY" | BACKUP_PASSWORD_STDIN=true INSTANCE_ENV_FILE="$ENV_FILE" run_cli_root database.mjs restore "$source" || result=$?
     unset REPLY
   else run_cli database.mjs restore "$source" || result=$?; fi
-  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then chown dx-dy:dx-dy "$DATABASE"; chmod 0600 "$DATABASE" "$ENV_FILE"; fi
+  chown -R -h dx-dy:dx-dy -- "$DXDY_DATA_DIR"
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then chown root:root -- "$ENV_FILE"; fi
+  chmod 0600 "$DATABASE" "$ENV_FILE"
   systemctl start "$SERVICE"
   [[ $result -eq 0 ]] || die "Restore failed; the pre-restore snapshot remains available."
   wait_health || die "Restore completed but health check failed."

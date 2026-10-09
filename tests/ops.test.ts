@@ -75,7 +75,7 @@ function singleFileFixture(
 ) {
   const root = temp();
   const assets = path.join(root, "assets");
-  const packageRoot = path.join(root, "package", "dx-dy-0.2.2-linux-amd64");
+  const packageRoot = path.join(root, "package", "dx-dy-0.2.3-linux-amd64");
   const script = path.join(root, "install.sh");
   const password = path.join(root, "password");
   const bin = path.join(root, "bin");
@@ -104,9 +104,9 @@ function singleFileFixture(
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    '{"version":"0.2.2","release_model":"native-systemd","architecture":"amd64"}\n',
+    '{"version":"0.2.3","release_model":"native-systemd","architecture":"amd64"}\n',
   );
-  const artifact = "dx-dy-0.2.2-linux-amd64.tar.gz";
+  const artifact = "dx-dy-0.2.3-linux-amd64.tar.gz";
   expect(
     spawnSync("tar", [
       "-czf",
@@ -121,7 +121,7 @@ function singleFileFixture(
   writeFileSync(
     path.join(assets, "release-manifest.json"),
     JSON.stringify({
-      version: "0.2.2",
+      version: "0.2.3",
       release_model: "native-systemd",
       architectures: ["amd64", "arm64"],
       artifacts: [
@@ -220,7 +220,7 @@ describe("native installer", () => {
       path.join(root, "etc/caddy/dx-dy.caddy"),
       "utf8",
     );
-    expect(config).toContain("DXDY_VERSION=0.2.2");
+    expect(config).toContain("DXDY_VERSION=0.2.3");
     expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
     expect(config).toContain(`DXDY_ARCH=${arch}`);
     expect(env).toContain("HOST=127.0.0.1");
@@ -233,10 +233,10 @@ describe("native installer", () => {
     expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
     expect(caddy).not.toContain("app:3000");
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.2.2",
+      "releases/0.2.3",
     );
     expect(
-      existsSync(path.join(root, "opt/dx-dy/releases/0.2.2/runtime/bin/node")),
+      existsSync(path.join(root, "opt/dx-dy/releases/0.2.3/runtime/bin/node")),
     ).toBe(true);
   });
 
@@ -369,7 +369,7 @@ describe("native installer", () => {
       `APP_MASTER_KEY=${masterKey}`,
     );
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.2.2",
+      "releases/0.2.3",
     );
   });
 
@@ -462,6 +462,7 @@ function nativeFixture() {
   mkdirSync(backups, { recursive: true });
   mkdirSync(caddy, { recursive: true });
   mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(data, "dx-dy.db"), "database", { mode: 0o600 });
   symlinkSync("releases/0.1.9", path.join(install, "current"));
   writeFileSync(path.join(current, "RELEASE.json"), '{"version":"0.1.9"}\n');
   writeFileSync(
@@ -513,8 +514,9 @@ function nativeFixture() {
   );
   executable(
     path.join(bin, "systemctl"),
-    `printf 'systemctl %s\\n' "$*" >>"${calls}"\nif [[ "$1" == is-active ]]; then printf 'active\\n'; fi\nif [[ "\${DXDY_MOCK_START_FAIL:-0}" == 1 && "$*" == "start dx-dy.service" && ! -e "${root}/failed-once" ]]; then touch "${root}/failed-once"; exit 1; fi`,
+    `printf 'systemctl %s\\n' "$*" >>"${calls}"\nif [[ "$1" == is-active ]]; then\n  if [[ "\${DXDY_MOCK_INACTIVE_SERVICE:-}" == "$2" ]]; then printf 'inactive\\n'; exit 3; fi\n  printf 'active\\n'\nfi\nif [[ "\${DXDY_MOCK_START_FAIL:-0}" == 1 && "$*" == "start dx-dy.service" && ! -e "${root}/failed-once" ]]; then touch "${root}/failed-once"; exit 1; fi`,
   );
+  executable(path.join(bin, "chown"), `printf 'chown %s\\n' "$*" >>"${calls}"`);
   executable(
     path.join(bin, "curl"),
     `printf '{"name":"dx-dy","status":"ok","version":"0.1.9"}\\n'`,
@@ -568,7 +570,7 @@ function manager(
 }
 
 function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
-  const version = "0.2.2";
+  const version = "0.2.3";
   const packageRoot = path.join(f.root, `dx-dy-${version}-linux-amd64`);
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
@@ -643,6 +645,16 @@ describe("native manager", () => {
     expect(calls).not.toContain("docker");
   });
 
+  it("renders an inactive service state exactly once", () => {
+    const f = nativeFixture();
+    const result = manager(f, ["status"], "", {
+      DXDY_MOCK_INACTIVE_SERVICE: "dx-dy.service",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Application service: inactive\n");
+    expect(result.stdout.match(/inactive/g)).toHaveLength(1);
+  });
+
   it("runs WAL-safe backup through the bundled application CLI", () => {
     const f = nativeFixture();
     const result = manager(f, ["backup", "db"]);
@@ -668,7 +680,9 @@ describe("native manager", () => {
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Restore completed");
-    expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
+    const calls = readFileSync(f.calls, "utf8");
+    expect(calls).toContain("database.mjs restore");
+    expect(calls).toContain(`chown -R -h dx-dy:dx-dy -- ${f.data}`);
   });
 
   it("recognizes that 0.1.9 is already current", () => {
@@ -683,12 +697,12 @@ describe("native manager", () => {
     prepareUpdate(f);
     const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Updated to dx-dy 0.2.2");
+    expect(result.stdout).toContain("Updated to dx-dy 0.2.3");
     expect(readlinkSync(path.join(f.install, "current"))).toBe(
-      "releases/0.2.2",
+      "releases/0.2.3",
     );
     expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
-      "DXDY_VERSION=0.2.2",
+      "DXDY_VERSION=0.2.3",
     );
   });
 
