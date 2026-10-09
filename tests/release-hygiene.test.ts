@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -14,6 +14,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   releaseRefPolicy,
+  validateRepositoryRef,
   validateTagProvenance,
 } from "../scripts/ci-ref-check.mjs";
 
@@ -28,6 +29,10 @@ function temp() {
   roots.push(root);
   chmodSync(root, 0o755);
   return root;
+}
+
+function git(cwd: string, ...args: string[]) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
 function tree(root: string): string[] {
@@ -109,7 +114,7 @@ describe("installer query options", () => {
     const result = queryInstaller("--version", true);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe("dx-dy installer 0.2.0\n");
+    expect(result.stdout).toBe("dx-dy installer 0.2.1\n");
   });
 
   it("rejects an unknown option before preflight or mutation", () => {
@@ -121,7 +126,7 @@ describe("installer query options", () => {
 });
 
 describe("release ref policy", () => {
-  const version = "0.2.0";
+  const version = "0.2.1";
 
   it("accepts a master branch push", () => {
     expect(
@@ -159,23 +164,24 @@ describe("release ref policy", () => {
       {
         GITHUB_ACTIONS: "true",
         GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/tags/v0.2.0",
+        GITHUB_REF: "refs/tags/v0.2.1",
         GITHUB_REF_TYPE: "tag",
-        GITHUB_REF_NAME: "v0.2.0",
+        GITHUB_REF_NAME: "v0.2.1",
       },
       version,
     );
-    expect(policy).toEqual({ kind: "tag", tag: "v0.2.0" });
+    expect(policy).toEqual({ kind: "tag", tag: "v0.2.1" });
     expect(() =>
       validateTagProvenance({
         head: "abc",
+        tagObject: "tag-object",
         tagTarget: "abc",
         remoteMaster: "abc",
       }),
     ).not.toThrow();
   });
 
-  it.each(["v0.2.0-rc.1", "release-0.2.0", "v0.2"])(
+  it.each(["v0.2.1-rc.1", "release-0.2.1", "v0.2"])(
     "rejects invalid release tag %s",
     (tag) => {
       expect(() =>
@@ -197,13 +203,96 @@ describe("release ref policy", () => {
     expect(() =>
       validateTagProvenance({
         head: "topic",
+        tagObject: "tag-object",
         tagTarget: "topic",
         remoteMaster: "main",
       }),
     ).toThrow("must equal origin/master");
   });
 
+  it("rejects a remote tag without an annotated tag object and peeled target", () => {
+    expect(() =>
+      validateTagProvenance({
+        head: "abc",
+        tagObject: "abc",
+        tagTarget: "abc",
+        remoteMaster: "abc",
+      }),
+    ).toThrow("annotated tag");
+    expect(() =>
+      validateTagProvenance({
+        head: "abc",
+        tagObject: "tag-object",
+        tagTarget: undefined,
+        remoteMaster: "abc",
+      }),
+    ).toThrow("annotated tag");
+  });
+
   it("classifies an ordinary local detached checkout as local, not a tag", () => {
     expect(releaseRefPolicy({}, version)).toEqual({ kind: "local" });
+  });
+
+  it("survives an Actions-style peeled local tag without fetching tags", () => {
+    const root = temp();
+    const remote = path.join(root, "remote.git");
+    const seed = path.join(root, "seed");
+    const runner = path.join(root, "runner");
+    mkdirSync(seed);
+    mkdirSync(runner);
+    git(root, "init", "--bare", remote);
+    git(seed, "init", "--initial-branch=master");
+    git(seed, "config", "user.name", "dx-dy fixture");
+    git(seed, "config", "user.email", "fixture@example.com");
+    writeFileSync(path.join(seed, "package.json"), '{"version":"0.2.1"}\n');
+    git(seed, "add", "package.json");
+    git(seed, "commit", "-m", "fixture");
+    git(seed, "tag", "-a", "v0.2.1", "-m", "dx-dy 0.2.1");
+    git(seed, "remote", "add", "origin", remote);
+    git(seed, "push", "origin", "master", "refs/tags/v0.2.1");
+
+    git(runner, "init");
+    git(runner, "remote", "add", "origin", remote);
+    git(
+      runner,
+      "fetch",
+      "--no-tags",
+      "origin",
+      "+refs/heads/master:refs/remotes/origin/master",
+    );
+    git(runner, "checkout", "--detach", "origin/master");
+    git(runner, "tag", "v0.2.1", "HEAD");
+    const peeledLocalTag = git(runner, "rev-parse", "refs/tags/v0.2.1");
+    expect(git(runner, "cat-file", "-t", "v0.2.1")).toBe("commit");
+
+    const oldFetch = spawnSync(
+      "git",
+      [
+        "fetch",
+        "--prune",
+        "origin",
+        "+refs/heads/master:refs/remotes/origin/master",
+        "--tags",
+      ],
+      { cwd: runner, encoding: "utf8" },
+    );
+    expect(oldFetch.status).not.toBe(0);
+    expect(oldFetch.stderr).toContain("would clobber existing tag");
+
+    const policy = validateRepositoryRef({
+      cwd: runner,
+      version: "0.2.1",
+      env: {
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_REF: "refs/tags/v0.2.1",
+        GITHUB_REF_TYPE: "tag",
+        GITHUB_REF_NAME: "v0.2.1",
+      },
+    });
+    expect(policy).toEqual({ kind: "tag", tag: "v0.2.1" });
+    expect(git(runner, "rev-parse", "refs/tags/v0.2.1")).toBe(peeledLocalTag);
+    expect(git(runner, "cat-file", "-t", "v0.2.1")).toBe("commit");
+    expect(git(runner, "rev-parse", "origin/master")).toBe(peeledLocalTag);
   });
 });

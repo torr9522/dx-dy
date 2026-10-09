@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-09
+
+### Fixed
+
+- Fixed tag-triggered CI and release provenance validation under GitHub Actions detached HEAD checkouts.
+- Release validation now fetches only `origin/master` and no longer attempts to overwrite the checked-out tag ref.
+
+### Compatibility
+
+- No database, subscription, runtime, installation or backup format changed.
+- Native installation behavior introduced in 0.1.9 and hardened in 0.2.0 remains unchanged.
+
 ## [0.2.0] - 2026-10-09
 
 ### Fixed

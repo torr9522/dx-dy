@@ -44,7 +44,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.0",
+      version: "0.2.1",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {

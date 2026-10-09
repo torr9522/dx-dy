@@ -27,7 +27,7 @@ import {
   snapshot,
   validateDatabase,
 } from "../apps/api/src/database-safety";
-const version = "0.2.0",
+const version = "0.2.1",
   database =
     process.env.DATABASE_PATH || "/data/private-subscription-manager.db";
 const stamp = () =>

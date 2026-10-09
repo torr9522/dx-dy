@@ -25,7 +25,7 @@
 - Debian 12, Ubuntu 22.04/24.04, amd64/arm64: [`install.sh`](../install.sh), [`ops.test.ts`](../tests/ops.test.ts).
 - Bundled Node 26.10.0, architecture-specific production dependencies and artifacts: [`build-native-artifact.mjs`](../scripts/build-native-artifact.mjs).
 - systemd lifecycle, journal logs, admin recovery, domain, backup/restore, doctor, uninstall, atomic update/rollback and legacy migration: [`ops/dx-dy`](../ops/dx-dy).
-- Docker/Compose/GHCR: deprecated 0.1.8 migration/history and optional CI tooling only; not the 0.2.0 runtime.
+- Docker/Compose/GHCR: deprecated 0.1.8 migration/history and optional CI tooling only; not the 0.2.1 runtime.
 
 ## Security And Release
 

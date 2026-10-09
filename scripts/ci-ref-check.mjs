@@ -47,7 +47,14 @@ export function releaseRefPolicy(env, version) {
   return { kind: "branch", branch };
 }
 
-export function validateTagProvenance({ head, tagTarget, remoteMaster }) {
+export function validateTagProvenance({
+  head,
+  tagObject,
+  tagTarget,
+  remoteMaster,
+}) {
+  if (!tagObject || !tagTarget || tagObject === tagTarget)
+    throw new Error("Release tag must be an annotated tag");
   if (head !== tagTarget)
     throw new Error(
       "Detached checkout HEAD does not match the release tag target",
@@ -83,16 +90,28 @@ export function validateRepositoryRef({
       "git",
       [
         "fetch",
+        "--no-tags",
         "--prune",
         "origin",
         "+refs/heads/master:refs/remotes/origin/master",
-        "--tags",
       ],
       { cwd, stdio: "inherit" },
     );
+  const remoteTagLines = git(
+    cwd,
+    "ls-remote",
+    "origin",
+    `refs/tags/${policy.tag}`,
+    `refs/tags/${policy.tag}^{}`,
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/, 2));
+  const remoteTag = new Map(remoteTagLines.map(([oid, ref]) => [ref, oid]));
   validateTagProvenance({
     head: git(cwd, "rev-parse", "HEAD"),
-    tagTarget: git(cwd, "rev-parse", `${policy.tag}^{commit}`),
+    tagObject: remoteTag.get(`refs/tags/${policy.tag}`),
+    tagTarget: remoteTag.get(`refs/tags/${policy.tag}^{}`),
     remoteMaster: git(cwd, "rev-parse", "origin/master"),
   });
   return policy;

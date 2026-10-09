@@ -11,7 +11,8 @@ export function releaseRefPolicy(
 
 export function validateTagProvenance(input: {
   head: string;
-  tagTarget: string;
+  tagObject: string | undefined;
+  tagTarget: string | undefined;
   remoteMaster: string;
 }): void;
 

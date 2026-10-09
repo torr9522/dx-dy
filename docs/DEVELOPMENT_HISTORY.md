@@ -85,3 +85,16 @@ direct version tags are validated in detached HEAD and must target the current
 from the GitHub Release manifest, verifies its SHA-256 and shell syntax, and
 installs it atomically without a source checkout. Runtime architecture, schema,
 backup formats and business behavior are unchanged.
+
+The public `v0.2.0` tag remains immutable. Its tag CI and Release workflow
+failed because provenance validation fetched all remote tags into an Actions
+checkout whose local tag ref was already peeled to the release commit.
+
+## 0.2.1 - Tag Workflow Provenance Fix
+
+Changed tag provenance validation to fetch only `origin/master` with tag
+following disabled. The validator reads the public annotated tag object and
+peeled target through `git ls-remote`, preserves the checked-out local tag ref,
+and retains the strict requirement that the release target equal current
+`origin/master`. Runtime architecture, schema, installation and business
+behavior are unchanged.

@@ -25,3 +25,7 @@
   command is not provided.
 - Existing unrelated Caddy configurations are preserved and imported, but
   unusual custom package/layout configurations may require manual integration.
+
+Historical note: public `v0.2.0` has failed tag workflow records caused by an
+Actions local-tag fetch collision. The tag is intentionally immutable; 0.2.1
+fixes the validation path without fetching or rewriting tag refs.
