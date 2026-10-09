@@ -258,6 +258,7 @@ describe("native installer", () => {
     expect(installer).not.toMatch(/ghcr\.io|podman|nerdctl/);
     expect(installer).not.toContain("install docker");
     expect(installer).toContain("dnsutils libatomic1");
+    expect(installer).toContain('cd "$INSTALL_ROOT/current/app"');
   });
 
   it.each([
@@ -408,7 +409,7 @@ function nativeFixture() {
   );
   executable(
     path.join(current, "runtime/bin/node"),
-    `printf 'node %s\\n' "$*" >>"${calls}"\nif [[ "$*" == *"database.mjs backup"* ]]; then printf database >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then printf bundle >"\${*: -1}"; fi`,
+    `printf 'node cwd=%s args=%s\\n' "$PWD" "$*" >>"${calls}"\nif [[ "$*" == *"database.mjs backup"* ]]; then printf database >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then printf bundle >"\${*: -1}"; fi`,
   );
   writeFileSync(
     path.join(config, "install.conf"),
@@ -586,6 +587,9 @@ describe("native manager", () => {
       true,
     );
     expect(readFileSync(f.calls, "utf8")).toContain("database.mjs backup");
+    expect(readFileSync(f.calls, "utf8")).toContain(
+      `cwd=${path.join(f.install, "current/app")}`,
+    );
   });
 
   it("restores a full migration bundle through the application CLI", () => {

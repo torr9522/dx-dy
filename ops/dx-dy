@@ -43,8 +43,8 @@ run_cli() {
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
-  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then "$NODE" "$APP/dist/$script" "$@"
-  else runuser -u dx-dy -- "$NODE" "$APP/dist/$script" "$@"; fi
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then (cd "$APP" && "$NODE" "$APP/dist/$script" "$@")
+  else (cd "$APP" && runuser -u dx-dy -- "$NODE" "$APP/dist/$script" "$@"); fi
 }
 
 run_cli_root() {
@@ -53,7 +53,7 @@ run_cli_root() {
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
-  "$NODE" "$APP/dist/$script" "$@"
+  (cd "$APP" && "$NODE" "$APP/dist/$script" "$@")
 }
 
 health() { curl -fsS --max-time 10 "http://127.0.0.1:$DXDY_INTERNAL_PORT/health"; }

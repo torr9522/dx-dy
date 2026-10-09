@@ -328,7 +328,7 @@ run_app_cli() {
   # shellcheck disable=SC1090,SC1091
   source "$CONFIG_DIR/dx-dy.env"
   set +a
-  runuser -u dx-dy -- "$INSTALL_ROOT/current/runtime/bin/node" "$INSTALL_ROOT/current/app/dist/$script" "$@"
+  (cd "$INSTALL_ROOT/current/app" && runuser -u dx-dy -- "$INSTALL_ROOT/current/runtime/bin/node" "$INSTALL_ROOT/current/app/dist/$script" "$@")
 }
 
 initialize_and_start() {

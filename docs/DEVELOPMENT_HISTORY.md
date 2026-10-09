@@ -114,4 +114,6 @@ artifact therefore fails before manager, configuration, systemd or release
 installation. Destructive acceptance also found and fixed a dangling Caddy
 import after uninstall: both uninstall modes now remove only the exact dx-dy
 import line while retaining unrelated Caddy configuration. Schema, backup
-formats and business behavior are unchanged.
+formats and business behavior are unchanged. Native administrator, database and
+domain CLIs also run from the installed app directory, matching systemd and
+making migration discovery independent of the invoking shell directory.
