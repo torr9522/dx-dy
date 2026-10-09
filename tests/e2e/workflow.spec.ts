@@ -55,6 +55,7 @@ for (const width of [1440, 768, 390]) {
         row.getByRole("button", { name: action, exact: true }),
       ).toBeVisible();
     await row.getByRole("button", { name: "复制订阅链接" }).click();
+    await expect(page.locator(".toast")).toContainText("已复制");
     const url = await page.evaluate(() => navigator.clipboard.readText());
     expect(new URL(url).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{43}$/);
     await row.getByRole("button", { name: `二维码 ${name}` }).click();
@@ -227,7 +228,11 @@ test("subscription lists remain usable at 20 subscriptions and 100 nodes", async
   });
   await page.reload();
   await page.getByRole("button", { name: "订阅", exact: true }).click();
-  await expect(page.locator(".subscription-row")).toHaveCount(20);
+  await expect(
+    page
+      .locator(".subscription-row")
+      .filter({ hasText: /Scale Subscription|超长中文/ }),
+  ).toHaveCount(20);
   await page
     .locator(".subscription-row")
     .filter({ hasText: profiles[0].name })
