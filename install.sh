@@ -311,7 +311,9 @@ install_caddy_fragment() {
   if [[ -e "$main" ]]; then cp -a "$main" "$STAGING/Caddyfile.before"; had_main=1; fi
   if [[ -e "$CADDY_IMPORT" ]]; then cp -a "$CADDY_IMPORT" "$STAGING/dx-dy.caddy.before"; had_fragment=1; fi
   if [[ -s "$main" ]] && ! grep -Fqx "$import_line" "$main"; then
-    cp -a "$main" "$main.pre-dx-dy.$(date -u +%Y%m%d-%H%M%SZ).bak"; printf '\n%s\n' "$import_line" >>"$main"
+    cp -a "$main" "$main.pre-dx-dy.$(date -u +%Y%m%d-%H%M%SZ).bak"
+    [[ -z "$(tail -c 1 "$main")" ]] || printf '\n' >>"$main"
+    printf '%s\n' "$import_line" >>"$main"
   elif [[ ! -s "$main" ]]; then printf '%s\n' "$import_line" >"$main"; fi
   install -m 0644 "$STAGING/dx-dy.caddy" "$CADDY_IMPORT"
   if [[ "$TEST_MODE" != 1 ]] && ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then

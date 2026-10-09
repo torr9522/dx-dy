@@ -121,3 +121,6 @@ Normal uninstall followed by reinstall is now an explicit retained-data mode:
 the installer requires the program/manager/unit to be absent and the protected
 config/environment/database to be present, then reuses domains, credentials and
 the existing master key. Ambiguous partial installations remain rejected.
+The Caddy import is appended without an extra separator line, so repeated
+uninstall/reinstall cycles restore a previously formatted Caddyfile byte-for-byte
+instead of accumulating whitespace and formatter warnings.

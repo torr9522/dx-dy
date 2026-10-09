@@ -36,6 +36,7 @@ function freshInstall(
   osVersion: string,
   arch: string,
   dual: boolean,
+  existingCaddyfile?: string,
 ) {
   const root = temp();
   const osRelease = path.join(root, "os-release");
@@ -44,6 +45,10 @@ function freshInstall(
   writeFileSync(password, "Synthetic-installer-password-123!\n", {
     mode: 0o600,
   });
+  if (existingCaddyfile !== undefined) {
+    mkdirSync(path.join(root, "etc/caddy"), { recursive: true });
+    writeFileSync(path.join(root, "etc/caddy/Caddyfile"), existingCaddyfile);
+  }
   const result = spawnSync("bash", ["install.sh"], {
     cwd: process.cwd(),
     env: {
@@ -259,6 +264,23 @@ describe("native installer", () => {
     expect(installer).not.toContain("install docker");
     expect(installer).toContain("dnsutils libatomic1");
     expect(installer).toContain('cd "$INSTALL_ROOT/current/app"');
+  });
+
+  it("adds the Caddy import without accumulating whitespace", () => {
+    const original = "unrelated.example.com { respond 200 }\n";
+    const root = freshInstall("debian", "12", "amd64", true, original);
+    const main = path.join(root, "etc/caddy/Caddyfile");
+    expect(readFileSync(main, "utf8")).toBe(
+      original + "import /etc/caddy/dx-dy.caddy\n",
+    );
+  });
+
+  it("separates the Caddy import when the existing file lacks a newline", () => {
+    const original = "unrelated.example.com { respond 200 }";
+    const root = freshInstall("debian", "12", "amd64", true, original);
+    expect(readFileSync(path.join(root, "etc/caddy/Caddyfile"), "utf8")).toBe(
+      original + "\nimport /etc/caddy/dx-dy.caddy\n",
+    );
   });
 
   it.each([
