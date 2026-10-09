@@ -2,6 +2,9 @@
 
 - Fresh installation is formally supported only on Debian 12, Ubuntu 22.04/24.04
   LTS and amd64/arm64. Other systems are best effort.
+- The zero-prerequisite command assumes a root shell with working Debian/Ubuntu
+  apt repositories. It bootstraps curl and CA certificates; DNS and outbound
+  HTTPS must already work.
 - dx-dy is a single-administrator private manager. It has no user registration,
   billing, plans, orders, traffic accounting, referrals or ticket system.
 - SQLite is the only database. The application is not a horizontally scaled

@@ -66,10 +66,11 @@ function freshInstall(
 
 function singleFileFixture(
   managerDelivery: "asset" | "corrupt" | "fail" = "asset",
+  runtimeFails = false,
 ) {
   const root = temp();
   const assets = path.join(root, "assets");
-  const packageRoot = path.join(root, "package", "dx-dy-0.2.1-linux-amd64");
+  const packageRoot = path.join(root, "package", "dx-dy-0.2.2-linux-amd64");
   const script = path.join(root, "install.sh");
   const password = path.join(root, "password");
   const bin = path.join(root, "bin");
@@ -79,7 +80,10 @@ function singleFileFixture(
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
   mkdirSync(assets);
   mkdirSync(bin);
-  executable(path.join(packageRoot, "runtime/bin/node"), "exit 0");
+  executable(
+    path.join(packageRoot, "runtime/bin/node"),
+    runtimeFails ? "exit 86" : "exit 0",
+  );
   writeFileSync(path.join(packageRoot, "app/dist/server.mjs"), "");
   writeFileSync(
     path.join(packageRoot, "dx-dy.service"),
@@ -95,9 +99,9 @@ function singleFileFixture(
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    '{"version":"0.2.1","release_model":"native-systemd","architecture":"amd64"}\n',
+    '{"version":"0.2.2","release_model":"native-systemd","architecture":"amd64"}\n',
   );
-  const artifact = "dx-dy-0.2.1-linux-amd64.tar.gz";
+  const artifact = "dx-dy-0.2.2-linux-amd64.tar.gz";
   expect(
     spawnSync("tar", [
       "-czf",
@@ -112,7 +116,7 @@ function singleFileFixture(
   writeFileSync(
     path.join(assets, "release-manifest.json"),
     JSON.stringify({
-      version: "0.2.1",
+      version: "0.2.2",
       release_model: "native-systemd",
       architectures: ["amd64", "arm64"],
       artifacts: [
@@ -211,7 +215,7 @@ describe("native installer", () => {
       path.join(root, "etc/caddy/dx-dy.caddy"),
       "utf8",
     );
-    expect(config).toContain("DXDY_VERSION=0.2.1");
+    expect(config).toContain("DXDY_VERSION=0.2.2");
     expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
     expect(config).toContain(`DXDY_ARCH=${arch}`);
     expect(env).toContain("HOST=127.0.0.1");
@@ -224,10 +228,10 @@ describe("native installer", () => {
     expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
     expect(caddy).not.toContain("app:3000");
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.2.1",
+      "releases/0.2.2",
     );
     expect(
-      existsSync(path.join(root, "opt/dx-dy/releases/0.2.1/runtime/bin/node")),
+      existsSync(path.join(root, "opt/dx-dy/releases/0.2.2/runtime/bin/node")),
     ).toBe(true);
   });
 
@@ -253,6 +257,7 @@ describe("native installer", () => {
     const installer = readFileSync("install.sh", "utf8");
     expect(installer).not.toMatch(/ghcr\.io|podman|nerdctl/);
     expect(installer).not.toContain("install docker");
+    expect(installer).toContain("dnsutils libatomic1");
   });
 
   it.each([
@@ -290,6 +295,16 @@ describe("native installer", () => {
     expect(readFileSync(fixture.installedManager, "utf8")).toContain(
       "existing-manager",
     );
+  });
+
+  it("rejects an unusable bundled runtime before committing installation", () => {
+    const fixture = singleFileFixture("asset", true);
+    const result = runSingleFile(fixture, true);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Bundled Node runtime cannot start");
+    expect(existsSync(fixture.installedManager)).toBe(false);
+    expect(existsSync(path.join(fixture.root, "etc/dx-dy"))).toBe(false);
+    expect(existsSync(path.join(fixture.root, "opt/dx-dy"))).toBe(false);
   });
 
   it("migrates a detected 0.1.8 Compose install after portable and full backups", () => {
@@ -370,6 +385,7 @@ function nativeFixture() {
   const install = path.join(root, "opt/dx-dy");
   const data = path.join(root, "var/lib/dx-dy");
   const backups = path.join(root, "var/backups/dx-dy");
+  const caddy = path.join(root, "etc/caddy");
   const bin = path.join(root, "bin");
   const calls = path.join(root, "calls");
   const current = path.join(install, "releases/0.1.9");
@@ -378,6 +394,7 @@ function nativeFixture() {
   mkdirSync(config, { recursive: true });
   mkdirSync(data, { recursive: true });
   mkdirSync(backups, { recursive: true });
+  mkdirSync(caddy, { recursive: true });
   mkdirSync(bin, { recursive: true });
   symlinkSync("releases/0.1.9", path.join(install, "current"));
   writeFileSync(path.join(current, "RELEASE.json"), '{"version":"0.1.9"}\n');
@@ -406,7 +423,7 @@ function nativeFixture() {
       "DXDY_INTERNAL_PORT=3000",
       "DXDY_ADMIN_DOMAIN=panel.example.com",
       "DXDY_SUBSCRIPTION_DOMAIN=sub.example.com",
-      `DXDY_CADDY_IMPORT=${path.join(config, "dx-dy.caddy")}`,
+      `DXDY_CADDY_IMPORT=${path.join(caddy, "dx-dy.caddy")}`,
       "DXDY_SERVICE=dx-dy.service",
       `DXDY_SYSTEMD_UNIT_PATH=${path.join(root, "dx-dy.service")}`,
       "DXDY_ARCH=amd64",
@@ -421,8 +438,12 @@ function nativeFixture() {
     { mode: 0o600 },
   );
   writeFileSync(
-    path.join(config, "dx-dy.caddy"),
+    path.join(caddy, "dx-dy.caddy"),
     "panel.example.com { reverse_proxy 127.0.0.1:3000 }\n",
+  );
+  writeFileSync(
+    path.join(caddy, "Caddyfile"),
+    `unrelated.example.com { respond 200 }\nimport ${path.join(caddy, "dx-dy.caddy")}\n`,
   );
   executable(
     path.join(bin, "systemctl"),
@@ -446,7 +467,17 @@ function nativeFixture() {
   const managerPath = path.join(root, "dx-dy-manager");
   writeFileSync(managerPath, readFileSync("ops/dx-dy"));
   chmodSync(managerPath, 0o755);
-  return { root, config, install, backups, bin, calls, managerPath };
+  return {
+    root,
+    config,
+    install,
+    data,
+    backups,
+    caddy,
+    bin,
+    calls,
+    managerPath,
+  };
 }
 function manager(
   f: ReturnType<typeof nativeFixture>,
@@ -471,7 +502,7 @@ function manager(
 }
 
 function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
-  const version = "0.2.1";
+  const version = "0.2.2";
   const packageRoot = path.join(f.root, `dx-dy-${version}-linux-amd64`);
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
@@ -583,12 +614,12 @@ describe("native manager", () => {
     prepareUpdate(f);
     const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Updated to dx-dy 0.2.1");
+    expect(result.stdout).toContain("Updated to dx-dy 0.2.2");
     expect(readlinkSync(path.join(f.install, "current"))).toBe(
-      "releases/0.2.1",
+      "releases/0.2.2",
     );
     expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
-      "DXDY_VERSION=0.2.1",
+      "DXDY_VERSION=0.2.2",
     );
   });
 
@@ -608,5 +639,33 @@ describe("native manager", () => {
       "DXDY_VERSION=0.1.9",
     );
     expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
+  });
+
+  it("removes only the dx-dy Caddy import during normal uninstall", () => {
+    const f = nativeFixture();
+    const result = manager(f, ["uninstall"], "1\n");
+    expect(result.status).toBe(0);
+    expect(existsSync(f.install)).toBe(false);
+    expect(existsSync(f.config)).toBe(true);
+    expect(existsSync(f.data)).toBe(true);
+    expect(existsSync(f.backups)).toBe(true);
+    expect(readFileSync(path.join(f.caddy, "Caddyfile"), "utf8")).toBe(
+      "unrelated.example.com { respond 200 }\n",
+    );
+    expect(existsSync(path.join(f.caddy, "dx-dy.caddy"))).toBe(false);
+  });
+
+  it("removes the dx-dy Caddy import during full purge", () => {
+    const f = nativeFixture();
+    const result = manager(f, ["uninstall"], "2\nDELETE\n");
+    expect(result.status).toBe(0);
+    expect(existsSync(f.install)).toBe(false);
+    expect(existsSync(f.config)).toBe(false);
+    expect(existsSync(f.data)).toBe(false);
+    expect(existsSync(f.backups)).toBe(false);
+    expect(readFileSync(path.join(f.caddy, "Caddyfile"), "utf8")).toBe(
+      "unrelated.example.com { respond 200 }\n",
+    );
+    expect(existsSync(path.join(f.caddy, "dx-dy.caddy"))).toBe(false);
   });
 });

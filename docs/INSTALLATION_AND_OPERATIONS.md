@@ -2,7 +2,11 @@
 
 ## Fresh Installation
 
-Supported hosts are Debian 12 and Ubuntu 22.04/24.04 on amd64/arm64. Run the root README command as root. The installer verifies OS/architecture/network/disk/ports, downloads the matching GitHub Release artifact and SHA-256, installs host dependencies and official Caddy, and never installs Node or a container runtime.
+Supported hosts are Debian 12 and Ubuntu 22.04/24.04 on amd64/arm64. From a root shell, including a minimal host without curl, use the primary README bootstrap command. It uses Bash and apt to install `ca-certificates` and `curl` only when required, downloads the installer over verified HTTPS to a temporary file, executes it and removes that file on exit. Hosts that already have curl and trusted CA certificates may use the shorter process-substitution command.
+
+The installer verifies OS/architecture/network/disk/ports, installs required host libraries including `libatomic1`, downloads the matching GitHub Release artifact and SHA-256, and installs official Caddy. Node 26.10.0 is bundled in the release; Docker, Node, npm, pnpm, Git and a container runtime are not user prerequisites.
+
+Before committing installation state, the installer starts the staged bundled Node binary and imports the staged Argon2 production dependency. A missing host library or unusable native addon fails at this point without installing the manager, configuration, systemd unit or release directory.
 
 The root manager is a separate `dx-dy` Release asset. The single-file installer downloads it into private staging, verifies `manager_asset` and `manager_sha256` from `release-manifest.json`, checks shell syntax, and only then atomically renames it into `/usr/local/bin/dx-dy`. It never assumes that `install.sh` is beside a Git checkout or an `ops/` directory.
 
@@ -41,7 +45,7 @@ dx-dy cleanup-legacy
 dx-dy uninstall
 ```
 
-`stop` stops only the application. Logs use `journalctl`. Doctor checks systemd, services, health, SQLite integrity/FKs, DNS/TLS, localhost binding, permissions, symlink/release metadata and disk. Default uninstall removes program/service/manager but preserves config, database and backups; full purge requires `DELETE`. Caddy is never uninstalled automatically.
+`stop` stops only the application. Logs use `journalctl`. Doctor checks systemd, services, health, SQLite integrity/FKs, DNS/TLS, localhost binding, permissions, symlink/release metadata and disk. Default uninstall removes program/service/manager but preserves config, database and backups; full purge requires `DELETE`. Both modes remove the exact dx-dy import from the host Caddyfile while preserving unrelated Caddy configuration. Caddy is never uninstalled automatically.
 
 ## Update And Rollback
 

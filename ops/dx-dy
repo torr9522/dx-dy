@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.2.1"
+readonly DXDY_MANAGER_VERSION="0.2.2"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.2.1 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.2.2 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
@@ -32,6 +32,7 @@ load_instance() {
   SERVICE="${DXDY_SERVICE:-dx-dy.service}"
   SYSTEMD_UNIT_PATH="${DXDY_SYSTEMD_UNIT_PATH:-/etc/systemd/system/dx-dy.service}"
   CADDY_IMPORT="${DXDY_CADDY_IMPORT:-/etc/caddy/dx-dy.caddy}"
+  CADDY_MAIN="${DXDY_CADDYFILE:-${CADDY_IMPORT%/*}/Caddyfile}"
   DATABASE="$DXDY_DATA_DIR/dx-dy.db"
   [[ -L "$CURRENT_LINK" && -x "$NODE" && -f "$ENV_FILE" ]] || die "Native installation layout is incomplete."
 }
@@ -274,13 +275,22 @@ safe_remove_tree() {
   [[ "$target" == /opt/dx-dy || "$target" == /etc/dx-dy || "$target" == /var/lib/dx-dy || "$target" == /var/backups/dx-dy || ( "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "$target" == /tmp/dxdy-ops-test-* ) ]] || die "Refusing unexpected removal path: $target"
   rm -rf -- "$target"
 }
+remove_caddy_import() {
+  local import_line="import $CADDY_IMPORT" temp
+  [[ -f "$CADDY_MAIN" ]] || return 0
+  temp="$(mktemp "${CADDY_MAIN}.XXXXXX")"
+  awk -v line="$import_line" '$0 != line { print }' "$CADDY_MAIN" >"$temp"
+  chmod --reference="$CADDY_MAIN" "$temp"
+  chown --reference="$CADDY_MAIN" "$temp"
+  mv -f "$temp" "$CADDY_MAIN"
+}
 cmd_uninstall() {
   require_root; load_instance
   printf '1. Uninstall program; preserve config, database and backups\n2. Full purge\n0. Cancel\n'
   local choice confirmation; read -r -p "Choice: " choice
   case "$choice" in
-    1) systemctl disable --now "$SERVICE" || true; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'Program removed; config, database and backups preserved. Caddy was not uninstalled.\n' ;;
-    2) read -r -p 'Type DELETE to continue: ' confirmation; [[ "$confirmation" == DELETE ]] || die "Confirmation did not match."; systemctl disable --now "$SERVICE" || true; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; safe_remove_tree "$CONFIG_DIR"; safe_remove_tree "$DXDY_DATA_DIR"; safe_remove_tree "$DXDY_BACKUP_DIR"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'dx-dy and all instance data removed. Caddy was not uninstalled.\n' ;;
+    1) systemctl disable --now "$SERVICE" || true; remove_caddy_import; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'Program removed; config, database and backups preserved. Caddy was not uninstalled.\n' ;;
+    2) read -r -p 'Type DELETE to continue: ' confirmation; [[ "$confirmation" == DELETE ]] || die "Confirmation did not match."; systemctl disable --now "$SERVICE" || true; remove_caddy_import; rm -f "$SYSTEMD_UNIT_PATH" "$CADDY_IMPORT" "$MANAGER_PATH"; safe_remove_tree "$DXDY_INSTALL_ROOT"; safe_remove_tree "$CONFIG_DIR"; safe_remove_tree "$DXDY_DATA_DIR"; safe_remove_tree "$DXDY_BACKUP_DIR"; systemctl daemon-reload; systemctl reload caddy.service || true; printf 'dx-dy and all instance data removed. Caddy was not uninstalled.\n' ;;
     0) return ;; *) die "Invalid choice." ;;
   esac
 }

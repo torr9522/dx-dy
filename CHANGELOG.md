@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-09
+
+### Fixed
+
+- Added a Fresh Debian/Ubuntu bootstrap command that installs `curl` and CA certificates when absent before securely downloading the public installer.
+- Added the Debian/Ubuntu `libatomic1` runtime dependency required by the bundled Node.js 26.10.0 binary on a minimal Debian 12 host.
+- Added a bundled Node and production dependency preflight before the installer commits configuration, manager, systemd or release state.
+- Removed the exact dx-dy import from the host Caddyfile during normal uninstall and Full Purge so Caddy never retains a dangling include.
+
+### Compatibility
+
+- No database, subscription, runtime, installation layout or backup format changed.
+- Native systemd, Caddy, SQLite, manager delivery and release artifact behavior remain compatible with 0.2.1.
+
 ## [0.2.1] - 2026-10-09
 
 ### Fixed

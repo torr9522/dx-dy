@@ -5,9 +5,11 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -114,7 +116,7 @@ describe("installer query options", () => {
     const result = queryInstaller("--version", true);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe("dx-dy installer 0.2.1\n");
+    expect(result.stdout).toBe("dx-dy installer 0.2.2\n");
   });
 
   it("rejects an unknown option before preflight or mutation", () => {
@@ -125,8 +127,108 @@ describe("installer query options", () => {
   });
 });
 
+describe("fresh host bootstrap command", () => {
+  function runBootstrap(curlInitiallyPresent: boolean) {
+    const root = temp();
+    const bin = path.join(root, "bin");
+    const calls = path.join(root, "calls");
+    const curlStub = path.join(root, "curl-stub");
+    const installer = path.join(root, "downloaded-installer");
+    mkdirSync(bin);
+    symlinkSync("/bin/rm", path.join(bin, "rm"));
+    writeFileSync(
+      path.join(bin, "bash"),
+      `#!/bin/bash
+set -eu
+exec /bin/bash "$@"
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      path.join(bin, "mktemp"),
+      `#!/bin/bash
+set -eu
+printf '%s\n' "$DXDY_BOOTSTRAP_INSTALLER"
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      curlStub,
+      `#!/bin/bash
+set -eu
+printf 'curl\\n' >>"$DXDY_BOOTSTRAP_CALLS"
+target=
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == -o ]]; then target="$2"; shift 2; else shift; fi
+done
+printf '#!/bin/bash\\nprintf "installer-run\\\\n" >>"$DXDY_BOOTSTRAP_CALLS"\\n' >"$target"
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      path.join(bin, "apt-get"),
+      `#!/bin/bash
+set -eu
+printf 'apt-get %s\\n' "$*" >>"$DXDY_BOOTSTRAP_CALLS"
+if [[ "\${1:-}" == install ]]; then
+  /bin/cp "$DXDY_BOOTSTRAP_CURL_STUB" "$DXDY_BOOTSTRAP_BIN/curl"
+  /bin/chmod 0755 "$DXDY_BOOTSTRAP_BIN/curl"
+fi
+`,
+      { mode: 0o755 },
+    );
+    if (curlInitiallyPresent) copyFileSync(curlStub, path.join(bin, "curl"));
+    if (curlInitiallyPresent) chmodSync(path.join(bin, "curl"), 0o755);
+    const readme = readFileSync("README.md", "utf8");
+    const command = readme.match(
+      /<!-- fresh-bootstrap -->\s*```bash\n([\s\S]*?)\n```/,
+    )?.[1];
+    expect(command).toBeTruthy();
+    const result = spawnSync(
+      "/bin/bash",
+      ["-c", `export PATH="$DXDY_BOOTSTRAP_BIN"\n${command!}`],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DXDY_BOOTSTRAP_BIN: bin,
+          DXDY_BOOTSTRAP_CALLS: calls,
+          DXDY_BOOTSTRAP_CURL_STUB: curlStub,
+          DXDY_BOOTSTRAP_INSTALLER: installer,
+        },
+      },
+    );
+    return {
+      result,
+      calls: existsSync(calls) ? readFileSync(calls, "utf8") : "",
+      installer,
+    };
+  }
+
+  it("installs curl and CA certificates before running the public installer", () => {
+    const fixture = runBootstrap(false);
+    expect(
+      fixture.result.status,
+      `calls=${fixture.calls}\n${fixture.result.stdout}\n${fixture.result.stderr}`,
+    ).toBe(0);
+    expect(fixture.calls).toContain("apt-get update");
+    expect(fixture.calls).toContain("apt-get install -y ca-certificates curl");
+    expect(fixture.calls).toContain("curl\ninstaller-run\n");
+    expect(existsSync(fixture.installer)).toBe(false);
+  });
+
+  it("does not invoke apt when curl and CA certificates are present", () => {
+    const fixture = runBootstrap(true);
+    expect(
+      fixture.result.status,
+      `calls=${fixture.calls}\n${fixture.result.stdout}\n${fixture.result.stderr}`,
+    ).toBe(0);
+    expect(fixture.calls).toBe("curl\ninstaller-run\n");
+  });
+});
+
 describe("release ref policy", () => {
-  const version = "0.2.1";
+  const version = "0.2.2";
 
   it("accepts a master branch push", () => {
     expect(
@@ -164,13 +266,13 @@ describe("release ref policy", () => {
       {
         GITHUB_ACTIONS: "true",
         GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/tags/v0.2.1",
+        GITHUB_REF: "refs/tags/v0.2.2",
         GITHUB_REF_TYPE: "tag",
-        GITHUB_REF_NAME: "v0.2.1",
+        GITHUB_REF_NAME: "v0.2.2",
       },
       version,
     );
-    expect(policy).toEqual({ kind: "tag", tag: "v0.2.1" });
+    expect(policy).toEqual({ kind: "tag", tag: "v0.2.2" });
     expect(() =>
       validateTagProvenance({
         head: "abc",
@@ -181,7 +283,7 @@ describe("release ref policy", () => {
     ).not.toThrow();
   });
 
-  it.each(["v0.2.1-rc.1", "release-0.2.1", "v0.2"])(
+  it.each(["v0.2.2-rc.1", "release-0.2.2", "v0.2"])(
     "rejects invalid release tag %s",
     (tag) => {
       expect(() =>
@@ -244,12 +346,12 @@ describe("release ref policy", () => {
     git(seed, "init", "--initial-branch=master");
     git(seed, "config", "user.name", "dx-dy fixture");
     git(seed, "config", "user.email", "fixture@example.com");
-    writeFileSync(path.join(seed, "package.json"), '{"version":"0.2.1"}\n');
+    writeFileSync(path.join(seed, "package.json"), '{"version":"0.2.2"}\n');
     git(seed, "add", "package.json");
     git(seed, "commit", "-m", "fixture");
-    git(seed, "tag", "-a", "v0.2.1", "-m", "dx-dy 0.2.1");
+    git(seed, "tag", "-a", "v0.2.2", "-m", "dx-dy 0.2.2");
     git(seed, "remote", "add", "origin", remote);
-    git(seed, "push", "origin", "master", "refs/tags/v0.2.1");
+    git(seed, "push", "origin", "master", "refs/tags/v0.2.2");
 
     git(runner, "init");
     git(runner, "remote", "add", "origin", remote);
@@ -261,9 +363,9 @@ describe("release ref policy", () => {
       "+refs/heads/master:refs/remotes/origin/master",
     );
     git(runner, "checkout", "--detach", "origin/master");
-    git(runner, "tag", "v0.2.1", "HEAD");
-    const peeledLocalTag = git(runner, "rev-parse", "refs/tags/v0.2.1");
-    expect(git(runner, "cat-file", "-t", "v0.2.1")).toBe("commit");
+    git(runner, "tag", "v0.2.2", "HEAD");
+    const peeledLocalTag = git(runner, "rev-parse", "refs/tags/v0.2.2");
+    expect(git(runner, "cat-file", "-t", "v0.2.2")).toBe("commit");
 
     const oldFetch = spawnSync(
       "git",
@@ -281,18 +383,18 @@ describe("release ref policy", () => {
 
     const policy = validateRepositoryRef({
       cwd: runner,
-      version: "0.2.1",
+      version: "0.2.2",
       env: {
         GITHUB_ACTIONS: "true",
         GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/tags/v0.2.1",
+        GITHUB_REF: "refs/tags/v0.2.2",
         GITHUB_REF_TYPE: "tag",
-        GITHUB_REF_NAME: "v0.2.1",
+        GITHUB_REF_NAME: "v0.2.2",
       },
     });
-    expect(policy).toEqual({ kind: "tag", tag: "v0.2.1" });
-    expect(git(runner, "rev-parse", "refs/tags/v0.2.1")).toBe(peeledLocalTag);
-    expect(git(runner, "cat-file", "-t", "v0.2.1")).toBe("commit");
+    expect(policy).toEqual({ kind: "tag", tag: "v0.2.2" });
+    expect(git(runner, "rev-parse", "refs/tags/v0.2.2")).toBe(peeledLocalTag);
+    expect(git(runner, "cat-file", "-t", "v0.2.2")).toBe("commit");
     expect(git(runner, "rev-parse", "origin/master")).toBe(peeledLocalTag);
   });
 });

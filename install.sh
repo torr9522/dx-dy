@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_VERSION="0.2.1"
+readonly DXDY_VERSION="0.2.2"
 readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -81,7 +81,7 @@ install_dependencies() {
   [[ "$TEST_MODE" == 1 ]] && return
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl gnupg jq openssl tar gzip xz-utils coreutils util-linux iproute2 dnsutils
+  apt-get install -y ca-certificates curl gnupg jq openssl tar gzip xz-utils coreutils util-linux iproute2 dnsutils libatomic1
   if ! have caddy; then
     install -d -m 0755 /usr/share/keyrings
     curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -217,6 +217,15 @@ download_release() {
   tar -xzf "$STAGING/artifact.tar.gz" -C "$STAGING/extract"
   RELEASE_SOURCE="$STAGING/extract/dx-dy-$DXDY_VERSION-linux-$ARCH"
   [[ -x "$RELEASE_SOURCE/runtime/bin/node" && -f "$RELEASE_SOURCE/app/dist/server.mjs" ]] || die "Native artifact layout is invalid."
+}
+
+validate_release_runtime() {
+  if ! "$RELEASE_SOURCE/runtime/bin/node" --version >/dev/null; then
+    die "Bundled Node runtime cannot start on this host."
+  fi
+  if ! (cd "$RELEASE_SOURCE/app" && "$RELEASE_SOURCE/runtime/bin/node" -e "import('argon2')") >/dev/null; then
+    die "Bundled production dependencies cannot load on this host."
+  fi
 }
 
 render_caddy() {
@@ -364,7 +373,7 @@ main() {
     if [[ -n "${DXDY_ADMIN_PASSWORD_FILE:-}" ]]; then [[ -f "$DXDY_ADMIN_PASSWORD_FILE" ]] || die "Password file does not exist."; ADMIN_PASSWORD="$(<"$DXDY_ADMIN_PASSWORD_FILE")"; else prompt_password; fi
     [[ ${#ADMIN_PASSWORD} -ge 12 ]] || die "Password must be at least 12 characters."
   fi
-  STAGING="$(mktemp -d)"; download_release; legacy_backup_and_stop; write_config; commit_installation; initialize_and_start
+  STAGING="$(mktemp -d)"; download_release; validate_release_runtime; legacy_backup_and_stop; write_config; commit_installation; initialize_and_start
   printf '\ndx-dy %s native installation completed.\nAdmin: https://%s\nSubscription: https://%s\nManagement: dx-dy\n' "$DXDY_VERSION" "$ADMIN_DOMAIN" "$SUBSCRIPTION_DOMAIN"
   if [[ "$GENERATED_PASSWORD" == 1 ]]; then printf 'Password (shown once): %s\n' "$ADMIN_PASSWORD"; fi
   unset ADMIN_PASSWORD LEGACY_MASTER_KEY APP_MASTER_KEY || true

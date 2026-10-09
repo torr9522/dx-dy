@@ -98,3 +98,20 @@ peeled target through `git ls-remote`, preserves the checked-out local tag ref,
 and retains the strict requirement that the release target equal current
 `origin/master`. Runtime architecture, schema, installation and business
 behavior are unchanged.
+
+## 0.2.2 - Fresh Host Hardening
+
+Real-world acceptance began from a minimal Debian 12 host with no curl, Node,
+Caddy, Docker or Git. It exposed that the short process-substitution command
+could not bootstrap without curl and that the bundled Node 26.10.0 runtime
+requires `libatomic.so.1` on that host. The documented primary command now uses
+base-system Bash and apt to install curl/CA certificates when required, and the
+installer includes `libatomic1` in its host dependencies.
+
+The installer now launches the bundled Node runtime and imports the production
+Argon2 dependency before writing authoritative installation state. An unusable
+artifact therefore fails before manager, configuration, systemd or release
+installation. Destructive acceptance also found and fixed a dangling Caddy
+import after uninstall: both uninstall modes now remove only the exact dx-dy
+import line while retaining unrelated Caddy configuration. Schema, backup
+formats and business behavior are unchanged.
