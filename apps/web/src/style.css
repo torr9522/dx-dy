@@ -1747,10 +1747,32 @@ pre {
   min-height: 58px;
   padding: 8px 13px;
   display: grid;
-  grid-template-columns: 34px minmax(160px, 1fr) 58px repeat(4, 34px);
+  grid-template-columns: 28px 34px minmax(160px, 1fr) 58px repeat(4, 34px);
   align-items: center;
   gap: 5px;
   border-bottom: 1px solid var(--line);
+}
+.subscription-entry-check {
+  width: 16px;
+  height: 16px;
+  justify-self: center;
+}
+.subscription-selection-toolbar {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.subscription-selection-toolbar > span {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+.subscription-draft-bar {
+  margin-bottom: 18px;
 }
 .subscription-node-row:last-child {
   border-bottom: 0;
@@ -1920,18 +1942,22 @@ pre {
     flex-direction: column;
   }
   .subscription-node-row {
-    grid-template-columns: 30px minmax(0, 1fr) repeat(3, 32px);
+    grid-template-columns: 26px 30px minmax(0, 1fr) repeat(3, 32px);
     padding: 9px 7px;
   }
   .subscription-node-row .source-badge {
-    grid-column: 2;
+    grid-column: 3;
   }
   .subscription-node-row[data-source="local"]
     .subscription-node-main
     + .source-badge
     + button {
-    grid-column: 3;
+    grid-column: 4;
     grid-row: 1;
+  }
+  .subscription-selection-toolbar > span {
+    width: 100%;
+    margin-left: 0;
   }
   .add-node-options,
   .subscription-picker-full,

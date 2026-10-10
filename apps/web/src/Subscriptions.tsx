@@ -62,6 +62,7 @@ type ConfirmSetter = (
     text: string;
     run: () => Promise<void>;
     successMessage?: string;
+    confirmLabel?: string;
     returnFocus?: () => void;
   } | null,
 ) => void;
@@ -334,6 +335,8 @@ function SortableEntry({
   entry,
   index,
   total,
+  selected,
+  toggle,
   move,
   remove,
   edit,
@@ -341,6 +344,8 @@ function SortableEntry({
   entry: SubscriptionEntry;
   index: number;
   total: number;
+  selected: boolean;
+  toggle: (checked: boolean, shiftKey: boolean) => void;
   move: (from: number, to: number) => void;
   remove: () => void;
   edit: () => void;
@@ -356,6 +361,17 @@ function SortableEntry({
       className="subscription-node-row"
       data-source={entry.source}
     >
+      <input
+        className="subscription-entry-check"
+        type="checkbox"
+        checked={selected}
+        aria-label={`选择 ${entry.node.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          toggle(event.currentTarget.checked, event.shiftKey);
+        }}
+        onChange={() => undefined}
+      />
       <button
         className="drag icon-button"
         aria-label={`拖动 ${entry.node.name}`}
@@ -1083,6 +1099,7 @@ export function SubscriptionDetail({
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<NodeRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  const selection = useNodeSelection();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, {
@@ -1097,10 +1114,21 @@ export function SubscriptionDetail({
     setOrdered(result);
     await onSaved();
   };
+  const refreshEntryDetails = async () => {
+    const result = await api<SubscriptionEntry[]>(
+      `/subscriptions/${profile.id}/entries`,
+    );
+    const byId = new Map(result.map((entry) => [entry.id, entry]));
+    setEntries(result);
+    setOrdered((current) =>
+      current.map((entry) => byId.get(entry.id) || entry),
+    );
+    await onSaved();
+  };
   useEffect(() => {
     void reloadEntries();
   }, [profile.id]);
-  const orderDirty = !sameNumbers(
+  const draftDirty = !sameNumbers(
     entries.map((entry) => entry.id),
     ordered.map((entry) => entry.id),
   );
@@ -1113,6 +1141,7 @@ export function SubscriptionDetail({
         .includes(query),
     );
   }, [ordered, search]);
+  const visibleIds = visible.map((entry) => entry.id);
   const duplicateCount = useMemo(() => {
     const seen = new Set<string>();
     let count = 0;
@@ -1128,6 +1157,41 @@ export function SubscriptionDetail({
     if (to < 0 || to >= ordered.length) return;
     setOrdered(arrayMove(ordered, from, to));
   };
+  const removeFromDraft = (ids: readonly number[]) => {
+    const removed = new Set(ids);
+    setOrdered((current) => current.filter((entry) => !removed.has(entry.id)));
+    selection.replace(
+      selection.selectedIds.filter((entryId) => !removed.has(entryId)),
+    );
+  };
+  const discardDraft = () => {
+    setOrdered(entries);
+    selection.clearAll();
+  };
+  const saveDraft = async () => {
+    if (busy || !draftDirty) return;
+    setBusy(true);
+    try {
+      await api(`/subscriptions/${profile.id}/entries`, "PUT", {
+        entry_ids: ordered.map((entry) => entry.id),
+      });
+      selection.clearAll();
+      await reloadEntries();
+      common.notify("节点与顺序已保存");
+    } catch (error) {
+      common.notify((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    const leave = (event: BeforeUnloadEvent) => {
+      if (!draftDirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", leave);
+    return () => window.removeEventListener("beforeunload", leave);
+  }, [draftDirty]);
   const drag = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     move(
@@ -1136,10 +1200,10 @@ export function SubscriptionDetail({
     );
   };
   const leaveMain = () => {
-    if (!orderDirty) return onBack();
+    if (!draftDirty) return onBack();
     common.confirm({
-      title: "放弃未保存顺序？",
-      text: "节点顺序尚未保存。返回后将恢复已持久化顺序。",
+      title: "放弃未保存更改？",
+      text: "节点移除与顺序调整尚未保存。返回后将恢复已持久化状态。",
       run: async () => onBack(),
     });
   };
@@ -1258,7 +1322,12 @@ export function SubscriptionDetail({
             name={profile.name}
             notify={common.notify}
           />
-          <button className="primary" onClick={() => setView("add")}>
+          <button
+            className="primary"
+            disabled={draftDirty}
+            title={draftDirty ? "请先保存或放弃节点草稿" : undefined}
+            onClick={() => setView("add")}
+          >
             <Plus size={16} /> 添加节点
           </button>
         </div>
@@ -1267,10 +1336,13 @@ export function SubscriptionDetail({
         <div className="subscription-list-heading">
           <div>
             <h2>
-              已保存节点 <span className="count">{entries.length}</span>
+              {draftDirty ? "当前节点" : "已保存节点"}{" "}
+              <span className="count">{ordered.length}</span>
             </h2>
             <p className="muted">
-              Global 与 Local 共用同一顺序；搜索只过滤显示。
+              {draftDirty
+                ? `已保存 ${entries.length} · 有未保存更改`
+                : "Global 与 Local 共用同一顺序；搜索只过滤显示。"}
             </p>
           </div>
           <label className="search">
@@ -1284,21 +1356,8 @@ export function SubscriptionDetail({
           </label>
           <button
             className="primary"
-            disabled={busy || !orderDirty}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api(`/subscriptions/${profile.id}/entries/order`, "PUT", {
-                  entry_ids: ordered.map((entry) => entry.id),
-                });
-                await reloadEntries();
-                common.notify("节点顺序已保存");
-              } catch (error) {
-                common.notify((error as Error).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
+            disabled={busy || !draftDirty}
+            onClick={saveDraft}
           >
             保存节点与顺序
           </button>
@@ -1308,6 +1367,45 @@ export function SubscriptionDetail({
             当前订阅存在 {duplicateCount} 个重复配置，请移除重复节点后再保存。
           </div>
         )}
+        <div className="subscription-selection-toolbar">
+          <SelectionMaster
+            selected={selection.selected}
+            selectableIds={visibleIds}
+            toggle={() => selection.toggleVisible(visibleIds)}
+            label="当前搜索结果"
+          />
+          <span>已选择 {selection.selectedCount} 个</span>
+          <button
+            disabled={!selection.selectedCount}
+            onClick={selection.clearAll}
+          >
+            取消选择
+          </button>
+          <button
+            className="danger"
+            disabled={!selection.selectedCount}
+            aria-label={`删除已选 ${selection.selectedCount} 个节点`}
+            onClick={() => {
+              const selectedEntries = ordered.filter((entry) =>
+                selection.selected.has(entry.id),
+              );
+              const globals = selectedEntries.filter(
+                (entry) => entry.source === "global",
+              ).length;
+              const locals = selectedEntries.length - globals;
+              common.confirm({
+                title: `删除已选（${selectedEntries.length}）`,
+                text: `将从当前订阅草稿中移除 ${selectedEntries.length} 个节点。其中 ${globals} 个节点库节点仅解除当前订阅关系，${locals} 个独立节点将在保存时删除。`,
+                successMessage: "已从草稿移除，保存后生效",
+                confirmLabel: "从当前订阅移除",
+                run: async () =>
+                  removeFromDraft(selectedEntries.map((entry) => entry.id)),
+              });
+            }}
+          >
+            <Trash2 size={15} /> 删除已选（{selection.selectedCount}）
+          </button>
+        </div>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -1328,6 +1426,14 @@ export function SubscriptionDetail({
                     entry={entry}
                     index={index}
                     total={ordered.length}
+                    selected={selection.isSelected(entry.id)}
+                    toggle={(checked, shiftKey) =>
+                      selection.toggleOne(entry.id, {
+                        checked,
+                        shiftKey,
+                        visibleIds,
+                      })
+                    }
                     move={move}
                     edit={() => setEditing(entry.node)}
                     remove={() =>
@@ -1338,20 +1444,11 @@ export function SubscriptionDetail({
                             : "移除节点",
                         text:
                           entry.source === "local"
-                            ? `将永久删除当前订阅中的独立节点“${entry.node.name}”。`
-                            : `仅从当前订阅移除“${entry.node.name}”，节点库记录不受影响。`,
-                        successMessage:
-                          entry.source === "local"
-                            ? "独立节点已删除"
-                            : "节点已移除",
-                        run: async () => {
-                          await api(
-                            `/subscriptions/${profile.id}/entries/${entry.id}`,
-                            "DELETE",
-                            {},
-                          );
-                          await reloadEntries();
-                        },
+                            ? `先从草稿移除独立节点“${entry.node.name}”；保存节点与顺序时才会永久删除。`
+                            : `先从草稿移除“${entry.node.name}”；保存后仅解除当前订阅关系，节点库记录不受影响。`,
+                        successMessage: "已从草稿移除，保存后生效",
+                        confirmLabel: "从草稿移除",
+                        run: async () => removeFromDraft([entry.id]),
                       })
                     }
                   />
@@ -1362,10 +1459,25 @@ export function SubscriptionDetail({
         </DndContext>
         {!visible.length && (
           <div className="empty">
-            {entries.length ? "没有匹配的节点" : "当前订阅还没有节点"}
+            {ordered.length
+              ? "没有匹配的节点"
+              : draftDirty
+                ? "当前草稿没有节点"
+                : "当前订阅还没有节点"}
           </div>
         )}
       </section>
+      {draftDirty && (
+        <div className="sticky-save-bar subscription-draft-bar">
+          <span>已修改当前订阅，保存后生效</span>
+          <button disabled={busy} onClick={discardDraft}>
+            放弃更改
+          </button>
+          <button className="primary" disabled={busy} onClick={saveDraft}>
+            保存更改
+          </button>
+        </div>
+      )}
       <section className="subscription-distribution card section-pad">
         <h2>订阅分发</h2>
         <p className="muted">
@@ -1401,7 +1513,7 @@ export function SubscriptionDetail({
           profileId={profile.id}
           node={editing}
           close={() => setEditing(null)}
-          saved={reloadEntries}
+          saved={refreshEntryDetails}
           notify={common.notify}
         />
       )}

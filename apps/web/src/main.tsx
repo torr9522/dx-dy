@@ -462,7 +462,7 @@ function App() {
               })
             }
           >
-            确认
+            {confirm?.confirmLabel || "确认"}
           </button>
         </div>
       </Modal>
@@ -898,6 +898,7 @@ type Confirmation = {
   run: () => Promise<void>;
   returnFocus?: () => void;
   successMessage?: string;
+  confirmLabel?: string;
 };
 type ConfirmSetter = (v: Confirmation | null) => void;
 function NodeDrawer({

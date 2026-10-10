@@ -762,6 +762,30 @@ export async function createApp(options: Options) {
     store.reorderEntries(id(req), entry_ids);
     res.json(store.subscriptionEntries(id(req)));
   });
+  app.put("/api/subscriptions/:id/entries", (req, res) => {
+    const subscriptionId = id(req);
+    getProfile(req);
+    const { entry_ids } = z
+      .object({
+        entry_ids: z
+          .array(z.number().int().positive())
+          .max(1300)
+          .refine((values) => new Set(values).size === values.length),
+      })
+      .parse(req.body);
+    const current = store.subscriptionEntries(subscriptionId);
+    const currentIds = new Set(current.map((entry) => entry.id));
+    if (entry_ids.some((entryId) => !currentIds.has(entryId)))
+      return fail(400, "ENTRY_SET", "节点列表包含不属于当前订阅的记录");
+    const retained = new Set(entry_ids);
+    rejectSemanticDuplicates(
+      current
+        .filter((entry) => retained.has(entry.id))
+        .map((entry) => entry.node),
+    );
+    store.replaceSubscriptionEntries(subscriptionId, entry_ids);
+    res.json(store.subscriptionEntries(subscriptionId));
+  });
   app.delete("/api/subscriptions/:id/entries/:entryId", (req, res) => {
     getProfile(req);
     const entryId = z.coerce

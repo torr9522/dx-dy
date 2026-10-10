@@ -400,6 +400,56 @@ export class Store {
       );
     });
   }
+  replaceSubscriptionEntries(subscriptionId: number, entryIds: number[]) {
+    this.transaction(() => {
+      const entries = this.all(
+        "SELECT id,source_type,local_node_id FROM subscription_entries WHERE subscription_id=? ORDER BY position,id",
+        subscriptionId,
+      );
+      const currentIds = new Set(entries.map((entry) => Number(entry.id)));
+      if (
+        new Set(entryIds).size !== entryIds.length ||
+        entryIds.some((entryId) => !currentIds.has(entryId))
+      )
+        throw new Error("Invalid subscription entry set");
+
+      const retained = new Set(entryIds);
+      this.run(
+        "UPDATE subscription_entries SET position=position+1000000 WHERE subscription_id=?",
+        subscriptionId,
+      );
+      for (const entry of entries) {
+        const entryId = Number(entry.id);
+        if (retained.has(entryId)) continue;
+        if (String(entry.source_type) === "local")
+          this.run(
+            "DELETE FROM subscription_local_nodes WHERE subscription_id=? AND id=?",
+            subscriptionId,
+            Number(entry.local_node_id),
+          );
+        else
+          this.run(
+            "DELETE FROM subscription_entries WHERE subscription_id=? AND id=?",
+            subscriptionId,
+            entryId,
+          );
+      }
+      entryIds.forEach((entryId, position) =>
+        this.run(
+          "UPDATE subscription_entries SET position=? WHERE subscription_id=? AND id=?",
+          position,
+          subscriptionId,
+          entryId,
+        ),
+      );
+      this.syncGlobalMirror(subscriptionId);
+      this.run(
+        "UPDATE subscriptions SET updated_at=? WHERE id=?",
+        now(),
+        subscriptionId,
+      );
+    });
+  }
   deleteEntry(subscriptionId: number, entryId: number) {
     this.transaction(() => {
       const entry = this.get(
