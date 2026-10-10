@@ -2,17 +2,16 @@
 
 ## Release Identity
 
-- Current public stable release: **0.2.5**
+- Current public stable release: **0.2.6**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-The verified public baseline is the annotated `v0.2.5` release. Public tags are immutable.
-
-Development is now on the **0.2.6 LOCAL CANDIDATE**. Its first change scopes
-semantic duplicate detection to the Global Library or one Subscription's Local
-Nodes; cross-namespace Global/Local semantic overlap is valid.
+The verified public baseline is the annotated `v0.2.6` release. Public tags are immutable.
+Version 0.2.6 scopes semantic duplicate detection to the Global Library or one
+Subscription's Local Nodes; cross-namespace Global/Local semantic overlap is
+valid.
 
 ## Persistence And Invariants
 
@@ -52,5 +51,5 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-The 0.2.5 source remains frozen at the public release. Current candidate source
-changes belong to 0.2.6 and are not public until a later release decision.
+The 0.2.6 source is frozen at the public release. The next source change belongs
+to 0.2.7.

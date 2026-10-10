@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.6] - Unreleased
+## [0.2.6] - 2026-10-10
 
 - Scoped semantic duplicate detection to the Global Node Library or the Local
   Nodes owned by one Subscription. Global and Local entries with equal
