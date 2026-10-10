@@ -239,6 +239,54 @@ test("subscription lists remain usable at 20 subscriptions and 100 nodes", async
       .locator(".subscription-row")
       .filter({ hasText: /Scale Subscription|超长中文/ }),
   ).toHaveCount(20);
+  await expect(page.locator(".subscription-list-header")).toContainText(
+    "订阅名称状态节点数操作",
+  );
+  const firstRow = page
+    .locator(".subscription-row")
+    .filter({ hasText: profiles[0].name });
+  const headerCells = page.locator(".subscription-list-header > span");
+  const firstCells = firstRow.locator(":scope > *");
+  for (let column = 0; column < 4; column += 1) {
+    const header = await headerCells.nth(column).boundingBox();
+    const cell = await firstCells.nth(column).boundingBox();
+    expect(header).not.toBeNull();
+    expect(cell).not.toBeNull();
+    expect(Math.abs(header!.x - cell!.x)).toBeLessThanOrEqual(1);
+  }
+  expect((await firstRow.boundingBox())!.height).toBeLessThanOrEqual(72);
+  const longName = page
+    .locator(".subscription-row-name strong")
+    .filter({ hasText: profiles[19].name });
+  await expect(longName).toHaveAttribute("title", profiles[19].name);
+  expect(
+    await longName.evaluate((element) => element.scrollWidth),
+  ).toBeGreaterThan(await longName.evaluate((element) => element.clientWidth));
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    for (const action of [
+      "复制订阅链接",
+      `二维码 ${profiles[0].name}`,
+      "管理订阅",
+      "删除",
+    ])
+      await expect(
+        firstRow.getByRole("button", { name: action, exact: true }),
+      ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    expect(
+      await firstRow.evaluate((element) => element.scrollWidth),
+    ).toBeLessThanOrEqual(
+      await firstRow.evaluate((element) => element.clientWidth),
+    );
+    await page.screenshot({
+      path: `test-results/subscription-list-layout-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page
     .locator(".subscription-row")
     .filter({ hasText: profiles[0].name })
