@@ -1053,6 +1053,113 @@ describe("subscription local nodes and unified ordering", () => {
       system.store.close();
     }
   });
+  it("atomically commits a mixed final entry draft", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const post = (route: string, body: object) =>
+        agent.post(route).set("X-CSRF-Token", csrf).send(body);
+      const globals = (
+        await post("/api/nodes/import", {
+          items: fixtures.slice(0, 2).map(([name, uri]) => ({ name, uri })),
+        })
+      ).body as NodeRecord[];
+      const subscription = (
+        await post("/api/subscriptions", { name: "Atomic mixed draft" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: globals.map((node) => node.id) })
+        .expect(200);
+      await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
+        items: fixtures.slice(6, 8).map(([name, uri]) => ({ name, uri })),
+      }).expect(201);
+      const original = system.store.subscriptionEntries(subscription.id);
+      const retainedGlobal = original.find(
+        (entry) => entry.source === "global" && entry.node.id === globals[1].id,
+      )!;
+      const locals = original.filter((entry) => entry.source === "local");
+      const finalIds = [locals[1].id, retainedGlobal.id];
+
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/entries`)
+        .set("X-CSRF-Token", csrf)
+        .send({ entry_ids: finalIds })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(
+            body.map((entry: SubscriptionEntry) => [
+              entry.id,
+              entry.position,
+              entry.source,
+            ]),
+          ).toEqual([
+            [locals[1].id, 0, "local"],
+            [retainedGlobal.id, 1, "global"],
+          ]);
+        });
+
+      expect(globals.map((node) => system.store.findNode(node.id)?.id)).toEqual(
+        globals.map((node) => node.id),
+      );
+      expect(
+        system.store.get(
+          "SELECT COUNT(*) count FROM subscription_local_nodes WHERE subscription_id=?",
+          subscription.id,
+        )?.count,
+      ).toBe(1);
+      expect(
+        system.store.get(
+          "SELECT node_id,position FROM subscription_nodes WHERE subscription_id=?",
+          subscription.id,
+        ),
+      ).toMatchObject({ node_id: globals[1].id, position: 1 });
+
+      const other = (
+        await post("/api/subscriptions", { name: "Foreign entry owner" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${other.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [globals[0].id] })
+        .expect(200);
+      const foreign = system.store.subscriptionEntries(other.id)[0];
+      await agent
+        .put(`/api/subscriptions/${subscription.id}/entries`)
+        .set("X-CSRF-Token", csrf)
+        .send({ entry_ids: [foreign.id] })
+        .expect(400)
+        .expect(({ body }) => expect(body.error.code).toBe("ENTRY_SET"));
+      expect(
+        system.store
+          .subscriptionEntries(subscription.id)
+          .map((entry) => entry.id),
+      ).toEqual(finalIds);
+
+      expect(() =>
+        system.store.replaceSubscriptionEntries(subscription.id, [
+          finalIds[1],
+          999999,
+        ]),
+      ).toThrow("Invalid subscription entry set");
+      expect(
+        system.store
+          .subscriptionEntries(subscription.id)
+          .map((entry) => [entry.id, entry.position]),
+      ).toEqual([
+        [finalIds[0], 0],
+        [finalIds[1], 1],
+      ]);
+      expect(system.store.all("PRAGMA foreign_key_check")).toHaveLength(0);
+    } finally {
+      system.store.close();
+    }
+  });
 });
 
 describe("node deletion and enabled operations", () => {

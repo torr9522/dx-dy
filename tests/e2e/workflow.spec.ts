@@ -351,7 +351,7 @@ test("complete browser workflow with synthetic nodes", async ({
     "E2E VMess",
   );
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
-  await expect(page.locator(".toast")).toContainText("节点顺序已保存");
+  await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
   const universal = page.locator(".subscription-distribution");
   await universal.getByRole("button", { name: "复制订阅链接" }).click();
   await expect(page.locator(".toast")).toContainText("已复制");
@@ -1179,7 +1179,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
   await page.getByLabel("上移 Global Library WS").click();
   await page.getByLabel("上移 Global Library WS").click();
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
-  await expect(page.locator(".toast")).toContainText("节点顺序已保存");
+  await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
   const visibleOrder = await page
     .locator(".subscription-node-row .subscription-node-main strong")
     .allTextContents();
@@ -1227,9 +1227,16 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
   await page.getByLabel("移除 Local Trojan").click();
   await page
     .getByRole("dialog", { name: "删除独立节点" })
-    .getByRole("button", { name: "确认" })
+    .getByRole("button", { name: "从草稿移除" })
     .click();
   await expect(page.getByText("Local Trojan", { exact: true })).toHaveCount(0);
+  expect(
+    await (
+      await context.request.get(`/api/subscriptions/${profile.id}/entries`)
+    ).json(),
+  ).toHaveLength(7);
+  await page.getByRole("button", { name: "保存节点与顺序" }).click();
+  await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
 
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page
@@ -1401,9 +1408,11 @@ test("subscription semantic duplicates are blocked and historical conflicts are 
   await page.getByRole("button", { name: "移除 Semantic Historical" }).click();
   await page
     .getByRole("dialog", { name: "移除节点" })
-    .getByRole("button", { name: "确认" })
+    .getByRole("button", { name: "从草稿移除" })
     .click();
-  await expect(page.locator(".toast")).toContainText("节点已移除");
+  await expect(page.getByText(/当前订阅存在 1 个重复配置/)).toHaveCount(0);
+  await page.getByRole("button", { name: "保存节点与顺序" }).click();
+  await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
   await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
   await context.request.delete(`/api/collections/${collectionA.id}`, {
     headers,
