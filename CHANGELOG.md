@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.2.5] - 2026-10-09
+## [0.2.5] - 2026-10-10
 
 ### Added
 
@@ -10,11 +10,17 @@
 - Added a compact Subscription row list with persisted enabled switches, total node counts and direct copy/QR/manage/delete actions.
 - Added a source-audited Shadowrocket named-subscription QR alongside the unchanged generic subscription QR.
 - Added migration `003_subscription_local_nodes.sql` with lossless 0.2.4 relationship and position carry-forward.
+- Added per-row and atomic batch deletion to the Global Node Library, including referenced-node protection and selection that survives filtering.
+- Added real persisted enabled switches to Subscription and Node Library rows with failure rollback and serialized rapid updates.
+- Added filtered and cross-search selection to saved Subscription nodes, with mixed Global/Local batch removal and source-specific confirmation.
 
 ### Changed
 
 - Replaced the persistent split Subscription editor with a full-width saved-node workspace and secondary Add Node pages.
 - Separated Global Node selector drafts from persisted Subscription membership; cancel/back never writes and save is the only commit boundary.
+- Made single and batch saved-node removal part of the same ordered draft. One transactional save removes Global relationships, deletes owned Local Nodes and normalizes the mixed order without partial writes.
+- Added a shared sticky save/discard action for long Subscription lists and kept node actions visible at tablet widths.
+- Successful Global selection and Local single-link import now return directly to the refreshed persisted-node list.
 - Portable and Full Migration backups now preserve Local Nodes, mixed order and existing Token continuity through the generic SQLite safety path.
 
 ### Security

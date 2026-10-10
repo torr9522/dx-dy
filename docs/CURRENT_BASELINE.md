@@ -2,14 +2,13 @@
 
 ## Release Identity
 
-- Current development candidate: **0.2.5**
-- Current public stable release: **0.2.4**
+- Current public stable release: **0.2.5**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-The 0.2.5 candidate is local-only until explicit approval. There is no v0.2.5 tag or GitHub Release.
+The verified public baseline is the annotated `v0.2.5` release. Public tags are immutable.
 
 ## Persistence And Invariants
 
@@ -47,4 +46,4 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-The current work is a local 0.2.5 candidate. Do not push, tag or publish it without explicit approval. If 0.2.5 is published, the next real source change is 0.2.6.
+The 0.2.5 source is frozen at the public release. The next real source change is 0.2.6.

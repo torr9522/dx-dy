@@ -10,7 +10,10 @@ identities and pre-public commit mappings.
 - Separated selector drafts from persisted membership and moved selection/import into secondary Subscription pages.
 - Replaced Subscription cards with a compact responsive row list and real enabled switches.
 - Added a separately labeled Shadowrocket named-subscription QR without changing Generic QR or copied URLs.
-- Kept the work as a local candidate pending explicit publication approval.
+- Added per-row and atomic filtered batch deletion to the Node Library with referenced-node protection, plus persisted enabled switches and tablet-safe actions.
+- Added cross-search saved-node selection, draft-only single/batch removal, transactional mixed Global/Local commits and a sticky save/discard action for long lists.
+- Fixed successful Global selection and Local single-link import to return directly to the refreshed persisted-node list.
+- Published the complete candidate hardening line as the immutable `v0.2.5` baseline after clean multi-architecture, migration, recovery and browser gates.
 
 ## 0.1.0 - Core Manager
 

@@ -66,9 +66,8 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The current development version is `0.2.5`; public `v0.2.4` remains the latest
-stable release until the candidate is explicitly approved. Never move an
-existing public tag. The next source change after a public `v0.2.5` is `0.2.6`.
+The current public stable release is `v0.2.5`. Never move an existing public
+tag. The next source change is `0.2.6`.
 
 ## Git Safety And Privacy
 
