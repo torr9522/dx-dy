@@ -35,7 +35,6 @@ import {
   generateURI,
   generateUniversalUriLines,
   generateUniversalBase64Subscription,
-  dedupeSubscriptionNodes,
   findSemanticDuplicateGroups,
   getNodeSemanticKey,
   parseNode,
@@ -198,7 +197,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.5" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.6" });
   });
   app.post(
     "/api/auth/login",
@@ -470,6 +469,28 @@ export async function createApp(options: Options) {
     });
     res.json({ action, collection_ids, node_ids });
   });
+  const rejectSemanticDuplicates = (
+    nodes: (Envelope & { id?: number; name?: string; protocol?: string })[],
+  ) => {
+    const duplicateGroups = findSemanticDuplicateGroups(nodes);
+    if (!duplicateGroups.length) return;
+    throw new ApiError(
+      422,
+      "DUPLICATE_SEMANTICS",
+      "存在重复连接配置，请取消重复节点后再保存",
+      {
+        duplicates: duplicateGroups.flatMap(({ nodes: group }) =>
+          group.slice(1).map((node) => ({
+            node_id: node.id,
+            display_name: node.normalized_config.name,
+            protocol: node.normalized_config.type,
+            duplicate_of_node_id: group[0].id,
+            duplicate_of: group[0].normalized_config.name,
+          })),
+        ),
+      },
+    );
+  };
   app.post("/api/nodes/preview", (req, res) => {
     const { text } = z
       .object({ text: z.string().min(1).max(200000) })
@@ -502,6 +523,7 @@ export async function createApp(options: Options) {
       if (x.name) e.normalized_config.name = x.name;
       return e;
     });
+    rejectSemanticDuplicates([...store.nodes(), ...parsed]);
     const ids = store.transaction(() =>
       parsed.map((e) => {
         const nodeId = store.addNode(e);
@@ -522,6 +544,10 @@ export async function createApp(options: Options) {
     if (x.collection_ids) requireCollections(x.collection_ids);
     const e = editConfig(n, x.normalized_config);
     generateURI(e);
+    rejectSemanticDuplicates([
+      ...store.nodes().filter((node) => node.id !== n.id),
+      e,
+    ]);
     store.transaction(() => {
       store.updateNode(n.id, e, x.remark, x.tags, x.enabled);
       if (x.collection_ids) store.setCollections(n.id, x.collection_ids);
@@ -635,26 +661,27 @@ export async function createApp(options: Options) {
       fail(404, "NOT_FOUND", "独立节点不存在")
     );
   };
-  const rejectSemanticDuplicates = (
-    nodes: (Envelope & { id?: number; name?: string; protocol?: string })[],
+  const localNodes = (subscriptionId: number, excludeId?: number) =>
+    store
+      .subscriptionEntries(subscriptionId)
+      .filter(
+        (entry) =>
+          entry.source === "local" &&
+          (excludeId === undefined || entry.node.id !== excludeId),
+      )
+      .map((entry) => entry.node);
+  const rejectEntrySemanticDuplicates = (
+    entries: ReturnType<typeof store.subscriptionEntries>,
   ) => {
-    const duplicateGroups = findSemanticDuplicateGroups(nodes);
-    if (!duplicateGroups.length) return;
-    throw new ApiError(
-      422,
-      "DUPLICATE_SEMANTICS",
-      "存在重复连接配置，请取消重复节点后再保存",
-      {
-        duplicates: duplicateGroups.flatMap(({ nodes: group }) =>
-          group.slice(1).map((node) => ({
-            node_id: node.id,
-            display_name: node.normalized_config.name,
-            protocol: node.normalized_config.type,
-            duplicate_of_node_id: group[0].id,
-            duplicate_of: group[0].normalized_config.name,
-          })),
-        ),
-      },
+    rejectSemanticDuplicates(
+      entries
+        .filter((entry) => entry.source === "global")
+        .map((entry) => entry.node),
+    );
+    rejectSemanticDuplicates(
+      entries
+        .filter((entry) => entry.source === "local")
+        .map((entry) => entry.node),
     );
   };
   const tokenData = () => {
@@ -730,11 +757,7 @@ export async function createApp(options: Options) {
     if (node_ids.some((nodeId) => !byId.has(nodeId)))
       return fail(400, "NODE", "含不存在的节点");
     const selected = node_ids.map((nodeId) => byId.get(nodeId)!);
-    const locals = store
-      .subscriptionEntries(id(req))
-      .filter((entry) => entry.source === "local")
-      .map((entry) => entry.node);
-    rejectSemanticDuplicates([...selected, ...locals]);
+    rejectSemanticDuplicates(selected);
     store.assign(id(req), node_ids);
     res.json(store.profile(getProfile(req)));
   });
@@ -756,9 +779,7 @@ export async function createApp(options: Options) {
       entry_ids.some((entryId) => !existing.includes(entryId))
     )
       return fail(400, "ENTRY_ORDER", "节点顺序必须包含当前订阅的全部节点");
-    rejectSemanticDuplicates(
-      store.subscriptionEntries(id(req)).map((entry) => entry.node),
-    );
+    rejectEntrySemanticDuplicates(store.subscriptionEntries(id(req)));
     store.reorderEntries(id(req), entry_ids);
     res.json(store.subscriptionEntries(id(req)));
   });
@@ -778,10 +799,8 @@ export async function createApp(options: Options) {
     if (entry_ids.some((entryId) => !currentIds.has(entryId)))
       return fail(400, "ENTRY_SET", "节点列表包含不属于当前订阅的记录");
     const retained = new Set(entry_ids);
-    rejectSemanticDuplicates(
-      current
-        .filter((entry) => retained.has(entry.id))
-        .map((entry) => entry.node),
+    rejectEntrySemanticDuplicates(
+      current.filter((entry) => retained.has(entry.id)),
     );
     store.replaceSubscriptionEntries(subscriptionId, entry_ids);
     res.json(store.subscriptionEntries(subscriptionId));
@@ -807,12 +826,7 @@ export async function createApp(options: Options) {
       .parse(req.body);
     if (text.split("\n").length > 300)
       return fail(400, "LIMIT", "每批最多 300 行");
-    res.json(
-      preview(
-        text,
-        store.subscriptionEntries(id(req)).map((entry) => entry.node),
-      ),
-    );
+    res.json(preview(text, localNodes(id(req))));
   });
   app.post("/api/subscriptions/:id/local-nodes/import", (req, res) => {
     getProfile(req);
@@ -834,13 +848,8 @@ export async function createApp(options: Options) {
       if (item.name) envelope.normalized_config.name = item.name;
       return envelope;
     });
-    rejectSemanticDuplicates([
-      ...store.subscriptionEntries(id(req)).map((entry) => entry.node),
-      ...parsed,
-    ]);
-    const created = parsed.map((envelope) =>
-      store.addLocalNode(id(req), envelope),
-    );
+    rejectSemanticDuplicates([...localNodes(id(req)), ...parsed]);
+    const created = store.addLocalNodes(id(req), parsed);
     res.status(201).json(
       created.map(({ entryId, localNodeId }) => ({
         entry_id: entryId,
@@ -856,13 +865,7 @@ export async function createApp(options: Options) {
     const input = nodeEditSchema.parse(req.body);
     const envelope = editConfig(node, input.normalized_config);
     generateURI(envelope);
-    const others = store
-      .subscriptionEntries(id(req))
-      .filter(
-        (entry) =>
-          !(entry.source === "local" && entry.node.id === localNodeId(req)),
-      )
-      .map((entry) => entry.node);
+    const others = localNodes(id(req), localNodeId(req));
     rejectSemanticDuplicates([...others, envelope]);
     store.updateLocalNode(
       id(req),
@@ -906,13 +909,7 @@ export async function createApp(options: Options) {
         .object({ uri: z.string().max(20000), confirm: z.literal(true) })
         .parse(req.body);
       const envelope = parseURI(input.uri);
-      const others = store
-        .subscriptionEntries(id(req))
-        .filter(
-          (entry) =>
-            !(entry.source === "local" && entry.node.id === localNodeId(req)),
-        )
-        .map((entry) => entry.node);
+      const others = localNodes(id(req), localNodeId(req));
       rejectSemanticDuplicates([...others, envelope]);
       store.updateLocalNode(
         id(req),
@@ -930,13 +927,7 @@ export async function createApp(options: Options) {
       const node = getLocalNode(req);
       z.object({ confirm: z.literal(true) }).parse(req.body);
       const envelope = parseURI(node.original_uri);
-      const others = store
-        .subscriptionEntries(id(req))
-        .filter(
-          (entry) =>
-            !(entry.source === "local" && entry.node.id === localNodeId(req)),
-        )
-        .map((entry) => entry.node);
+      const others = localNodes(id(req), localNodeId(req));
       rejectSemanticDuplicates([...others, envelope]);
       store.updateLocalNode(
         id(req),
@@ -965,11 +956,26 @@ export async function createApp(options: Options) {
     const token = decryptToken(String(p.token_ciphertext), key);
     res.json({ url: buildSubscriptionUrl(token) });
   });
-  const render = <T extends Envelope & { id?: number }>(
-    nodes: T[],
+  const render = (
+    entries: ReturnType<typeof store.subscriptionEntries>,
     format: string,
   ) => {
-    const { emitted, suppressed } = dedupeSubscriptionNodes(nodes);
+    const seen = new Map<string, (typeof entries)[number]>();
+    const emittedEntries: typeof entries = [];
+    const suppressed: {
+      node: (typeof entries)[number];
+      duplicateOf: (typeof entries)[number];
+    }[] = [];
+    for (const entry of entries) {
+      const key = `${entry.source}:${getNodeSemanticKey(entry.node)}`;
+      const first = seen.get(key);
+      if (first) suppressed.push({ node: entry, duplicateOf: first });
+      else {
+        seen.set(key, entry);
+        emittedEntries.push(entry);
+      }
+    }
+    const emitted = emittedEntries.map((entry) => entry.node);
     return {
       body:
         format === "raw"
@@ -986,10 +992,19 @@ export async function createApp(options: Options) {
     const f = z
       .enum(["auto", "raw", "v2ray", "shadowrocket"])
       .parse(req.query.format || "auto");
-    const selectedNodes = store.selectedNodes(Number(p.id));
-    const nodes = selectedNodes.filter((node) => node.enabled);
-    const output = render(nodes, f);
-    const duplicateGroups = findSemanticDuplicateGroups(selectedNodes);
+    const selectedEntries = store.subscriptionEntries(Number(p.id));
+    const selectedNodes = selectedEntries.map((entry) => entry.node);
+    const output = render(
+      selectedEntries.filter((entry) => entry.node.enabled),
+      f,
+    );
+    const duplicateGroups = ["global", "local"].flatMap((source) =>
+      findSemanticDuplicateGroups(
+        selectedEntries
+          .filter((entry) => entry.source === source)
+          .map((entry) => entry.node),
+      ),
+    );
     res.json({
       body: output.body,
       contentType: output.contentType,
@@ -1088,7 +1103,9 @@ export async function createApp(options: Options) {
       const format = z
         .enum(["auto", "raw", "v2ray", "shadowrocket"])
         .parse(req.query.format || "auto");
-      const selected = store.authorized(Number(p.id));
+      const selected = store
+        .subscriptionEntries(Number(p.id))
+        .filter((entry) => entry.node.enabled);
       const output = render(selected, format);
       if (output.suppressed.length)
         console.warn(
@@ -1114,7 +1131,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "dx-dy-0.2.5-source.tar.gz",
+        "dx-dy-0.2.6-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

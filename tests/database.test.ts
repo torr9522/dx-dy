@@ -259,13 +259,20 @@ describe("database migration and portability", () => {
       .set("X-CSRF-Token", csrf)
       .send({ items: [{ uri: localUri }] })
       .expect(201);
+    await agent
+      .post(`/api/subscriptions/${profile.id}/local-nodes/import`)
+      .set("X-CSRF-Token", csrf)
+      .send({ items: [{ uri: vless, name: "Portable local overlap" }] })
+      .expect(201);
     const mixedEntries = a.store.subscriptionEntries(profile.id);
     await agent
       .put(`/api/subscriptions/${profile.id}/entries/order`)
       .set("X-CSRF-Token", csrf)
       .send({
         entry_ids: [
-          mixedEntries.find((entry) => entry.source === "local")!.id,
+          ...mixedEntries
+            .filter((entry) => entry.source === "local")
+            .map((entry) => entry.id),
           ...mixedEntries
             .filter((entry) => entry.source === "global")
             .map((entry) => entry.id),
@@ -299,6 +306,13 @@ describe("database migration and portability", () => {
     expect(JSON.parse(portableLocal.normalized_config).uuid).toBe(
       nonRfcVmessUuid,
     );
+    expect(
+      independent
+        .prepare(
+          "SELECT COUNT(*) n FROM subscription_local_nodes WHERE subscription_id=?",
+        )
+        .get(profile.id)?.n,
+    ).toBe(2);
     integrity(independent);
     independent.close();
     run(["bundle", bundle], {
@@ -352,12 +366,15 @@ describe("database migration and portability", () => {
       );
       expect(
         b.store.subscriptionEntries(profile.id).map((entry) => entry.source),
-      ).toEqual(["local", "global", "global"]);
+      ).toEqual(["local", "local", "global", "global"]);
       expect(b.store.subscriptionEntries(profile.id)[0].node.original_uri).toBe(
         localUri,
       );
       const restoredBody = (await request(b.app).get(new URL(url).pathname))
         .text;
+      expect(
+        Buffer.from(restoredBody, "base64").toString("utf8").split("\n"),
+      ).toHaveLength(3);
       expect(createHash("sha256").update(restoredBody).digest("hex")).toBe(
         bodyHash,
       );

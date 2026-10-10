@@ -69,6 +69,7 @@ type Preview = {
   status: string;
   envelope: Envelope | null;
   duplicate: boolean;
+  duplicate_scope?: "existing" | "batch" | null;
   error: string | null;
   code?: string;
   field?: string;
@@ -290,7 +291,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.5</small>
+          <small>dx-dy v0.2.6</small>
         </div>
       </aside>
       <main>
@@ -796,7 +797,7 @@ function ImportDialog({
                         aria-label={`导入第 ${r.index + 1} 行`}
                         type="checkbox"
                         checked={selected.has(r.index)}
-                        disabled={!r.envelope}
+                        disabled={!r.envelope || r.duplicate}
                         onChange={(e) =>
                           setSelected((s) => {
                             const n = new Set(s);
@@ -846,7 +847,9 @@ function ImportDialog({
                         {r.error ||
                           [
                             r.duplicate
-                              ? "可能重复，默认不选中；可手动确认保留"
+                              ? r.duplicate_scope === "batch"
+                                ? "与本次导入前面的节点重复"
+                                : "与节点库已有节点重复"
                               : "",
                             ...r.envelope!.parse_warnings,
                           ]

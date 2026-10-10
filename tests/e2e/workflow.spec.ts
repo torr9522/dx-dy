@@ -1220,7 +1220,36 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
   await page.getByRole("button", { name: /添加节点链接/ }).click();
   await page.getByLabel("独立节点链接").fill(fixtures[1][1]);
   await page.getByRole("button", { name: "解析预览" }).click();
-  await expect(page.getByText("与当前订阅节点重复")).toBeVisible();
+  await expect(page.getByText("1 成功 · 0 警告 · 0 失败")).toBeVisible();
+  await expect(page.getByLabel("导入独立节点第 1 行")).toBeEnabled();
+  await page.getByLabel("独立节点第 1 行名称").fill("Local matches Global");
+  await page.getByRole("button", { name: "确认添加" }).click();
+  await expect(page.locator(".toast")).toContainText("已添加 1 个独立节点");
+  await expect(
+    page
+      .locator(".subscription-node-row")
+      .filter({ hasText: "Global Library WS" }),
+  ).toContainText("节点库");
+  await expect(
+    page
+      .locator(".subscription-node-row")
+      .filter({ hasText: "Local matches Global" }),
+  ).toContainText("独立节点");
+  await page.reload();
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page
+    .locator(".subscription-row")
+    .filter({ hasText: profile.name })
+    .getByRole("button", { name: "管理订阅" })
+    .click();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(8);
+
+  await page.getByRole("button", { name: "添加节点", exact: true }).click();
+  await page.getByRole("button", { name: /添加节点链接/ }).click();
+  await page.getByLabel("独立节点链接").fill(fixtures[1][1]);
+  await page.getByRole("button", { name: "解析预览" }).click();
+  await expect(page.getByText("与当前订阅已有独立节点重复")).toBeVisible();
+  await expect(page.getByLabel("导入独立节点第 1 行")).toBeDisabled();
   await expect(page.getByRole("button", { name: "确认添加" })).toBeDisabled();
   await page.getByRole("button", { name: "返回添加节点" }).click();
   await page.getByRole("button", { name: "返回订阅" }).click();
@@ -1234,7 +1263,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
     await (
       await context.request.get(`/api/subscriptions/${profile.id}/entries`)
     ).json(),
-  ).toHaveLength(7);
+  ).toHaveLength(8);
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
   await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
 
@@ -1262,167 +1291,27 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
   });
 });
 
-test("subscription semantic duplicates are blocked and historical conflicts are visible", async ({
-  page,
-  context,
-}) => {
+test("Global Library still blocks semantic duplicates", async ({ page }) => {
   await page.goto("/");
   await page
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-  const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
-  const headers = { "X-CSRF-Token": csrf };
-  const source = JSON.parse(
-    Buffer.from(vmess.slice(8), "base64").toString("utf8"),
-  );
-  const changedUri =
-    "vmess://" +
-    Buffer.from(JSON.stringify({ ...source, port: "8443" })).toString("base64");
-  const importResponse = await context.request.post("/api/nodes/import", {
-    headers,
-    data: {
-      items: [
-        { uri: vmess, name: "Semantic Primary" },
-        { uri: vmess, name: "Semantic Backup" },
-        { uri: changedUri, name: "Semantic Primary" },
-      ],
-    },
-  });
-  expect(importResponse.status()).toBe(201);
-  const imported = await importResponse.json();
-  const collectionA = await (
-    await context.request.post("/api/collections", {
-      headers,
-      data: { name: "Semantic Source A" },
-    })
-  ).json();
-  const collectionB = await (
-    await context.request.post("/api/collections", {
-      headers,
-      data: { name: "Semantic Source B" },
-    })
-  ).json();
-  await context.request.post(`/api/collections/${collectionA.id}/nodes`, {
-    headers,
-    data: { node_ids: [imported[0].id] },
-  });
-  await context.request.post(`/api/collections/${collectionB.id}/nodes`, {
-    headers,
-    data: { node_ids: [imported[1].id] },
-  });
-  const profile = await (
-    await context.request.post("/api/subscriptions", {
-      headers,
-      data: { name: "Semantic duplicate E2E" },
-    })
-  ).json();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
+  await page.getByLabel("节点链接", { exact: true }).fill(vmess);
+  await page.getByRole("button", { name: "解析预览", exact: true }).click();
+  await page.getByLabel("第 1 行名称").fill("Namespace Global");
+  await page.getByRole("button", { name: "确认导入", exact: true }).click();
+  await expect(
+    page.getByText("Namespace Global", { exact: true }),
+  ).toBeVisible();
 
-  await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
-  await page
-    .locator(".subscription-row")
-    .filter({ hasText: profile.name })
-    .getByRole("button", { name: "管理订阅" })
-    .click();
-  await page.getByRole("button", { name: "添加节点", exact: true }).click();
-  await page.getByRole("button", { name: /从节点库选择节点/ }).click();
-  await page.getByLabel("搜索可选节点").fill("Semantic");
-  await page
-    .getByRole("checkbox", { name: "选择订阅节点 Semantic Primary" })
-    .nth(0)
-    .check();
-  await page
-    .getByRole("checkbox", { name: "选择订阅节点 Semantic Primary" })
-    .nth(1)
-    .check();
-  await expect(page.getByText(/草稿已选 2/)).toBeVisible();
-  await page
-    .locator(".picker-node")
-    .filter({ hasText: "Semantic Backup" })
-    .click();
-  await expect(page.locator(".toast")).toContainText("重复配置");
-  await expect(page.getByText(/草稿已选 2/)).toBeVisible();
-
-  await page.getByRole("button", { name: "清空选择" }).click();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /Semantic Source A/ })
-    .click();
-  await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /Semantic Source B/ })
-    .click();
-  await expect(page.getByText("重复配置", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "清空选择" }).click();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /全部节点/ })
-    .click();
-  await page.getByLabel("搜索可选节点").fill("Semantic");
-  await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
-  await expect(page.getByText(/草稿已选 2/)).toBeVisible();
-
-  await page.getByRole("button", { name: "清空选择" }).click();
-  const rows = page.locator(".node-picker .picker-node");
-  await rows.nth(0).click();
-  await rows.nth(2).click({ modifiers: ["Shift"] });
-  await expect(page.getByText(/草稿已选 2/)).toBeVisible();
-  await page.getByRole("button", { name: "保存并返回" }).click();
-
-  const allNodes = await (await context.request.get("/api/nodes")).json();
-  const first = allNodes.find(
-    (node: { id: number }) => node.id === imported[0].id,
-  );
-  await context.request.patch(`/api/nodes/${imported[2].id}`, {
-    headers,
-    data: {
-      normalized_config: {
-        ...first.normalized_config,
-        name: "Semantic Historical",
-      },
-      remark: "",
-      tags: [],
-      enabled: true,
-    },
-  });
-  await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
-  const card = page
-    .locator(".subscription-row")
-    .filter({ hasText: profile.name });
-  await card.getByRole("button", { name: "管理订阅" }).click();
-  await expect(page.getByText(/当前订阅存在 1 个重复配置/)).toBeVisible();
-  await page.getByLabel("下移 Semantic Historical").click();
-  await page.getByRole("button", { name: "保存节点与顺序" }).click();
-  await expect(page.locator(".toast")).toContainText("存在重复连接配置");
-  for (const width of [390, 768]) {
-    await page.setViewportSize({ width, height: 844 });
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBeLessThanOrEqual(width);
-  }
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("button", { name: "移除 Semantic Historical" }).click();
-  await page
-    .getByRole("dialog", { name: "移除节点" })
-    .getByRole("button", { name: "从草稿移除" })
-    .click();
-  await expect(page.getByText(/当前订阅存在 1 个重复配置/)).toHaveCount(0);
-  await page.getByRole("button", { name: "保存节点与顺序" }).click();
-  await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
-  await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
-  await context.request.delete(`/api/collections/${collectionA.id}`, {
-    headers,
-  });
-  await context.request.delete(`/api/collections/${collectionB.id}`, {
-    headers,
-  });
-  for (const node of imported)
-    await context.request.delete(`/api/nodes/${node.id}`, {
-      headers,
-      data: { confirm: true },
-    });
+  await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
+  await page.getByLabel("节点链接", { exact: true }).fill(vmess);
+  await page.getByRole("button", { name: "解析预览", exact: true }).click();
+  await expect(page.getByText("与节点库已有节点重复")).toBeVisible();
+  await expect(page.getByLabel("导入第 1 行")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
 });

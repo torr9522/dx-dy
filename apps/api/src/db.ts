@@ -315,45 +315,55 @@ export class Store {
         String(entry.created_at),
       );
   }
-  addLocalNode(subscriptionId: number, envelope: Envelope) {
+  private insertLocalNode(subscriptionId: number, envelope: Envelope) {
     const timestamp = now();
-    return this.transaction(() => {
-      const localNodeId = Number(
-        this.run(
-          "INSERT INTO subscription_local_nodes(subscription_id,name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          subscriptionId,
-          envelope.normalized_config.name,
-          "",
-          envelope.normalized_config.type,
-          envelope.original_uri,
-          JSON.stringify(envelope.normalized_config),
-          JSON.stringify(envelope.unknown_params),
-          envelope.parser_name,
-          envelope.parser_version,
-          JSON.stringify(envelope.parse_warnings),
-          JSON.stringify(envelope.unsupported_fields),
-          1,
-          timestamp,
-          timestamp,
-        ).lastInsertRowid,
-      );
-      const position = Number(
-        this.get(
-          "SELECT COALESCE(MAX(position),-1)+1 AS position FROM subscription_entries WHERE subscription_id=?",
-          subscriptionId,
-        )?.position,
-      );
-      const entryId = Number(
-        this.run(
-          "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'local',NULL,?,?,?)",
-          subscriptionId,
-          localNodeId,
-          position,
-          timestamp,
-        ).lastInsertRowid,
-      );
-      return { entryId, localNodeId };
-    });
+    const localNodeId = Number(
+      this.run(
+        "INSERT INTO subscription_local_nodes(subscription_id,name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        subscriptionId,
+        envelope.normalized_config.name,
+        "",
+        envelope.normalized_config.type,
+        envelope.original_uri,
+        JSON.stringify(envelope.normalized_config),
+        JSON.stringify(envelope.unknown_params),
+        envelope.parser_name,
+        envelope.parser_version,
+        JSON.stringify(envelope.parse_warnings),
+        JSON.stringify(envelope.unsupported_fields),
+        1,
+        timestamp,
+        timestamp,
+      ).lastInsertRowid,
+    );
+    const position = Number(
+      this.get(
+        "SELECT COALESCE(MAX(position),-1)+1 AS position FROM subscription_entries WHERE subscription_id=?",
+        subscriptionId,
+      )?.position,
+    );
+    const entryId = Number(
+      this.run(
+        "INSERT INTO subscription_entries(subscription_id,source_type,node_id,local_node_id,position,created_at) VALUES(?,'local',NULL,?,?,?)",
+        subscriptionId,
+        localNodeId,
+        position,
+        timestamp,
+      ).lastInsertRowid,
+    );
+    return { entryId, localNodeId };
+  }
+  addLocalNode(subscriptionId: number, envelope: Envelope) {
+    return this.transaction(() =>
+      this.insertLocalNode(subscriptionId, envelope),
+    );
+  }
+  addLocalNodes(subscriptionId: number, envelopes: Envelope[]) {
+    return this.transaction(() =>
+      envelopes.map((envelope) =>
+        this.insertLocalNode(subscriptionId, envelope),
+      ),
+    );
   }
   updateLocalNode(
     subscriptionId: number,

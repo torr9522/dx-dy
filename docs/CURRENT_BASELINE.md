@@ -10,6 +10,10 @@
 
 The verified public baseline is the annotated `v0.2.5` release. Public tags are immutable.
 
+Development is now on the **0.2.6 LOCAL CANDIDATE**. Its first change scopes
+semantic duplicate detection to the Global Library or one Subscription's Local
+Nodes; cross-namespace Global/Local semantic overlap is valid.
+
 ## Persistence And Invariants
 
 - SQLite WAL; schemas `001_initial.sql`, `002_node_collections.sql` and `003_subscription_local_nodes.sql`
@@ -18,7 +22,9 @@ The verified public baseline is the annotated `v0.2.5` release. Public tags are 
 - Subscription Local Nodes belong to exactly one Subscription and share one ordered `subscription_entries` sequence with Global Nodes
 - **NO AUTO SUBSCRIPTION**: Collection changes never synchronize a Subscription
 - Canonical `/s/:token` is standard Base64 of UTF-8 LF-separated share URIs
-- Library/Collections may contain equivalent Nodes; Subscription output is semantically unique
+- Library/Collections may contain equivalent Nodes. Global and Local entries in
+  one Subscription use separate duplicate namespaces; equal Global/Local
+  semantics remain two output entries in their saved order.
 - Token plaintext is not stored or logged; continuity requires SQLite plus `APP_MASTER_KEY`
 
 ## Supported Installation
@@ -46,4 +52,5 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-The 0.2.5 source is frozen at the public release. The next real source change is 0.2.6.
+The 0.2.5 source remains frozen at the public release. Current candidate source
+changes belong to 0.2.6 and are not public until a later release decision.

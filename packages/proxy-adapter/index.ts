@@ -345,6 +345,7 @@ export function fingerprints(e: Envelope) {
 }
 export function preview(text: string, existing: Envelope[] = []) {
   const seen = [...existing];
+  const existingCount = seen.length;
   return text
     .split(/\r?\n/)
     .map((line, index) => ({ line: line.trim(), index }))
@@ -353,10 +354,11 @@ export function preview(text: string, existing: Envelope[] = []) {
       try {
         const envelope = parseNode(line),
           fp = fingerprints(envelope);
-        const duplicate = seen.some((e) => {
+        const duplicateIndex = seen.findIndex((e) => {
           const p = fingerprints(e);
           return p.raw === fp.raw || p.semantic === fp.semantic;
         });
+        const duplicate = duplicateIndex !== -1;
         seen.push(envelope);
         return {
           index,
@@ -364,6 +366,11 @@ export function preview(text: string, existing: Envelope[] = []) {
             duplicate || envelope.parse_warnings.length ? "warning" : "success",
           envelope,
           duplicate,
+          duplicate_scope: duplicate
+            ? duplicateIndex < existingCount
+              ? "existing"
+              : "batch"
+            : null,
           error: null,
         };
       } catch (error) {
@@ -373,9 +380,8 @@ export function preview(text: string, existing: Envelope[] = []) {
           status: "failure",
           envelope: null,
           duplicate: false,
-          error: known
-            ? error.message
-            : "无法解析此行，请检查格式和必需参数",
+          duplicate_scope: null,
+          error: known ? error.message : "无法解析此行，请检查格式和必需参数",
           code: known ? error.code : "PARSE_ERROR",
           field: known ? error.field : undefined,
         };

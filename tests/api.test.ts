@@ -54,7 +54,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.5",
+      version: "0.2.6",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -1017,9 +1017,26 @@ describe("subscription local nodes and unified ordering", () => {
           .map((uri) => parseNode(uri).normalized_config.type),
       ).toEqual(["vmess", "vless"]);
 
-      await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
-        items: [{ uri: vless, name: "Duplicate global" }],
-      }).expect(422);
+      const sameAsGlobal = await post(
+        `/api/subscriptions/${subscription.id}/local-nodes/import`,
+        {
+          items: [{ uri: vless, name: "Duplicate global" }],
+        },
+      ).expect(201);
+      const sameAsGlobalEntry = system.store
+        .subscriptionEntries(subscription.id)
+        .find(
+          (entry) =>
+            entry.source === "local" &&
+            entry.node.id === sameAsGlobal.body[0].node.id,
+        )!;
+      await agent
+        .delete(
+          `/api/subscriptions/${subscription.id}/entries/${sameAsGlobalEntry.id}`,
+        )
+        .set("X-CSRF-Token", csrf)
+        .send({})
+        .expect(200);
       await post(`/api/subscriptions/${subscription.id}/local-nodes/import`, {
         items: [
           { uri: nonRfcVmess, name: "Duplicate local A" },
@@ -1246,6 +1263,191 @@ describe("node deletion and enabled operations", () => {
 });
 
 describe("subscription semantic duplicate protection", () => {
+  it("scopes duplicates to the Global Library or one Subscription's Local Nodes", async () => {
+    const system = await createApp(options);
+    try {
+      const agent = request.agent(system.app);
+      const login = await agent
+        .post("/api/auth/login")
+        .send({ username: "admin", password });
+      const csrf = login.body.csrf as string;
+      const post = (route: string, body: object) =>
+        agent.post(route).set("X-CSRF-Token", csrf).send(body);
+      const patch = (route: string, body: object) =>
+        agent.patch(route).set("X-CSRF-Token", csrf).send(body);
+
+      const global = (
+        await post("/api/nodes/import", {
+          items: [{ uri: vless, name: "Global VLESS" }],
+        }).expect(201)
+      ).body[0] as NodeRecord;
+      const first = (
+        await post("/api/subscriptions", { name: "Namespace one" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${first.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [global.id] })
+        .expect(200);
+
+      const crossPreview = await post(
+        `/api/subscriptions/${first.id}/local-nodes/preview`,
+        { text: vless },
+      ).expect(200);
+      expect(crossPreview.body[0]).toMatchObject({
+        status: "success",
+        duplicate: false,
+        duplicate_scope: null,
+      });
+      const crossLocal = (
+        await post(`/api/subscriptions/${first.id}/local-nodes/import`, {
+          items: [{ uri: vless, name: "Local VLESS" }],
+        }).expect(201)
+      ).body[0].node as NodeRecord;
+      expect(system.store.subscriptionEntries(first.id)).toHaveLength(2);
+      expect(
+        system.store.profile(
+          system.store.get("SELECT * FROM subscriptions WHERE id=?", first.id)!,
+        ).node_count,
+      ).toBe(2);
+
+      const localPreview = await post(
+        `/api/subscriptions/${first.id}/local-nodes/preview`,
+        { text: vless },
+      ).expect(200);
+      expect(localPreview.body[0]).toMatchObject({
+        status: "warning",
+        duplicate: true,
+        duplicate_scope: "existing",
+      });
+      await post(`/api/subscriptions/${first.id}/local-nodes/import`, {
+        items: [{ uri: vless, name: "Blocked Local" }],
+      })
+        .expect(422)
+        .expect(({ body }) =>
+          expect(body.error.code).toBe("DUPLICATE_SEMANTICS"),
+        );
+
+      const batchPreview = await post(
+        `/api/subscriptions/${first.id}/local-nodes/preview`,
+        { text: `${nonRfcVmess}\n${nonRfcVmess}` },
+      ).expect(200);
+      expect(
+        batchPreview.body.map((row: { status: string }) => row.status),
+      ).toEqual(["success", "warning"]);
+      expect(batchPreview.body[1]).toMatchObject({
+        duplicate: true,
+        duplicate_scope: "batch",
+      });
+      await post(`/api/subscriptions/${first.id}/local-nodes/import`, {
+        items: [{ uri: nonRfcVmess }, { uri: nonRfcVmess }],
+      }).expect(422);
+
+      const second = (
+        await post("/api/subscriptions", { name: "Namespace two" })
+      ).body as Profile;
+      await post(`/api/subscriptions/${second.id}/local-nodes/preview`, {
+        text: vless,
+      })
+        .expect(200)
+        .expect(({ body }) =>
+          expect(body[0]).toMatchObject({
+            status: "success",
+            duplicate: false,
+          }),
+        );
+      await post(`/api/subscriptions/${second.id}/local-nodes/import`, {
+        items: [{ uri: vless, name: "Other Subscription Local" }],
+      }).expect(201);
+
+      await post("/api/nodes/import", {
+        items: [{ uri: vless, name: "Blocked Global" }],
+      })
+        .expect(422)
+        .expect(({ body }) =>
+          expect(body.error.code).toBe("DUPLICATE_SEMANTICS"),
+        );
+      const globalPreview = await post("/api/nodes/preview", {
+        text: vless,
+      }).expect(200);
+      expect(globalPreview.body[0]).toMatchObject({
+        status: "warning",
+        duplicate: true,
+      });
+
+      const localOnly = (
+        await post("/api/subscriptions", { name: "Local-only source" })
+      ).body as Profile;
+      await post(`/api/subscriptions/${localOnly.id}/local-nodes/import`, {
+        items: [{ uri: vmess, name: "Local before Global" }],
+      }).expect(201);
+      await post("/api/nodes/import", {
+        items: [{ uri: vmess, name: "Global after Local" }],
+      }).expect(201);
+
+      const editCross = (
+        await post("/api/subscriptions", { name: "Edit across namespace" })
+      ).body as Profile;
+      await agent
+        .put(`/api/subscriptions/${editCross.id}/nodes`)
+        .set("X-CSRF-Token", csrf)
+        .send({ node_ids: [global.id] })
+        .expect(200);
+      const editable = (
+        await post(`/api/subscriptions/${editCross.id}/local-nodes/import`, {
+          items: [{ uri: nonRfcVmess, name: "Editable Local" }],
+        }).expect(201)
+      ).body[0].node as NodeRecord;
+      await patch(
+        `/api/subscriptions/${editCross.id}/local-nodes/${editable.id}`,
+        {
+          normalized_config: global.normalized_config,
+          remark: "",
+          enabled: true,
+        },
+      ).expect(200);
+
+      const editLocal = (
+        await post("/api/subscriptions", { name: "Edit local collision" })
+      ).body as Profile;
+      const editLocals = (
+        await post(`/api/subscriptions/${editLocal.id}/local-nodes/import`, {
+          items: [
+            { uri: nonRfcVmess, name: "Edit source" },
+            { uri: fixtures[7][1], name: "Edit target" },
+          ],
+        }).expect(201)
+      ).body.map((item: { node: NodeRecord }) => item.node) as NodeRecord[];
+      await patch(
+        `/api/subscriptions/${editLocal.id}/local-nodes/${editLocals[0].id}`,
+        {
+          normalized_config: editLocals[1].normalized_config,
+          remark: "",
+          enabled: true,
+        },
+      ).expect(422);
+
+      const entries = system.store.subscriptionEntries(first.id);
+      await agent
+        .put(`/api/subscriptions/${first.id}/entries/order`)
+        .set("X-CSRF-Token", csrf)
+        .send({ entry_ids: entries.map((entry) => entry.id).reverse() })
+        .expect(200);
+      const url = (await agent.get(`/api/subscriptions/${first.id}/url`)).body
+        .url as string;
+      const raw = await request(system.app).get(
+        new URL(url).pathname + "?format=raw",
+      );
+      expect(raw.text.split("\n")).toHaveLength(2);
+      expect(
+        system.store.subscriptionEntries(first.id).map((entry) => entry.source),
+      ).toEqual(["local", "global"]);
+      expect(system.store.findLocalNode(first.id, crossLocal.id)).toBeDefined();
+    } finally {
+      system.store.close();
+    }
+  });
+
   it("rejects new duplicates, preserves historical relations, and dedupes every feed", async () => {
     const system = await createApp(options);
     try {
@@ -1256,14 +1458,13 @@ describe("subscription semantic duplicate protection", () => {
       const csrf = login.body.csrf as string;
       const post = (route: string, body: object) =>
         agent.post(route).set("X-CSRF-Token", csrf).send(body);
-      const imported = (
-        await post("/api/nodes/import", {
-          items: [
-            { uri: vmess, name: "阿里香港" },
-            { uri: vmess, name: "HK Backup" },
-          ],
-        })
-      ).body as NodeRecord[];
+      const first = parseNode(vmess);
+      first.normalized_config.name = "阿里香港";
+      const second = parseNode(vmess);
+      second.normalized_config.name = "HK Backup";
+      const imported = [first, second].map((node) =>
+        system.store.findNode(system.store.addNode(node)),
+      ) as NodeRecord[];
       const listed = (await agent.get("/api/nodes")).body as NodeRecord[];
       expect(
         listed.find((node) => node.id === imported[0].id)?.semantic_key,

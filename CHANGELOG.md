@@ -1,6 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.6] - Unreleased
+
+- Scoped semantic duplicate detection to the Global Node Library or the Local
+  Nodes owned by one Subscription. Global and Local entries with equal
+  connection semantics can coexist, retain mixed order and both render.
+- Kept strict Global/Global, same-Subscription Local/Local and import-batch
+  duplicate defenses with source-specific Local import warnings.
 
 ## [0.2.5] - 2026-10-10
 

@@ -174,6 +174,10 @@ describe("protocol adapter", () => {
     const p = preview(vless + "\n" + vless);
     expect(p).toHaveLength(2);
     expect(p[1].duplicate).toBe(true);
+    expect(p[1].duplicate_scope).toBe("batch");
+    expect(preview(vless, [parseNode(vless)])[0].duplicate_scope).toBe(
+      "existing",
+    );
   });
   it("name alone is not node identity but unknown parameters distinguish assets", () => {
     const e = parseNode(vless);

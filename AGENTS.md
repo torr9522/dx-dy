@@ -28,11 +28,13 @@ referrals or tickets without an explicit product decision.
 - Canonical `/s/:token` output is UTF-8 LF-separated share URIs encoded with
   standard Base64. Legacy client aliases are byte-identical. Raw output is an
   authenticated debugging view only.
-- Global Node Library and Collections may contain equivalent connections. A
-  Subscription selection/output is semantically unique. Duplicate comparison
-  uses current rendered connection semantics, never name or Node ID.
-- Historical duplicate relationships are not automatically deleted. At output,
-  the lowest subscription position wins.
+- Global Library Nodes and each Subscription's Local Nodes are separate
+  semantic duplicate namespaces. Global/Global duplicates are blocked in the
+  Library; Local/Local duplicates are blocked within one Subscription. A
+  Global and Local Node with equal connection semantics may coexist and both
+  render in their saved order.
+- Historical same-namespace duplicate relationships are not automatically
+  deleted. At output, the lowest position within that namespace wins.
 
 ## Protocol Source of Truth
 

@@ -76,6 +76,7 @@ type Preview = {
   status: string;
   envelope: Envelope | null;
   duplicate: boolean;
+  duplicate_scope?: "existing" | "batch" | null;
   error: string | null;
   code?: string;
   field?: string;
@@ -872,7 +873,9 @@ function LocalImport({
                       <small className={row.error ? "danger-text" : "muted"}>
                         {row.error ||
                           (row.duplicate
-                            ? "与当前订阅节点重复"
+                            ? row.duplicate_scope === "batch"
+                              ? "与本次导入前面的独立节点重复"
+                              : "与当前订阅已有独立节点重复"
                             : row.envelope?.parse_warnings.join("；") ||
                               "解析成功")}
                       </small>
@@ -1146,7 +1149,7 @@ export function SubscriptionDetail({
     const seen = new Set<string>();
     let count = 0;
     for (const entry of ordered) {
-      const key = entry.node.semantic_key;
+      const key = `${entry.source}:${entry.node.semantic_key}`;
       if (!key) continue;
       if (seen.has(key)) count += 1;
       else seen.add(key);
