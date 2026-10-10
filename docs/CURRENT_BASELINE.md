@@ -2,19 +2,17 @@
 
 ## Release Identity
 
-- Current public stable release: **0.2.6**
+- Current public stable release: **0.2.7**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-The verified public baseline is the annotated `v0.2.6` release. Public tags are immutable.
-Version 0.2.6 scopes semantic duplicate detection to the Global Library or one
-Subscription's Local Nodes; cross-namespace Global/Local semantic overlap is
-valid.
-
-Development is now on the **0.2.7 LOCAL CANDIDATE**, limited to the
-Subscription index row layout.
+The verified public baseline is the annotated `v0.2.7` release. Public tags are
+immutable. Version 0.2.7 refines the Subscription index into compact aligned
+rows with responsive tablet and mobile action layouts. It preserves the 0.2.6
+duplicate namespace policy and makes no API, schema, renderer, protocol or
+backup format change.
 
 ## Persistence And Invariants
 
@@ -54,5 +52,5 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-The 0.2.6 source remains frozen at the public release. Current source changes
-belong to 0.2.7.
+The 0.2.7 source is frozen at the public release. The next source change belongs
+to 0.2.8.

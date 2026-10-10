@@ -1,4 +1,4 @@
-# dx-dy 0.2.7 LOCAL CANDIDATE
+# dx-dy 0.2.7
 
 Private Node & Subscription Manager
 

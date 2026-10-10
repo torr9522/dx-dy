@@ -1,9 +1,11 @@
 # Changelog
 
-## [0.2.7] - Unreleased
+## [0.2.7] - 2026-10-10
 
 - Refined the Subscription index into a compact, aligned four-column list with
   responsive tablet and mobile action layouts.
+- Preserved existing Subscription actions and behavior with no API, database,
+  migration, renderer, protocol or backup format changes.
 
 ## [0.2.6] - 2026-10-10
 
