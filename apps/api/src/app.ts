@@ -491,6 +491,20 @@ export async function createApp(options: Options) {
       },
     );
   };
+  const rejectNewGlobalDuplicates = (
+    candidates: Envelope[],
+    excludeId?: number,
+  ) => {
+    const existing: Envelope[] = store
+      .nodes()
+      .filter((node) => node.id !== excludeId);
+    for (const candidate of candidates) {
+      const key = getNodeSemanticKey(candidate);
+      const match = existing.find((node) => getNodeSemanticKey(node) === key);
+      if (match) rejectSemanticDuplicates([match, candidate]);
+      existing.push(candidate);
+    }
+  };
   app.post("/api/nodes/preview", (req, res) => {
     const { text } = z
       .object({ text: z.string().min(1).max(200000) })
@@ -523,7 +537,7 @@ export async function createApp(options: Options) {
       if (x.name) e.normalized_config.name = x.name;
       return e;
     });
-    rejectSemanticDuplicates([...store.nodes(), ...parsed]);
+    rejectNewGlobalDuplicates(parsed);
     const ids = store.transaction(() =>
       parsed.map((e) => {
         const nodeId = store.addNode(e);
@@ -544,10 +558,8 @@ export async function createApp(options: Options) {
     if (x.collection_ids) requireCollections(x.collection_ids);
     const e = editConfig(n, x.normalized_config);
     generateURI(e);
-    rejectSemanticDuplicates([
-      ...store.nodes().filter((node) => node.id !== n.id),
-      e,
-    ]);
+    if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
+      rejectNewGlobalDuplicates([e], n.id);
     store.transaction(() => {
       store.updateNode(n.id, e, x.remark, x.tags, x.enabled);
       if (x.collection_ids) store.setCollections(n.id, x.collection_ids);
@@ -579,19 +591,18 @@ export async function createApp(options: Options) {
         .object({ uri: z.string().max(20000), confirm: z.literal(true) })
         .parse(req.body);
     const e = parseURI(x.uri);
+    if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
+      rejectNewGlobalDuplicates([e], n.id);
     store.updateNode(n.id, e, n.remark, n.tags, n.enabled);
     res.json(store.findNode(n.id));
   });
   app.post("/api/nodes/:id/restore", (req, res) => {
     const n = getNode(req);
     z.object({ confirm: z.literal(true) }).parse(req.body);
-    store.updateNode(
-      n.id,
-      parseURI(n.original_uri),
-      n.remark,
-      n.tags,
-      n.enabled,
-    );
+    const e = parseURI(n.original_uri);
+    if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
+      rejectNewGlobalDuplicates([e], n.id);
+    store.updateNode(n.id, e, n.remark, n.tags, n.enabled);
     res.json(store.findNode(n.id));
   });
   app.delete("/api/nodes/:id", (req, res) => {

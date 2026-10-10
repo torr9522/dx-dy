@@ -1149,8 +1149,8 @@ export function SubscriptionDetail({
     const seen = new Set<string>();
     let count = 0;
     for (const entry of ordered) {
+      if (!entry.node.semantic_key) continue;
       const key = `${entry.source}:${entry.node.semantic_key}`;
-      if (!key) continue;
       if (seen.has(key)) count += 1;
       else seen.add(key);
     }

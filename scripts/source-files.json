@@ -103,6 +103,7 @@
   "tests/admin-cli.test.ts",
   "tests/api.test.ts",
   "tests/database.test.ts",
+  "tests/e2e/duplicate-namespace.spec.ts",
   "tests/e2e/subscription-batch.spec.ts",
   "tests/e2e/workflow.spec.ts",
   "tests/fixtures.ts",

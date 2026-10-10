@@ -352,12 +352,11 @@ export function preview(text: string, existing: Envelope[] = []) {
     .filter((x) => x.line)
     .map(({ line, index }) => {
       try {
-        const envelope = parseNode(line),
-          fp = fingerprints(envelope);
-        const duplicateIndex = seen.findIndex((e) => {
-          const p = fingerprints(e);
-          return p.raw === fp.raw || p.semantic === fp.semantic;
-        });
+        const envelope = parseNode(line);
+        const semanticKey = getNodeSemanticKey(envelope);
+        const duplicateIndex = seen.findIndex(
+          (e) => getNodeSemanticKey(e) === semanticKey,
+        );
         const duplicate = duplicateIndex !== -1;
         seen.push(envelope);
         return {

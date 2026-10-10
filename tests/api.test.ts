@@ -1466,6 +1466,25 @@ describe("subscription semantic duplicate protection", () => {
         system.store.findNode(system.store.addNode(node)),
       ) as NodeRecord[];
       const listed = (await agent.get("/api/nodes")).body as NodeRecord[];
+      // Legacy duplicates must not block unrelated imports or metadata edits.
+      const unrelated = (
+        await post("/api/nodes/import", {
+          items: [{ uri: vless }],
+        }).expect(201)
+      ).body[0] as NodeRecord;
+      await agent
+        .patch(`/api/nodes/${imported[0].id}`)
+        .set("X-CSRF-Token", csrf)
+        .send({
+          normalized_config: imported[0].normalized_config,
+          remark: "Legacy metadata edit",
+          enabled: true,
+        })
+        .expect(200);
+      await post(`/api/nodes/${unrelated.id}/reimport`, {
+        uri: vmess,
+        confirm: true,
+      }).expect(422);
       expect(
         listed.find((node) => node.id === imported[0].id)?.semantic_key,
       ).toBe(listed.find((node) => node.id === imported[1].id)?.semantic_key);
