@@ -7,6 +7,10 @@
   connection semantics can coexist, retain mixed order and both render.
 - Kept strict Global/Global, same-Subscription Local/Local and import-batch
   duplicate defenses with source-specific Local import warnings.
+- Allowed semantically equivalent Local Nodes in different Subscriptions while
+  keeping Global Node Library duplicate behavior unchanged.
+- No database migration is required; schema 003 and existing backup formats
+  remain current.
 
 ## [0.2.5] - 2026-10-10
 
