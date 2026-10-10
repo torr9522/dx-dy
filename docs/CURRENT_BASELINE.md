@@ -13,6 +13,9 @@ Version 0.2.6 scopes semantic duplicate detection to the Global Library or one
 Subscription's Local Nodes; cross-namespace Global/Local semantic overlap is
 valid.
 
+Development is now on the **0.2.7 LOCAL CANDIDATE**, limited to the
+Subscription index row layout.
+
 ## Persistence And Invariants
 
 - SQLite WAL; schemas `001_initial.sql`, `002_node_collections.sql` and `003_subscription_local_nodes.sql`
@@ -51,5 +54,5 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-The 0.2.6 source is frozen at the public release. The next source change belongs
-to 0.2.7.
+The 0.2.6 source remains frozen at the public release. Current source changes
+belong to 0.2.7.

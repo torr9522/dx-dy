@@ -280,51 +280,61 @@ export function SubscriptionList({
   return (
     <div className="subscription-list card">
       {profiles.length ? (
-        profiles.map((profile) => (
-          <div className="subscription-row" key={profile.id}>
-            <div className="subscription-row-name">
-              <strong>{profile.name}</strong>
-              {profile.remark && <small>{profile.remark}</small>}
-            </div>
-            <EnabledSwitch
-              profile={profile}
-              changed={refresh}
-              notify={common.notify}
-            />
-            <span className="subscription-count">
-              {profile.node_count} 个节点
-            </span>
-            <div className="subscription-row-actions">
-              <CopySubscription profileId={profile.id} copy={common.copy} />
-              <SubscriptionQr
-                profileId={profile.id}
-                name={profile.name}
+        <>
+          <div className="subscription-list-header" aria-hidden="true">
+            <span>订阅名称</span>
+            <span>状态</span>
+            <span>节点数</span>
+            <span>操作</span>
+          </div>
+          {profiles.map((profile) => (
+            <div className="subscription-row" key={profile.id}>
+              <div className="subscription-row-name">
+                <strong title={profile.name}>{profile.name}</strong>
+                {profile.remark && (
+                  <small title={profile.remark}>{profile.remark}</small>
+                )}
+              </div>
+              <EnabledSwitch
+                profile={profile}
+                changed={refresh}
                 notify={common.notify}
               />
-              <button onClick={() => open(profile)}>
-                <ArrowRight size={15} />
-                管理订阅
-              </button>
-              <button
-                className="danger-text"
-                onClick={() =>
-                  common.confirm({
-                    title: "删除订阅",
-                    text: `即将删除订阅“${profile.name}”。独立节点将随订阅删除，全局节点不受影响。`,
-                    successMessage: "订阅已删除",
-                    run: async () => {
-                      await api(`/subscriptions/${profile.id}`, "DELETE", {});
-                      await refresh();
-                    },
-                  })
-                }
-              >
-                <Trash2 size={15} />
-                删除
-              </button>
+              <span className="subscription-count">
+                {profile.node_count} 个节点
+              </span>
+              <div className="subscription-row-actions">
+                <CopySubscription profileId={profile.id} copy={common.copy} />
+                <SubscriptionQr
+                  profileId={profile.id}
+                  name={profile.name}
+                  notify={common.notify}
+                />
+                <button onClick={() => open(profile)}>
+                  <ArrowRight size={15} />
+                  管理订阅
+                </button>
+                <button
+                  className="danger-text"
+                  onClick={() =>
+                    common.confirm({
+                      title: "删除订阅",
+                      text: `即将删除订阅“${profile.name}”。独立节点将随订阅删除，全局节点不受影响。`,
+                      successMessage: "订阅已删除",
+                      run: async () => {
+                        await api(`/subscriptions/${profile.id}`, "DELETE", {});
+                        await refresh();
+                      },
+                    })
+                  }
+                >
+                  <Trash2 size={15} />
+                  删除
+                </button>
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+        </>
       ) : (
         <div className="empty">还没有订阅</div>
       )}

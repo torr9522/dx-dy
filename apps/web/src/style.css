@@ -1613,14 +1613,25 @@ pre {
 .subscription-list {
   overflow: hidden;
 }
+.subscription-list-header,
 .subscription-row {
-  min-height: 64px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 88px 92px auto;
+  grid-template-columns:
+    minmax(160px, 1.15fr) minmax(110px, 0.55fr) minmax(90px, 0.5fr)
+    minmax(390px, 1.8fr);
   align-items: center;
-  gap: 14px;
+  column-gap: 20px;
+}
+.subscription-list-header {
+  min-height: 34px;
+  padding: 8px 16px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.subscription-row {
+  min-height: 62px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
 }
 .subscription-row:last-child {
   border-bottom: 0;
@@ -1630,18 +1641,24 @@ pre {
 }
 .subscription-row-name {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
-.subscription-row-name strong,
+.subscription-row-name strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .subscription-row-name small {
-  overflow-wrap: anywhere;
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .subscription-row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
 }
 .subscription-row-actions button {
@@ -1901,8 +1918,15 @@ pre {
 }
 
 @media (max-width: 1150px) {
+  .subscription-list-header {
+    display: none;
+  }
   .subscription-row {
-    grid-template-columns: minmax(150px, 1fr) 82px 80px;
+    grid-template-columns: minmax(150px, 1fr) minmax(105px, auto) minmax(
+        80px,
+        auto
+      );
+    row-gap: 9px;
   }
   .subscription-row-actions {
     grid-column: 1 / -1;
@@ -1926,7 +1950,13 @@ pre {
     padding: 13px;
   }
   .subscription-count {
-    grid-column: 1 / 2;
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+  }
+  .subscription-row > .switch-control {
+    grid-column: 1;
+    grid-row: 2;
   }
   .subscription-row-actions {
     grid-column: 1 / -1;

@@ -75,7 +75,7 @@ function singleFileFixture(
 ) {
   const root = temp();
   const assets = path.join(root, "assets");
-  const packageRoot = path.join(root, "package", "dx-dy-0.2.6-linux-amd64");
+  const packageRoot = path.join(root, "package", "dx-dy-0.2.7-linux-amd64");
   const script = path.join(root, "install.sh");
   const password = path.join(root, "password");
   const bin = path.join(root, "bin");
@@ -104,9 +104,9 @@ function singleFileFixture(
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    '{"version":"0.2.6","release_model":"native-systemd","architecture":"amd64"}\n',
+    '{"version":"0.2.7","release_model":"native-systemd","architecture":"amd64"}\n',
   );
-  const artifact = "dx-dy-0.2.6-linux-amd64.tar.gz";
+  const artifact = "dx-dy-0.2.7-linux-amd64.tar.gz";
   expect(
     spawnSync("tar", [
       "-czf",
@@ -121,7 +121,7 @@ function singleFileFixture(
   writeFileSync(
     path.join(assets, "release-manifest.json"),
     JSON.stringify({
-      version: "0.2.6",
+      version: "0.2.7",
       release_model: "native-systemd",
       architectures: ["amd64", "arm64"],
       artifacts: [
@@ -220,7 +220,7 @@ describe("native installer", () => {
       path.join(root, "etc/caddy/dx-dy.caddy"),
       "utf8",
     );
-    expect(config).toContain("DXDY_VERSION=0.2.6");
+    expect(config).toContain("DXDY_VERSION=0.2.7");
     expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
     expect(config).toContain(`DXDY_ARCH=${arch}`);
     expect(env).toContain("HOST=127.0.0.1");
@@ -233,10 +233,10 @@ describe("native installer", () => {
     expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
     expect(caddy).not.toContain("app:3000");
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.2.6",
+      "releases/0.2.7",
     );
     expect(
-      existsSync(path.join(root, "opt/dx-dy/releases/0.2.6/runtime/bin/node")),
+      existsSync(path.join(root, "opt/dx-dy/releases/0.2.7/runtime/bin/node")),
     ).toBe(true);
   });
 
@@ -369,7 +369,7 @@ describe("native installer", () => {
       `APP_MASTER_KEY=${masterKey}`,
     );
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.2.6",
+      "releases/0.2.7",
     );
   });
 
@@ -570,7 +570,7 @@ function manager(
 }
 
 function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
-  const version = "0.2.6";
+  const version = "0.2.7";
   const packageRoot = path.join(f.root, `dx-dy-${version}-linux-amd64`);
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
@@ -697,12 +697,12 @@ describe("native manager", () => {
     prepareUpdate(f);
     const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Updated to dx-dy 0.2.6");
+    expect(result.stdout).toContain("Updated to dx-dy 0.2.7");
     expect(readlinkSync(path.join(f.install, "current"))).toBe(
-      "releases/0.2.6",
+      "releases/0.2.7",
     );
     expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
-      "DXDY_VERSION=0.2.6",
+      "DXDY_VERSION=0.2.7",
     );
   });
 

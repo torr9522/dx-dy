@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.7] - Unreleased
+
+- Refined the Subscription index into a compact, aligned four-column list with
+  responsive tablet and mobile action layouts.
+
 ## [0.2.6] - 2026-10-10
 
 - Scoped semantic duplicate detection to the Global Node Library or the Local

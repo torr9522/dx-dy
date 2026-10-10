@@ -105,6 +105,7 @@
   "tests/database.test.ts",
   "tests/e2e/duplicate-namespace.spec.ts",
   "tests/e2e/subscription-batch.spec.ts",
+  "tests/e2e/subscription-list-layout.spec.ts",
   "tests/e2e/workflow.spec.ts",
   "tests/fixtures.ts",
   "tests/frontend.test.ts",
