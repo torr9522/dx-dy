@@ -291,7 +291,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.7</small>
+          <small>dx-dy v0.2.8 LOCAL CANDIDATE</small>
         </div>
       </aside>
       <main>
@@ -449,7 +449,15 @@ function App() {
               ?.focus();
         }}
       >
-        <p>{confirm?.text}</p>
+        <p
+          style={{
+            overflowWrap: "anywhere",
+            maxHeight: "45vh",
+            overflowY: "auto",
+          }}
+        >
+          {confirm?.text}
+        </p>
         <div className="modal-actions">
           <button onClick={() => setConfirm(null)}>取消</button>
           <button
@@ -457,9 +465,9 @@ function App() {
             disabled={pending}
             onClick={() =>
               action(async () => {
-                await confirm?.run();
+                const message = await confirm?.run();
                 setConfirm(null);
-                notify(confirm?.successMessage || "操作已完成");
+                notify(message || confirm?.successMessage || "操作已完成");
               })
             }
           >
@@ -898,7 +906,7 @@ function ImportDialog({
 type Confirmation = {
   title: string;
   text: string;
-  run: () => Promise<void>;
+  run: () => Promise<void | string>;
   returnFocus?: () => void;
   successMessage?: string;
   confirmLabel?: string;

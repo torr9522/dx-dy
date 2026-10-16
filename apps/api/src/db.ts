@@ -13,9 +13,11 @@ import {
   type NodeRecord,
   type Profile,
   type SubscriptionEntry,
+  type NodeDeleteImpact,
 } from "../../../packages/shared/schema";
 export const now = () => new Date().toISOString();
 type Row = Record<string, unknown>;
+export class NodeDeleteConflict extends Error {}
 export class Store {
   db: DatabaseSync;
   constructor(public file: string) {
@@ -314,6 +316,86 @@ export class Store {
         Number(entry.position),
         String(entry.created_at),
       );
+  }
+  nodeDeleteImpact(nodeIds: number[]): NodeDeleteImpact {
+    const slots = nodeIds.map(() => "?").join(",");
+    const entries = this.all(
+      `SELECT subscription_id,node_id FROM subscription_entries WHERE source_type='global' AND node_id IN(${slots})`,
+      ...nodeIds,
+    );
+    const legacy = this.all(
+      `SELECT subscription_id,node_id FROM subscription_nodes WHERE node_id IN(${slots})`,
+      ...nodeIds,
+    );
+    // The mirror is not a second business reference. Count the union, including
+    // target references that exist in only one historical representation.
+    const references = new Map(
+      [...entries, ...legacy].map((row) => [
+        `${row.subscription_id}:${row.node_id}`,
+        row,
+      ]),
+    );
+    const subscriptionIds = new Set(
+      [...references.values()].map((row) => Number(row.subscription_id)),
+    );
+    return {
+      nodeCount: nodeIds.length,
+      referencedNodeCount: new Set(
+        [...references.values()].map((row) => Number(row.node_id)),
+      ).size,
+      subscriptionCount: subscriptionIds.size,
+      relationshipCount: references.size,
+      entryCount: entries.length,
+      legacyRelationshipCount: legacy.length,
+      collectionMembershipCount: Number(
+        this.get(
+          `SELECT COUNT(*) count FROM node_collection_members WHERE node_id IN(${slots})`,
+          ...nodeIds,
+        )?.count,
+      ),
+      subscriptions: this.all("SELECT id,name FROM subscriptions ORDER BY id")
+        .filter((row) => subscriptionIds.has(Number(row.id)))
+        .map((row) => ({ id: Number(row.id), name: String(row.name) })),
+    };
+  }
+  deleteGlobalNodes(nodeIds: number[]) {
+    return this.transaction(() => {
+      if (
+        !nodeIds.length ||
+        new Set(nodeIds).size !== nodeIds.length ||
+        nodeIds.some((nodeId) => !this.findNode(nodeId))
+      )
+        throw new Error("Invalid global node set");
+      const impact = this.nodeDeleteImpact(nodeIds);
+      // FK cascades remove target entries, legacy relations and memberships
+      // by Global ID only. No semantic lookup or Local deletion occurs.
+      for (const nodeId of nodeIds)
+        this.run("DELETE FROM nodes WHERE id=?", nodeId);
+      for (const { id: subscriptionId } of impact.subscriptions) {
+        const globalIds = (table: string) =>
+          this.all(
+            `SELECT node_id FROM ${table} WHERE subscription_id=? AND node_id IS NOT NULL ORDER BY node_id`,
+            subscriptionId,
+          ).map((row) => Number(row.node_id));
+        // Do not silently repair unrelated legacy corruption while rebuilding
+        // the mirror. Target-only discrepancies have already been detached.
+        if (
+          JSON.stringify(globalIds("subscription_entries")) !==
+          JSON.stringify(globalIds("subscription_nodes"))
+        )
+          throw new NodeDeleteConflict(
+            "Subscription reference mirror is inconsistent; deletion rolled back",
+          );
+        this.compactEntries(subscriptionId);
+        this.syncGlobalMirror(subscriptionId);
+        this.run(
+          "UPDATE subscriptions SET updated_at=? WHERE id=?",
+          now(),
+          subscriptionId,
+        );
+      }
+      return { ok: true, deleted: nodeIds.length, ...impact };
+    });
   }
   private insertLocalNode(subscriptionId: number, envelope: Envelope) {
     const timestamp = now();

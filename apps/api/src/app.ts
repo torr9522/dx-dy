@@ -11,7 +11,7 @@ import { z, ZodError } from "zod";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { Store, now } from "./db";
+import { Store, now, NodeDeleteConflict } from "./db";
 import {
   adminPasswordSchema,
   hashAdminPassword,
@@ -197,7 +197,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.7" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.8" });
   });
   app.post(
     "/api/auth/login",
@@ -607,15 +607,22 @@ export async function createApp(options: Options) {
   });
   app.delete("/api/nodes/:id", (req, res) => {
     const n = getNode(req);
-    if (n.references)
-      return fail(
-        409,
-        "REFERENCED",
-        `该节点正在被 ${n.references} 个订阅使用，请先从订阅中移除`,
-      );
     z.object({ confirm: z.literal(true) }).parse(req.body);
-    store.run("DELETE FROM nodes WHERE id=?", n.id);
-    res.json({ ok: true });
+    res.json(store.deleteGlobalNodes([n.id]));
+  });
+  app.post("/api/nodes/delete-impact", (req, res) => {
+    const { node_ids } = z
+      .object({
+        node_ids: z
+          .array(z.number().int().positive())
+          .min(1)
+          .max(1000)
+          .refine((values) => new Set(values).size === values.length),
+      })
+      .parse(req.body);
+    if (node_ids.some((nodeId) => !store.findNode(nodeId)))
+      return fail(400, "NODE", "含不存在的节点");
+    res.json(store.nodeDeleteImpact(node_ids));
   });
   app.post("/api/nodes/batch-delete", (req, res) => {
     const { node_ids } = z
@@ -631,28 +638,7 @@ export async function createApp(options: Options) {
     const byId = new Map(store.nodes().map((node) => [node.id, node]));
     if (node_ids.some((nodeId) => !byId.has(nodeId)))
       return fail(400, "NODE", "含不存在的节点");
-    const referenced = node_ids
-      .map((nodeId) => byId.get(nodeId)!)
-      .filter((node) => node.references > 0);
-    if (referenced.length)
-      throw new ApiError(
-        409,
-        "REFERENCED_NODES",
-        `${referenced.length} 个节点仍被订阅使用，请先从订阅中移除`,
-        {
-          referenced_count: referenced.length,
-          nodes: referenced.map((node) => ({
-            id: node.id,
-            name: node.name,
-            references: node.references,
-          })),
-        },
-      );
-    store.transaction(() => {
-      for (const nodeId of node_ids)
-        store.run("DELETE FROM nodes WHERE id=?", nodeId);
-    });
-    res.json({ ok: true, deleted: node_ids.length });
+    res.json(store.deleteGlobalNodes(node_ids));
   });
   app.patch("/api/nodes/:id/enabled", (req, res) => {
     const n = getNode(req);
@@ -1142,7 +1128,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "dx-dy-0.2.7-source.tar.gz",
+        "dx-dy-0.2.8-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");
@@ -1153,7 +1139,20 @@ export async function createApp(options: Options) {
     );
   }
   app.use(
-    (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    (
+      originalError: unknown,
+      _req: Request,
+      res: Response,
+      _next: NextFunction,
+    ) => {
+      const error =
+        originalError instanceof NodeDeleteConflict
+          ? new ApiError(
+              409,
+              "REFERENCE_INCONSISTENCY",
+              "订阅节点关系不一致，删除已全部回滚；请先检查数据完整性",
+            )
+          : originalError;
       const known = error instanceof ApiError;
       const invalid = error instanceof ZodError;
       const status = known ? error.status : invalid ? 400 : 500;

@@ -54,7 +54,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.7",
+      version: "0.2.8",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -858,7 +858,7 @@ describe("API and domain regression", () => {
       error: { code: "NOT_FOUND", message: "订阅不可用" },
     });
   });
-  it("referenced node deletion is blocked without changing relations", async () => {
+  it("referenced node deletion requires explicit confirmation", async () => {
     expect(
       (
         await agent
@@ -866,13 +866,7 @@ describe("API and domain regression", () => {
           .set("X-CSRF-Token", csrf)
           .send({})
       ).status,
-    ).toBe(409);
-    const confirmed = await agent
-      .delete(`/api/nodes/${nodes[0]}`)
-      .set("X-CSRF-Token", csrf)
-      .send({ confirm: true });
-    expect(confirmed.status).toBe(409);
-    expect(confirmed.body.error.code).toBe("REFERENCED");
+    ).toBe(400);
     expect(system.store.selectedNodes(profile)).toHaveLength(2);
     expect(system.store.selectedNodes(second)).toHaveLength(2);
   });
@@ -1180,7 +1174,7 @@ describe("subscription local nodes and unified ordering", () => {
 });
 
 describe("node deletion and enabled operations", () => {
-  it("protects references, deletes atomically and cleans collection memberships", async () => {
+  it("previews references, deletes atomically and cleans collection memberships", async () => {
     const system = await createApp(options);
     try {
       const agent = request.agent(system.app);
@@ -1210,19 +1204,15 @@ describe("node deletion and enabled operations", () => {
         .send({ node_ids: [imported[1].id] })
         .expect(200);
 
-      await agent
-        .delete(`/api/nodes/${imported[1].id}`)
-        .set("X-CSRF-Token", csrf)
-        .send({ confirm: true })
-        .expect(409)
-        .expect(({ body }) => expect(body.error.code).toBe("REFERENCED"));
-      const blocked = await post("/api/nodes/batch-delete", {
+      const impact = await post("/api/nodes/delete-impact", {
         node_ids: imported.map((node) => node.id),
-        confirm: true,
-      }).expect(409);
-      expect(blocked.body.error).toMatchObject({
-        code: "REFERENCED_NODES",
-        details: { referenced_count: 1 },
+      }).expect(200);
+      expect(impact.body).toMatchObject({
+        nodeCount: 3,
+        referencedNodeCount: 1,
+        subscriptionCount: 1,
+        relationshipCount: 1,
+        collectionMembershipCount: 3,
       });
       expect(system.store.nodes()).toHaveLength(3);
       expect(
@@ -1238,11 +1228,6 @@ describe("node deletion and enabled operations", () => {
         .send({ enabled: false })
         .expect(200);
       expect(system.store.findNode(imported[0].id)?.enabled).toBe(false);
-      await agent
-        .put(`/api/subscriptions/${subscription.id}/nodes`)
-        .set("X-CSRF-Token", csrf)
-        .send({ node_ids: [] })
-        .expect(200);
       await post("/api/nodes/batch-delete", {
         node_ids: imported.map((node) => node.id),
         confirm: true,

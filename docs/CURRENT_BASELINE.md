@@ -52,5 +52,11 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
+0.2.8 is under development as a LOCAL CANDIDATE, not a public release. Global
+Node Library deletion previews affected subscriptions, then transactionally
+detaches selected Global IDs, removes their collection memberships, compacts
+remaining entries and rebuilds the compatibility mirror. Subscriptions, their
+tokens/URLs and Local Nodes are retained. Schema 001/002/003 is unchanged.
+
 The 0.2.7 source is frozen at the public release. The next source change belongs
 to 0.2.8.

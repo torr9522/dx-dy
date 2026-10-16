@@ -7,6 +7,7 @@ import {
   vmess,
 } from "../fixtures";
 import QRCode from "qrcode";
+import { cascadingDeleteFlow } from "./node-delete-flow";
 for (const width of [1440, 768, 390]) {
   test(`subscription row quick actions at ${width}px`, async ({
     page,
@@ -616,6 +617,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
   page,
   context,
 }) => {
+  test.setTimeout(240000);
   await page.goto("/");
   await page
     .getByLabel("密码", { exact: true })
@@ -745,7 +747,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
     .click();
   await page
     .getByRole("dialog", { name: "删除节点" })
-    .getByRole("button", { name: "确认" })
+    .getByRole("button", { name: "删除节点", exact: true })
     .click();
   await expect(thirdRow).toHaveCount(0);
   expect(
@@ -757,11 +759,9 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
   for (const node of [imported[0], imported[1], imported[3]])
     await page.getByRole("checkbox", { name: `选择 ${node.name}` }).check();
   await page.getByRole("button", { name: "删除已选（3）" }).click();
-  await page
-    .getByRole("dialog", { name: "删除已选（3）" })
-    .getByRole("button", { name: "确认" })
-    .click();
-  await expect(page.locator(".toast")).toContainText("1 个节点仍被订阅使用");
+  await expect(
+    page.getByRole("dialog", { name: "删除已选（3）" }),
+  ).toContainText("1 个订阅");
   await expect(
     page.getByText("已选择 3 个节点", { exact: true }),
   ).toBeVisible();
@@ -769,14 +769,10 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
     .getByRole("dialog", { name: "删除已选（3）" })
     .getByRole("button", { name: "取消" })
     .click();
-  await context.request.put(`/api/subscriptions/${profile.id}/nodes`, {
-    headers,
-    data: { node_ids: [] },
-  });
   await page.getByRole("button", { name: "删除已选（3）" }).click();
   await page
     .getByRole("dialog", { name: "删除已选（3）" })
-    .getByRole("button", { name: "确认" })
+    .getByRole("button", { name: "删除节点并从订阅移除" })
     .click();
   await expect(page.getByText("已选择 3 个节点", { exact: true })).toHaveCount(
     0,
@@ -787,6 +783,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
   await context.request.delete(`/api/collections/${collection.id}`, {
     headers,
   });
+  await cascadingDeleteFlow(page, context);
 });
 
 test("filtered selection accumulates, supports rows and visible shift ranges", async ({

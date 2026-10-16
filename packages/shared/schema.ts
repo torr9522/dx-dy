@@ -1,4 +1,14 @@
 import { z } from "zod";
+export type NodeDeleteImpact = {
+  nodeCount: number;
+  referencedNodeCount: number;
+  subscriptionCount: number;
+  relationshipCount: number;
+  entryCount: number;
+  legacyRelationshipCount: number;
+  collectionMembershipCount: number;
+  subscriptions: { id: number; name: string }[];
+};
 export const protocols = [
   "vless",
   "vmess",

@@ -1,4 +1,8 @@
-# dx-dy 0.2.7
+# dx-dy 0.2.8
+
+0.2.8 is a local development candidate; the current public stable release remains
+v0.2.7. Global Node deletion now detaches its subscription references atomically,
+preserving subscriptions, tokens, Local Nodes and the remaining saved order.
 
 Private Node & Subscription Manager
 

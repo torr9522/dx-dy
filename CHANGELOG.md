@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.8] - Unreleased
+
+- Allow deleting Global Library Nodes used by subscriptions. Single and batch
+  deletion detach references atomically, normalize saved order and preserve
+  subscriptions, tokens, URLs, Local Nodes and unrelated Global Nodes.
+- Preview subscription/reference and collection membership impact before
+  deletion, with bounded subscription names and cancellation. Recalculate
+  impact inside the deletion transaction and report actual removed references.
+- No database migration, protocol, renderer or backup format change.
+
 ## [0.2.7] - 2026-10-10
 
 - Refined the Subscription index into a compact, aligned four-column list with

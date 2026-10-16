@@ -14,6 +14,7 @@ import {
 import type {
   NodeCollection,
   NodeRecord,
+  NodeDeleteImpact,
 } from "../../../packages/shared/schema";
 import { api } from "./api";
 import { nodeMatches } from "./fields";
@@ -36,7 +37,8 @@ type Confirm = (value: {
   title: string;
   text: string;
   successMessage?: string;
-  run: () => Promise<void>;
+  confirmLabel?: string;
+  run: () => Promise<void | string>;
 }) => void;
 
 function LibraryModal({
@@ -247,27 +249,49 @@ export function NodeLibrary({
     selection.replace,
   ]);
 
-  const deleteNodes = (selectedNodes: NodeRecord[]) => {
+  const deleteNodes = async (selectedNodes: NodeRecord[]) => {
     const count = selectedNodes.length;
+    let impact: NodeDeleteImpact;
+    try {
+      impact = await api<NodeDeleteImpact>("/nodes/delete-impact", "POST", {
+        node_ids: selectedNodes.map((node) => node.id),
+      });
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法获取删除影响");
+      return;
+    }
+    const names = impact.subscriptions.slice(0, 4).map((item) => item.name);
     confirm({
       title: count === 1 ? "删除节点" : `删除已选（${count}）`,
-      text:
-        count === 1
-          ? `将永久删除 Global Node“${selectedNodes[0].name}”。正在被订阅使用的节点不能删除。`
-          : `将永久删除已选择的 ${count} 个 Global Nodes。只要其中任一节点仍被订阅使用，整个操作都会取消。`,
-      successMessage: count === 1 ? "节点已删除" : `已删除 ${count} 个节点`,
+      text: `${count === 1 ? `将永久删除节点库中的节点“${selectedNodes[0].name}”。` : `将永久删除节点库中已选择的 ${count} 个节点。`}${
+        impact.subscriptionCount
+          ? `其中 ${impact.referencedNodeCount} 个节点正在被 ${impact.subscriptionCount} 个订阅使用，将自动移除 ${impact.relationshipCount} 条订阅节点引用。受影响订阅：${names.join("、")}${impact.subscriptionCount > names.length ? `，+ ${impact.subscriptionCount - names.length} 个` : ""}。订阅本身、Token / URL、启用状态及其它 Global / Local 节点保持不变。`
+          : ""
+      }`,
+      confirmLabel: impact.subscriptionCount
+        ? "删除节点并从订阅移除"
+        : "删除节点",
       run: async () => {
-        if (count === 1)
-          await api(`/nodes/${selectedNodes[0].id}`, "DELETE", {
-            confirm: true,
-          });
-        else
-          await api("/nodes/batch-delete", "POST", {
-            node_ids: selectedNodes.map((node) => node.id),
-            confirm: true,
-          });
+        const result =
+          count === 1
+            ? await api<NodeDeleteImpact & { deleted: number }>(
+                `/nodes/${selectedNodes[0].id}`,
+                "DELETE",
+                { confirm: true },
+              )
+            : await api<NodeDeleteImpact & { deleted: number }>(
+                "/nodes/batch-delete",
+                "POST",
+                {
+                  node_ids: selectedNodes.map((node) => node.id),
+                  confirm: true,
+                },
+              );
         for (const node of selectedNodes) selection.removeOne(node.id);
         await refresh();
+        return result.subscriptionCount
+          ? `已删除 ${result.deleted} 个节点，并从 ${result.subscriptionCount} 个订阅中移除 ${result.relationshipCount} 条引用`
+          : `已删除 ${result.deleted} 个节点`;
       },
     });
   };
