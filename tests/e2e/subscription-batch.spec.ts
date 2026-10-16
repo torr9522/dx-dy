@@ -165,6 +165,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
   await page.getByRole("button", { name: /删除已选（6）/ }).click();
   await page
     .getByRole("dialog", { name: "删除已选（6）" })
-    .getByRole("button", { name: "确认" })
+    .getByRole("button", { name: "删除节点", exact: true })
     .click();
+  await expect(page.locator("tbody tr")).toHaveCount(0);
 });
