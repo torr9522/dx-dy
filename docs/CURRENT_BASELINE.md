@@ -2,17 +2,18 @@
 
 ## Release Identity
 
-- Current public stable release: **0.2.7**
+- Current release version: **0.2.8**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 
-The verified public baseline is the annotated `v0.2.7` release. Public tags are
-immutable. Version 0.2.7 refines the Subscription index into compact aligned
-rows with responsive tablet and mobile action layouts. It preserves the 0.2.6
-duplicate namespace policy and makes no API, schema, renderer, protocol or
-backup format change.
+The release baseline is the annotated `v0.2.8` release. Public tags are immutable.
+Version 0.2.8 permits deleting referenced Global Library Nodes with transactional
+subscription detach, impact confirmation, collection membership cleanup and
+position normalization. Subscriptions, tokens, URLs, enabled state and Local
+Nodes are preserved. The 0.2.7 responsive list and 0.2.6 duplicate namespaces
+remain unchanged. There is no schema, renderer, protocol or backup format change.
 
 ## Persistence And Invariants
 
@@ -52,11 +53,5 @@ The full gate builds amd64/arm64 artifacts, starts the host-compatible bundled r
 
 ## Version Boundary
 
-0.2.8 is under development as a LOCAL CANDIDATE, not a public release. Global
-Node Library deletion previews affected subscriptions, then transactionally
-detaches selected Global IDs, removes their collection memberships, compacts
-remaining entries and rebuilds the compatibility mirror. Subscriptions, their
-tokens/URLs and Local Nodes are retained. Schema 001/002/003 is unchanged.
-
-The 0.2.7 source is frozen at the public release. The next source change belongs
-to 0.2.8.
+The 0.2.8 source becomes immutable at publication. The next source change after
+release belongs to 0.2.9. Schema 001/002/003 is unchanged.

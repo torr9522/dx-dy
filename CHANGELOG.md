@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.8] - Unreleased
+## [0.2.8] - 2026-10-16
 
 - Allow deleting Global Library Nodes used by subscriptions. Single and batch
   deletion detach references atomically, normalize saved order and preserve
