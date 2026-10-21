@@ -2041,3 +2041,22 @@ pre {
 .subscription-row-actions {
   flex-wrap: wrap;
 }
+.group-nav-row > button:first-child,
+.group-nav-row > button:first-child span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .master-pool {
+    flex: 0 0 min(100%, 300px);
+    min-width: 0;
+  }
+  .group-nav-row {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) 30px 30px;
+  }
+  .group-nav-row .icon-button {
+    display: inline-flex;
+  }
+}

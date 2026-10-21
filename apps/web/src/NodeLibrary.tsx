@@ -281,6 +281,35 @@ export function NodeLibrary({
     selection.replace,
   ]);
 
+  const deleteGroup = async (group: NodeGroup) => {
+    try {
+      const impact = await api<NodeDeleteImpact & { groupName: string }>(
+        `/node-groups/${group.id}/delete-impact`,
+      );
+      const remove = async (confirmed: boolean) => {
+        const result = await api<NodeDeleteImpact & { deleted: number }>(
+          `/node-groups/${group.id}`,
+          "DELETE",
+          { confirm: confirmed },
+        );
+        await refresh();
+        return `已删除分组及 ${result.deleted} 个节点，并从 ${result.subscriptionCount} 个订阅中移除 ${result.relationshipCount} 条引用`;
+      };
+      if (!impact.nodeCount) {
+        notify(await remove(false));
+        return;
+      }
+      const names = impact.subscriptions.slice(0, 4).map((item) => item.name);
+      confirm({
+        title: "删除分组",
+        text: `分组：${impact.groupName}。分组内 Global Nodes：${impact.nodeCount}。受影响订阅：${impact.subscriptionCount}。将移除订阅节点引用：${impact.relationshipCount}。${names.length ? `受影响订阅名称：${names.join("、")}${impact.subscriptionCount > names.length ? `，另 ${impact.subscriptionCount - names.length} 个` : ""}。` : ""}删除分组后，该分组及其全部节点将被永久删除。这些节点也会从正在使用它们的订阅中自动移除。订阅本身、订阅链接、Token、启用状态、所有 Local Nodes 和其他分组不受影响。影响统计为预览，执行时将按实际状态重新计算。`,
+        confirmLabel: "删除分组及其全部节点",
+        run: () => remove(true),
+      });
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法删除分组");
+    }
+  };
   const deleteNodes = async (selectedNodes: NodeRecord[]) => {
     const count = selectedNodes.length;
     let impact: NodeDeleteImpact;
@@ -337,7 +366,7 @@ export function NodeLibrary({
             <Plus size={14} /> 新建分组
           </button>
           {groups.map((group) => (
-            <div className="collection-nav-row" key={group.id}>
+            <div className="collection-nav-row group-nav-row" key={group.id}>
               <button
                 className={activeGroupId === group.id ? "active" : ""}
                 onClick={() => {
@@ -360,20 +389,8 @@ export function NodeLibrary({
               <button
                 className="icon-button"
                 aria-label={`删除分组 ${group.name}`}
-                disabled={group.node_count > 0}
-                title={
-                  group.node_count ? "请先复制或删除组内节点" : "删除空分组"
-                }
-                onClick={() =>
-                  confirm({
-                    title: "删除空分组",
-                    text: `删除空分组“${group.name}”？`,
-                    run: async () => {
-                      await api(`/node-groups/${group.id}`, "DELETE");
-                      await refresh();
-                    },
-                  })
-                }
+                title={group.node_count ? "删除分组及其全部节点" : "删除空分组"}
+                onClick={() => deleteGroup(group)}
               >
                 <Trash2 size={14} />
               </button>

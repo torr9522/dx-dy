@@ -11,6 +11,10 @@
 - Preserve existing Generic URLs, token identity and migrated output bytes.
 - Wait for persisted Subscription entries before opening editable drafts; failed
   reads require a successful retry instead of treating existing selection as empty.
+- Delete a Group and all owned Global Nodes in one transaction, detaching
+  Subscription references and normalizing order while preserving other Groups,
+  Local Nodes, Subscription identities and Collections. Preview actual impact
+  before confirmation and keep Group actions accessible on narrow screens.
 - This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16

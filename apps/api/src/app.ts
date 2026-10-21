@@ -11,7 +11,12 @@ import { z, ZodError } from "zod";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { Store, now, NodeDeleteConflict } from "./db";
+import {
+  Store,
+  now,
+  NodeDeleteConflict,
+  GroupDeleteConfirmationRequired,
+} from "./db";
 import {
   adminPasswordSchema,
   hashAdminPassword,
@@ -348,13 +353,18 @@ export async function createApp(options: Options) {
     );
     res.json(getNodeGroup(groupId));
   });
+  app.get("/api/node-groups/:id/delete-impact", (req, res) => {
+    const impact = store.groupDeleteImpact(id(req));
+    if (!impact) return fail(404, "NOT_FOUND", "分组不存在");
+    res.json(impact);
+  });
   app.delete("/api/node-groups/:id", (req, res) => {
-    const groupId = id(req),
-      group = getNodeGroup(groupId);
-    if (group.node_count)
-      return fail(409, "GROUP_NOT_EMPTY", "请先复制或删除分组内节点");
-    store.run("DELETE FROM node_groups WHERE id=?", groupId);
-    res.json({ ok: true });
+    const { confirm = false } = z
+      .object({ confirm: z.boolean().optional() })
+      .parse(req.body ?? {});
+    const result = store.deleteNodeGroup(id(req), confirm);
+    if (!result) return fail(404, "NOT_FOUND", "分组不存在");
+    res.json(result);
   });
   const collectionSchema = z.object({
     name: z.string().trim().min(1).max(100),
@@ -1361,13 +1371,19 @@ export async function createApp(options: Options) {
       _next: NextFunction,
     ) => {
       const error =
-        originalError instanceof NodeDeleteConflict
+        originalError instanceof GroupDeleteConfirmationRequired
           ? new ApiError(
               409,
-              "REFERENCE_INCONSISTENCY",
-              "订阅节点关系不一致，删除已全部回滚；请先检查数据完整性",
+              "GROUP_DELETE_CONFIRMATION_REQUIRED",
+              "分组包含节点，请确认删除分组及其全部节点",
             )
-          : originalError;
+          : originalError instanceof NodeDeleteConflict
+            ? new ApiError(
+                409,
+                "REFERENCE_INCONSISTENCY",
+                "订阅节点关系不一致，删除已全部回滚；请先检查数据完整性",
+              )
+            : originalError;
       const known = error instanceof ApiError;
       const invalid = error instanceof ZodError;
       const status = known ? error.status : invalid ? 400 : 500;

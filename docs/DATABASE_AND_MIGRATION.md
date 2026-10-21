@@ -7,8 +7,15 @@ and ownership-update triggers require exactly one valid Group per Global Node.
 The nullable SQLite ALTER column is never valid as NULL after migration.
 Only populated legacy libraries receive 原节点库; empty/fresh instances retain
 zero Groups. Groups have unique case-insensitive trimmed names and positions.
-Deleting a nonempty Group is rejected. Collections and membership rows remain
-unchanged; they are not mapped to ownership Groups.
+Deleting a nonempty Group requires explicit confirmation. One immediate
+transaction re-reads ownership/references, reuses Global detach deletion,
+deletes the Group and normalizes affected Subscription positions/mirrors.
+Other Groups (including semantic-equal records), Local Nodes and Subscription
+identities remain intact. Collections remain; only deleted-node memberships
+are removed. The migration's empty-only DELETE trigger remains unchanged:
+the service deletes owned nodes before deleting their Group.
+原节点库 is an ordinary migration-created Group, with no runtime name/ID
+protection, fallback or automatic recreation. It can be renamed or deleted.
 
 Schema 004 cannot run on an older binary. Rollback requires the pre-upgrade
 schema-003 database/config snapshot; do not point v0.2.8 at a schema-004 DB.

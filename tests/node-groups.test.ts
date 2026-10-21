@@ -32,7 +32,7 @@ async function setup() {
 }
 
 describe("isolated Node Group ownership", () => {
-  it("starts empty, requires ownership, validates names, and only deletes empty groups", async () => {
+  it("starts empty, requires ownership, validates names, and requires confirmation for populated groups", async () => {
     const s = await setup();
     try {
       expect((await s.agent.get("/api/node-groups")).body).toEqual([]);
@@ -266,6 +266,14 @@ describe("isolated Node Group ownership", () => {
           expect(generateUniversalBase64Subscription(s.authorized(1))).toBe(
             generateUniversalBase64Subscription([parseNode(vless)]),
           );
+          const migratedGroupId = s.nodeGroups()[0].id;
+          expect(s.deleteNodeGroup(migratedGroupId, true)?.deleted).toBe(1);
+          expect(s.nodeGroups()).toEqual([]);
+          expect(s.nodes()).toEqual([]);
+          expect(s.all("SELECT id FROM subscriptions")).toEqual([{ id: 1 }]);
+          expect(s.all("SELECT id FROM node_collections")).toEqual([{ id: 1 }]);
+          await s.migrate();
+          expect(s.nodeGroups()).toEqual([]);
         }
         integrity(s.db);
       } finally {

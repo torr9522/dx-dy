@@ -18,6 +18,7 @@ import {
 export const now = () => new Date().toISOString();
 type Row = Record<string, unknown>;
 export class NodeDeleteConflict extends Error {}
+export class GroupDeleteConfirmationRequired extends Error {}
 export class Store {
   db: DatabaseSync;
   constructor(public file: string) {
@@ -400,42 +401,86 @@ export class Store {
   }
   deleteGlobalNodes(nodeIds: number[]) {
     return this.transaction(() => {
-      if (
-        !nodeIds.length ||
-        new Set(nodeIds).size !== nodeIds.length ||
-        nodeIds.some((nodeId) => !this.findNode(nodeId))
-      )
-        throw new Error("Invalid global node set");
-      const impact = this.nodeDeleteImpact(nodeIds);
-      // FK cascades remove target entries, legacy relations and memberships
-      // by Global ID only. No semantic lookup or Local deletion occurs.
-      for (const nodeId of nodeIds)
-        this.run("DELETE FROM nodes WHERE id=?", nodeId);
-      for (const { id: subscriptionId } of impact.subscriptions) {
-        const globalIds = (table: string) =>
-          this.all(
-            `SELECT node_id FROM ${table} WHERE subscription_id=? AND node_id IS NOT NULL ORDER BY node_id`,
-            subscriptionId,
-          ).map((row) => Number(row.node_id));
-        // Do not silently repair unrelated legacy corruption while rebuilding
-        // the mirror. Target-only discrepancies have already been detached.
-        if (
-          JSON.stringify(globalIds("subscription_entries")) !==
-          JSON.stringify(globalIds("subscription_nodes"))
-        )
-          throw new NodeDeleteConflict(
-            "Subscription reference mirror is inconsistent; deletion rolled back",
-          );
-        this.compactEntries(subscriptionId);
-        this.syncGlobalMirror(subscriptionId);
-        this.run(
-          "UPDATE subscriptions SET updated_at=? WHERE id=?",
-          now(),
-          subscriptionId,
-        );
-      }
+      const impact = this.removeGlobalNodes(nodeIds);
+      this.normalizeDeletedNodeSubscriptions(impact);
       return { ok: true, deleted: nodeIds.length, ...impact };
     });
+  }
+  groupDeleteImpact(groupId: number) {
+    const group = this.get(
+      "SELECT id,name FROM node_groups WHERE id=?",
+      groupId,
+    );
+    if (!group) return undefined;
+    const nodeIds = this.all(
+      "SELECT id FROM nodes WHERE group_id=? ORDER BY id",
+      groupId,
+    ).map((row) => Number(row.id));
+    return {
+      groupId,
+      groupName: String(group.name),
+      ...this.nodeDeleteImpact(nodeIds),
+    };
+  }
+  deleteNodeGroup(groupId: number, confirmed = false) {
+    return this.transaction(() => {
+      if (!this.get("SELECT id FROM node_groups WHERE id=?", groupId))
+        return undefined;
+      const nodeIds = this.all(
+        "SELECT id FROM nodes WHERE group_id=? ORDER BY id",
+        groupId,
+      ).map((row) => Number(row.id));
+      if (nodeIds.length && !confirmed)
+        throw new GroupDeleteConfirmationRequired();
+      const impact = nodeIds.length
+        ? this.removeGlobalNodes(nodeIds)
+        : this.nodeDeleteImpact([]);
+      this.run("DELETE FROM node_groups WHERE id=?", groupId);
+      this.normalizeDeletedNodeSubscriptions(impact);
+      if (this.get("SELECT id FROM nodes WHERE group_id=?", groupId))
+        throw new NodeDeleteConflict("Group ownership remains after deletion");
+      return { ok: true, groupId, deleted: nodeIds.length, ...impact };
+    });
+  }
+  // These helpers run only inside their caller's single BEGIN IMMEDIATE transaction.
+  private removeGlobalNodes(nodeIds: number[]) {
+    if (
+      !nodeIds.length ||
+      new Set(nodeIds).size !== nodeIds.length ||
+      nodeIds.some((nodeId) => !this.findNode(nodeId))
+    )
+      throw new Error("Invalid global node set");
+    const impact = this.nodeDeleteImpact(nodeIds);
+    // FK cascades remove target entries, legacy relations and memberships
+    // by Global ID only. No semantic lookup or Local deletion occurs.
+    for (const nodeId of nodeIds)
+      this.run("DELETE FROM nodes WHERE id=?", nodeId);
+    return impact;
+  }
+  private normalizeDeletedNodeSubscriptions(impact: NodeDeleteImpact) {
+    for (const { id: subscriptionId } of impact.subscriptions) {
+      const globalIds = (table: string) =>
+        this.all(
+          `SELECT node_id FROM ${table} WHERE subscription_id=? AND node_id IS NOT NULL ORDER BY node_id`,
+          subscriptionId,
+        ).map((row) => Number(row.node_id));
+      // Do not silently repair unrelated legacy corruption while rebuilding
+      // the mirror. Target-only discrepancies have already been detached.
+      if (
+        JSON.stringify(globalIds("subscription_entries")) !==
+        JSON.stringify(globalIds("subscription_nodes"))
+      )
+        throw new NodeDeleteConflict(
+          "Subscription reference mirror is inconsistent; deletion rolled back",
+        );
+      this.compactEntries(subscriptionId);
+      this.syncGlobalMirror(subscriptionId);
+      this.run(
+        "UPDATE subscriptions SET updated_at=? WHERE id=?",
+        now(),
+        subscriptionId,
+      );
+    }
   }
   private insertLocalNode(subscriptionId: number, envelope: Envelope) {
     const timestamp = now();
