@@ -112,6 +112,7 @@
   "tests/api.test.ts",
   "tests/client-subscription.test.ts",
   "tests/database.test.ts",
+  "tests/e2e/distribution-entry.spec.ts",
   "tests/e2e/duplicate-namespace.spec.ts",
   "tests/e2e/group-setup.ts",
   "tests/e2e/node-delete-flow.ts",

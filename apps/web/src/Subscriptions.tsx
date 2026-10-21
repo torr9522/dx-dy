@@ -1653,6 +1653,11 @@ export function SubscriptionDetail({
             name={profile.name}
             notify={common.notify}
           />
+          <MultiClientSubscription
+            profileId={profile.id}
+            copy={common.copy}
+            notify={common.notify}
+          />
           <button
             onClick={async () => {
               try {
