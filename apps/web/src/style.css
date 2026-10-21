@@ -2034,6 +2034,10 @@ pre {
   gap: 8px;
   min-width: 0;
 }
+.client-link-row strong,
+.client-link-row small {
+  display: block;
+}
 .subscription-row-actions {
   flex-wrap: wrap;
 }
