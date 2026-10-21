@@ -232,6 +232,45 @@ prune_releases() {
   while IFS= read -r dir; do [[ "$dir" == "$current" || "$dir" == "$previous" ]] || rm -rf -- "$dir"; done < <(find "$DXDY_INSTALL_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr | awk 'NR>3{sub(/^[^ ]+ /,"");print}')
 }
 
+restore_update_backup() {
+  local source="$1" staging candidate previous file restore_file moved=()
+  staging="$(mktemp -d "$DXDY_DATA_DIR/.update-rollback-XXXXXX")" || return 1
+  candidate="$staging/restored.db"
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then
+    chown dx-dy:dx-dy "$staging" || return 1
+  fi
+  # The previous application cannot inspect a database already migrated by the
+  # failed update. Restore into an absent destination with its own CLI instead;
+  # this retains schema validation, token verification and the old migrations.
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then
+    (cd "$APP" && DATABASE_PATH="$candidate" "$NODE" "$APP/dist/database.mjs" restore "$source") || return 1
+  else
+    (cd "$APP" && runuser -u dx-dy -- env DATABASE_PATH="$candidate" "$NODE" "$APP/dist/database.mjs" restore "$source") || return 1
+  fi
+  [[ -s "$candidate" ]] || return 1
+  # All writers are stopped. Retain the failed database and its sidecars for
+  # diagnosis, then atomically activate the validated old-schema database.
+  for file in "$DATABASE" "$DATABASE-wal" "$DATABASE-shm"; do
+    if [[ -e "$file" ]]; then
+      previous="$staging/failed-$(basename "$file")"
+      if ! mv -- "$file" "$previous"; then
+        for restore_file in "${moved[@]}"; do mv -- "$staging/failed-$(basename "$restore_file")" "$restore_file" || true; done
+        return 1
+      fi
+      moved+=("$file")
+    fi
+  done
+  if ! mv -- "$candidate" "$DATABASE"; then
+    for file in "${moved[@]}"; do mv -- "$staging/failed-$(basename "$file")" "$file" || true; done
+    return 1
+  fi
+  chmod 0600 "$DATABASE" || return 1
+}
+
 cmd_update() {
   require_root; load_instance
   [[ "$DXDY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Invalid repository coordinate."
@@ -258,8 +297,14 @@ cmd_update() {
   [[ $result -eq 0 ]] && wait_health || result=1
   if [[ $result -ne 0 ]]; then
     systemctl stop "$SERVICE" || true; ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
-    set_config_value "$CONFIG_FILE" DXDY_VERSION "$DXDY_VERSION"; run_cli database.mjs restore "$backup" || true; systemctl start "$SERVICE" || true
-    wait_health && printf 'ROLLBACK: PASS\n' || printf 'ROLLBACK: FAIL\n' >&2
+    set_config_value "$CONFIG_FILE" DXDY_VERSION "$DXDY_VERSION"
+    if ! restore_update_backup "$backup"; then
+      die "ROLLBACK: FAIL; database recovery failed. Application remains stopped; backups and failed database retained."
+    fi
+    if ! systemctl start "$SERVICE" || ! wait_health; then
+      die "ROLLBACK: FAIL; previous database restored but application is not healthy."
+    fi
+    printf 'ROLLBACK: PASS\n'
     die "Update failed; previous release and database were restored."
   fi
   install -m 0755 "$temp/dx-dy" "$MANAGER_PATH.next"; mv -f "$MANAGER_PATH.next" "$MANAGER_PATH"; prune_releases

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -15,6 +16,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { Store } from "../apps/api/src/db";
+import { encryptToken, digest } from "../apps/api/src/security";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -475,7 +479,7 @@ function nativeFixture() {
   );
   executable(
     path.join(current, "runtime/bin/node"),
-    `printf 'node cwd=%s args=%s\\n' "$PWD" "$*" >>"${calls}"\nif [[ "$*" == *"database.mjs backup"* ]]; then printf database >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then printf bundle >"\${*: -1}"; fi`,
+    `printf 'node cwd=%s args=%s\\n' "$PWD" "$*" >>"${calls}"\nif [[ "$*" == *"database.mjs backup"* ]]; then printf database >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs bundle"* ]]; then printf bundle >"\${*: -1}"; fi\nif [[ "$*" == *"database.mjs restore"* ]]; then cp "\${*: -1}" "$DATABASE_PATH"; fi`,
   );
   writeFileSync(
     path.join(config, "install.conf"),
@@ -723,6 +727,111 @@ describe("native manager", () => {
     );
     expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
   });
+
+  for (const invalidBackup of [false, true])
+    it(`handles an update that has really migrated schema 003 to 004 before failing (${invalidBackup ? "invalid backup stays stopped" : "validated rollback preserves schema and tokens"})`, async () => {
+      const f = nativeFixture();
+      prepareUpdate(f);
+      const old = path.join(f.install, "releases/0.1.9");
+      const oldMigrations = path.join(old, "app/migrations");
+      mkdirSync(oldMigrations);
+      for (const file of [
+        "001_initial.sql",
+        "002_node_collections.sql",
+        "003_subscription_local_nodes.sql",
+      ])
+        cpSync(path.join("migrations", file), path.join(oldMigrations, file));
+      const database = path.join(f.data, "dx-dy.db");
+      rmSync(database);
+      const store = new Store(database);
+      await store.migrate(oldMigrations);
+      const token = "S".repeat(43);
+      store.run(
+        "INSERT INTO subscriptions(name,remark,token_hash,token_ciphertext,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        "Preserved subscription",
+        "Preserved remark",
+        digest(token),
+        encryptToken(token, Buffer.from("0".repeat(64), "hex")),
+        1,
+        "synthetic timestamp",
+        "synthetic timestamp",
+      );
+      const expected = store.all("SELECT * FROM subscriptions");
+      store.close();
+      const future = path.join(f.root, "migrated.db");
+      cpSync(database, future);
+      const migrated = new Store(future);
+      await migrated.migrate();
+      migrated.close();
+      const cli = path.join(old, "app/dist/database.mjs");
+      const build = spawnSync(
+        "pnpm",
+        [
+          "exec",
+          "esbuild",
+          "scripts/database.ts",
+          "--bundle",
+          "--platform=node",
+          "--format=esm",
+          "--packages=external",
+          `--outfile=${cli}`,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(build.status, build.stderr).toBe(0);
+      symlinkSync(
+        path.resolve("node_modules"),
+        path.join(old, "app/node_modules"),
+      );
+      executable(
+        path.join(old, "runtime/bin/node"),
+        `exec '${process.execPath}' "$@"`,
+      );
+      executable(
+        path.join(f.bin, "systemctl"),
+        `printf 'systemctl %s\\n' "$*" >>'${f.calls}'\nif [[ "$*" == 'start dx-dy.service' && ! -f '${f.root}/failed-once' ]]; then\n cp '${future}' '${database}'\n touch '${f.root}/failed-once'\n ${invalidBackup ? `for file in '${f.backups}'/*.db; do printf invalid >"$file"; done` : ":"}\n exit 1\nfi`,
+      );
+      const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
+      expect(result.status).not.toBe(0);
+      const actual = new DatabaseSync(database, { readOnly: true });
+      try {
+        expect(
+          actual.prepare("PRAGMA integrity_check").get()?.integrity_check,
+        ).toBe("ok");
+        expect(actual.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+        expect(actual.prepare("SELECT * FROM subscriptions").all()).toEqual(
+          expected,
+        );
+        const count = actual
+          .prepare("SELECT COUNT(*) AS n FROM schema_migrations")
+          .get()?.n;
+        expect(count).toBe(invalidBackup ? 4 : 3);
+      } finally {
+        actual.close();
+      }
+      expect(result.stdout + result.stderr).toContain(
+        invalidBackup ? "ROLLBACK: FAIL" : "ROLLBACK: PASS",
+      );
+      const starts = readFileSync(f.calls, "utf8")
+        .split("\n")
+        .filter((line) => line === "systemctl start dx-dy.service");
+      expect(starts).toHaveLength(invalidBackup ? 1 : 2);
+      if (!invalidBackup) {
+        const retained = readdirSync(f.data).find((name) =>
+          name.startsWith(".update-rollback-"),
+        );
+        expect(retained).toBeTruthy();
+        const failed = new DatabaseSync(
+          path.join(f.data, retained!, "failed-dx-dy.db"),
+          { readOnly: true },
+        );
+        expect(
+          failed.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get()
+            ?.n,
+        ).toBe(4);
+        failed.close();
+      }
+    });
 
   it("removes only the dx-dy Caddy import during normal uninstall", () => {
     const f = nativeFixture();

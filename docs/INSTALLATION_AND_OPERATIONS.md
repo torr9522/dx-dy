@@ -58,6 +58,20 @@ Running the installer after default uninstall enters retained-data reinstall mod
 
 Update reads the latest public manifest, chooses the installed architecture, verifies SHA-256, creates a WAL-safe DB backup, extracts a new version directory, stops the app and atomically switches `current`. Failed start/health restores the old link and DB backup. Current, previous and a small recent set are retained.
 
+Cross-schema update recovery must restore the pre-update snapshot with the old
+application into a separate, absent database path. The old application cannot
+validate the newer database left by a failed migration. Only after its own CLI
+has validated the snapshot, decrypted Tokens and applied its supported
+migrations does the manager replace the active database. The failed database
+and sidecars remain in a protected `.update-rollback-*` directory for diagnosis.
+If recovery fails, the application remains stopped and the manager reports
+`ROLLBACK: FAIL`; a successful health response alone does not prove recovery.
+
+The previously published v0.2.8 manager lacks this staged recovery path. A
+schema-changing upgrade from that manager requires a separately validated
+manager bootstrap/recovery procedure before production deployment; changing
+the new release's manager does not retroactively change the installed old one.
+
 ## Docker 0.1.8 Migration
 
 The installer recognizes the 0.1.8 standard Compose layout. Migration requires a password file for a Full Migration backup, creates both portable and encrypted backups, retains domains/key/database, stops only the legacy dx-dy app/Caddy, starts native services and restores the old stack on failure. Docker Engine, compose files, images and configuration remain for rollback until explicit `dx-dy cleanup-legacy` acceptance.

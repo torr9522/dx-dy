@@ -15,6 +15,9 @@
   Subscription references and normalizing order while preserving other Groups,
   Local Nodes, Subscription identities and Collections. Preview actual impact
   before confirmation and keep Group actions accessible on narrow screens.
+- Restore failed schema-changing updates through a separate validated
+  old-version database, retain the failed database for diagnosis and stop on
+  recovery errors instead of reporting success from health alone.
 - This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16
