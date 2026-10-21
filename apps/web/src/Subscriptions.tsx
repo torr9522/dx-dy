@@ -1225,6 +1225,8 @@ export function SubscriptionDetail({
   const [profile, setProfile] = useState(initial);
   const [entries, setEntries] = useState<SubscriptionEntry[]>([]);
   const [ordered, setOrdered] = useState<SubscriptionEntry[]>([]);
+  const [entriesLoaded, setEntriesLoaded] = useState(false);
+  const [entriesLoadError, setEntriesLoadError] = useState<string | null>(null);
   const [view, setView] = useState<"main" | "add" | "library" | "local">(
     "main",
   );
@@ -1245,6 +1247,8 @@ export function SubscriptionDetail({
     setEntries(result);
     setOrdered(result);
     await onSaved();
+    setEntriesLoadError(null);
+    setEntriesLoaded(true);
   };
   const refreshEntryDetails = async () => {
     const result = await api<SubscriptionEntry[]>(
@@ -1258,7 +1262,9 @@ export function SubscriptionDetail({
     await onSaved();
   };
   useEffect(() => {
-    void reloadEntries();
+    void reloadEntries().catch((error) => {
+      setEntriesLoadError((error as Error).message);
+    });
   }, [profile.id]);
   const draftDirty = !sameNumbers(
     entries.map((entry) => entry.id),
@@ -1339,6 +1345,31 @@ export function SubscriptionDetail({
       run: async () => onBack(),
     });
   };
+  if (!entriesLoaded)
+    return (
+      <section className="subscription-subpage">
+        <button className="text-button" onClick={onBack}>
+          <ArrowLeft size={15} /> 返回订阅列表
+        </button>
+        {entriesLoadError ? (
+          <>
+            <p role="alert">无法读取订阅节点：{entriesLoadError}</p>
+            <button
+              onClick={() => {
+                setEntriesLoadError(null);
+                void reloadEntries().catch((error) => {
+                  setEntriesLoadError((error as Error).message);
+                });
+              }}
+            >
+              重新读取
+            </button>
+          </>
+        ) : (
+          <p role="status">正在读取订阅节点…</p>
+        )}
+      </section>
+    );
   if (view === "library")
     return (
       <LibrarySelector

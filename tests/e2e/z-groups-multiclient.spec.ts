@@ -45,6 +45,127 @@ async function importNodes(page: Page, names: string[]) {
   await expect(dialog).not.toBeVisible();
 }
 
+test("existing subscription selection cannot open before persisted entries load", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  const group = "D029-DESTRUCT-Load-Race";
+  const names = ["D029-DESTRUCT-Load-A", "D029-DESTRUCT-Load-B"];
+  await createGroup(page, group);
+  await importNodes(page, names);
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("button", { name: "创建订阅", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "创建订阅" });
+  await dialog.getByLabel("订阅名称").fill(group);
+  await dialog.getByRole("button", { name: "创建订阅", exact: true }).click();
+  const subscription = (
+    await (await context.request.get("/api/subscriptions")).json()
+  ).find((s: { name: string }) => s.name === group);
+  const row = page.locator(".subscription-row").filter({ hasText: group });
+  await row.getByRole("button", { name: "管理订阅", exact: true }).click();
+  await page.getByRole("button", { name: "添加节点", exact: true }).click();
+  await page.getByRole("button", { name: /从节点库选择节点/ }).click();
+  await page
+    .getByLabel("节点来源")
+    .getByRole("button", { name: new RegExp(`^${group}\\s`) })
+    .click();
+  await page
+    .getByRole("checkbox", { name: `选择订阅节点 ${names[0]}`, exact: true })
+    .check();
+  await page.getByRole("button", { name: "保存并返回", exact: true }).click();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "返回订阅列表", exact: true }).click();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let intercepted = false;
+  await page.route(
+    `**/api/subscriptions/${subscription.id}/entries`,
+    async (route) => {
+      if (!intercepted) {
+        intercepted = true;
+        await held;
+      }
+      await route.continue();
+    },
+  );
+  try {
+    await row.getByRole("button", { name: "管理订阅", exact: true }).click();
+    await expect.poll(() => intercepted).toBe(true);
+    await expect(
+      page.getByRole("button", { name: "添加节点", exact: true }),
+    ).not.toBeVisible();
+    await expect(
+      page.getByText("正在读取订阅节点…", { exact: true }),
+    ).toBeVisible();
+  } finally {
+    release();
+  }
+  await expect(page.locator(".subscription-node-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "添加节点", exact: true }).click();
+  await page.getByRole("button", { name: /从节点库选择节点/ }).click();
+  await page
+    .getByLabel("节点来源")
+    .getByRole("button", { name: new RegExp(`^${group}\\s`) })
+    .click();
+  await expect(
+    page.getByRole("checkbox", {
+      name: `选择订阅节点 ${names[0]}`,
+      exact: true,
+    }),
+  ).toBeChecked();
+  await page
+    .getByRole("checkbox", { name: `选择订阅节点 ${names[1]}`, exact: true })
+    .check();
+  await page.getByRole("button", { name: "保存并返回", exact: true }).click();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(2);
+  await page.reload();
+  const entries = await (
+    await context.request.get(`/api/subscriptions/${subscription.id}/entries`)
+  ).json();
+  expect(
+    entries.map((entry: { node: { name: string } }) => entry.node.name),
+  ).toEqual(names);
+  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.unroute(`**/api/subscriptions/${subscription.id}/entries`);
+  let failOnce = true;
+  await page.route(
+    `**/api/subscriptions/${subscription.id}/entries`,
+    async (route) => {
+      if (failOnce) {
+        failOnce = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "TEMPORARY", message: "Synthetic read unavailable" },
+          }),
+        });
+      } else await route.continue();
+    },
+  );
+  await row.getByRole("button", { name: "管理订阅", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("无法读取订阅节点");
+  await expect(
+    page.getByRole("button", { name: "添加节点", exact: true }),
+  ).not.toBeVisible();
+  await page.getByRole("button", { name: "重新读取", exact: true }).click();
+  await expect(page.locator(".subscription-node-row")).toHaveCount(2);
+  expect(
+    (
+      await (
+        await context.request.get(
+          `/api/subscriptions/${subscription.id}/entries`,
+        )
+      ).json()
+    ).map((entry: { node: { name: string } }) => entry.node.name),
+  ).toEqual(names);
+});
+
 for (const width of [1440, 768, 390]) {
   test(`isolated Groups, independent copy, multi-group draft and client links at ${width}`, async ({
     page,

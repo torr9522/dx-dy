@@ -9,6 +9,8 @@
 - Add separate Smart and explicit client HTTP views backed by three shared
   renderer families, capability diagnostics and private cache controls.
 - Preserve existing Generic URLs, token identity and migrated output bytes.
+- Wait for persisted Subscription entries before opening editable drafts; failed
+  reads require a successful retry instead of treating existing selection as empty.
 - This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16
