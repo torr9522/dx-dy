@@ -68,11 +68,24 @@ const nestedKeys: Record<string, string[]> = {
 };
 // Parser ownership is broader than renderer support. Reject even owned URI
 // options unless their normalized mapping has been audited for these families.
-const structuredQueryKeys = new Set(
-  "encryption flow security sni peer fp pbk sid type network host path serviceName mode alpn allowInsecure insecure allow_insecure packetEncoding packet-encoding aid scy cipher obfs obfs-password obfs_password congestion_control congestion-controller udp_relay_mode udp-relay-mode udp tfo"
-    .toLowerCase()
-    .split(" "),
-);
+const structuredQueryKeys: Record<string, Set<string>> = {
+  vless: new Set(
+    "encryption flow security sni peer fp pbk sid type host path serviceName mode alpn allowInsecure".split(
+      " ",
+    ),
+  ),
+  vmess: new Set(),
+  trojan: new Set(
+    "sni peer type host path serviceName alpn allowInsecure".split(" "),
+  ),
+  ss: new Set(),
+  hysteria2: new Set("sni peer obfs obfs-password insecure".split(" ")),
+  tuic: new Set(
+    "sni alpn congestion_control congestion-controller udp_relay_mode udp-relay-mode insecure".split(
+      " ",
+    ),
+  ),
+};
 
 function capability(
   node: NodeRecord,
@@ -85,7 +98,7 @@ function capability(
     node.unknown_params.query.some(
       (entry) =>
         !entry.owned ||
-        !structuredQueryKeys.has(entry.decodedKey.toLowerCase()),
+        !structuredQueryKeys[config.type]?.has(entry.decodedKey),
     ) ||
     Object.keys(node.unknown_params.vmessExtra).length
   )
@@ -125,6 +138,30 @@ function capability(
   if (config.flow && config.flow !== "xtls-rprx-vision")
     return { status: "UNSUPPORTED", reason: "目标格式不支持此 flow" };
   const network = config.network || "tcp";
+  for (const entry of node.unknown_params.query) {
+    const key = entry.decodedKey;
+    if (
+      (["path", "host"].includes(key) && !["ws", "xhttp"].includes(network)) ||
+      (key === "serviceName" && network !== "grpc") ||
+      (key === "mode" && network !== "xhttp") ||
+      (["fp", "alpn", "allowInsecure"].includes(key) && !config.tls) ||
+      (["pbk", "sid"].includes(key) && !config["reality-opts"])
+    )
+      return {
+        status: "LOSSY",
+        reason: "参数与当前传输或安全模式没有已验证的映射",
+      };
+    if (
+      key === "security" &&
+      !["none", "tls", "reality"].includes(entry.decodedValue)
+    )
+      return { status: "UNSUPPORTED", reason: "目标格式未验证此安全模式" };
+  }
+  if (config.flow && (network !== "tcp" || !config.tls))
+    return {
+      status: "UNSUPPORTED",
+      reason: "Vision 需要已验证的 TCP/TLS 组合",
+    };
   if (
     ![
       "tcp",

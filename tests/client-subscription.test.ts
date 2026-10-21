@@ -148,6 +148,17 @@ describe("shared structured renderer contracts", () => {
   );
   it("preserves Generic sidecars and rejects private or ignored structured parameters", () => {
     for (const suffix of [
+      "&udp=false",
+      "&tfo=true",
+      "&packetEncoding=packetaddr",
+      "&network=ws",
+      "&SNI=other.example.com",
+      "&insecure=1",
+      "&path=%2Fignored",
+      "&host=ignored.example.com",
+      "&serviceName=ignored",
+      "&mode=auto",
+      "&sid=abcd",
       "&private_option=secret",
       "&spx=%2Fprivate",
       "&heartbeat=77",
