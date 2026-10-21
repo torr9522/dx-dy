@@ -288,6 +288,7 @@ export function SelectedNodesDialog({
                   <div>
                     <strong>{node.name}</strong>
                     <small>
+                      {node.group_name ? `${node.group_name} · ` : ""}
                       {protocolLabel(node.protocol)} ·{" "}
                       {node.normalized_config.server}
                     </small>

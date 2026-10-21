@@ -1,3 +1,4 @@
+import { ensureRegressionGroup } from "./group-setup";
 import { test, expect } from "@playwright/test";
 import {
   fixtures,
@@ -20,6 +21,7 @@ for (const width of [1440, 768, 390]) {
       .getByLabel("密码", { exact: true })
       .fill("Synthetic-e2e-password-123!");
     await page.getByRole("button", { name: "安全登录" }).click();
+    await ensureRegressionGroup(page);
     await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
     const csrf = (await (await context.request.get("/api/auth/me")).json())
       .csrf;
@@ -123,6 +125,7 @@ test("subscription switch rolls back failures and coalesces rapid changes", asyn
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -197,6 +200,7 @@ test("subscription lists remain usable at 20 subscriptions and 100 nodes", async
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -329,6 +333,7 @@ test("complete browser workflow with synthetic nodes", async ({
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
@@ -480,6 +485,7 @@ test("global selector save returns to persisted main view and survives reload", 
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -558,6 +564,7 @@ test("single local link returns to main, persists and stays out of Global Librar
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -623,6 +630,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -796,6 +804,7 @@ test("filtered selection accumulates, supports rows and visible shift ranges", a
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -901,6 +910,7 @@ test("node collections organize nodes without becoming subscription authority", 
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(
     page.getByRole("heading", { name: "总览", exact: true }),
   ).toBeVisible();
@@ -934,6 +944,9 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.reload();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   for (const name of ["E2E-G", "E2E-A"]) {
+    const legacy = page.locator("details.collection-section");
+    if (!(await legacy.evaluate((element: HTMLDetailsElement) => element.open)))
+      await legacy.locator("summary").click();
     await page.getByRole("button", { name: "新建集合" }).click();
     await page.getByLabel("集合名称").fill(name);
     await page.getByLabel("集合备注").fill("E2E collection");
@@ -1025,17 +1038,19 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.getByRole("button", { name: "添加节点", exact: true }).click();
   await page.getByRole("button", { name: /从节点库选择节点/ }).click();
   await expect(
-    page.getByLabel("节点来源").getByRole("button", { name: /全部节点/ }),
+    page
+      .getByLabel("节点来源")
+      .getByRole("button", { name: /Regression Library/ }),
   ).toBeVisible();
   await page
     .getByLabel("节点来源")
-    .getByRole("button", { name: /全部节点/ })
+    .getByRole("button", { name: /Regression Library/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VLESS");
   await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
   await page
     .getByLabel("节点来源")
-    .getByRole("button", { name: /E2E-G/ })
+    .getByRole("button", { name: /Regression Library/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VMess");
   await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
@@ -1049,7 +1064,7 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
   await page
     .getByLabel("节点来源")
-    .getByRole("button", { name: /全部节点/ })
+    .getByRole("button", { name: /Regression Library/ })
     .click();
   await page.getByLabel("搜索可选节点").fill("Collection VLESS");
   await expect(
@@ -1094,6 +1109,7 @@ test("node collections organize nodes without becoming subscription authority", 
   );
   await page.reload();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.locator("details.collection-section > summary").click();
   await page
     .getByRole("button", { name: new RegExp(`编辑集合 ${collectionA.name}`) })
     .click();
@@ -1156,6 +1172,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf;
   const headers = { "X-CSRF-Token": csrf };
@@ -1342,6 +1359,7 @@ test("Global Library still blocks semantic duplicates", async ({ page }) => {
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();

@@ -1,5 +1,20 @@
 # Database And Migration
 
+## 0.2.9 local Candidate
+
+Migration 004 adds node_groups and nodes.group_id. A foreign key plus insert
+and ownership-update triggers require exactly one valid Group per Global Node.
+The nullable SQLite ALTER column is never valid as NULL after migration.
+Only populated legacy libraries receive 原节点库; empty/fresh instances retain
+zero Groups. Groups have unique case-insensitive trimmed names and positions.
+Deleting a nonempty Group is rejected. Collections and membership rows remain
+unchanged; they are not mapped to ownership Groups.
+
+Schema 004 cannot run on an older binary. Rollback requires the pre-upgrade
+schema-003 database/config snapshot; do not point v0.2.8 at a schema-004 DB.
+Portable/full restore applies forward migrations and preserves Group ownership,
+order, legacy Collections, Subscription tokens and mixed entry ordering.
+
 ## Storage Model
 
 The native database path is `/var/lib/dx-dy/dx-dy.db`, supplied through

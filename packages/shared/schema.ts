@@ -125,6 +125,8 @@ export const nodeEditSchema = z.object({
 });
 export type NodeRecord = Envelope & {
   id: number;
+  group_id?: number;
+  group_name?: string;
   name: string;
   protocol: string;
   remark: string;
@@ -135,6 +137,14 @@ export type NodeRecord = Envelope & {
   references: number;
   collection_ids: number[];
   semantic_key?: string;
+};
+export type NodeGroup = {
+  id: number;
+  name: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  node_count: number;
 };
 export type NodeCollection = {
   id: number;

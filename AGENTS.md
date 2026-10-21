@@ -18,7 +18,7 @@ referrals or tickets without an explicit product decision.
 
 ## Core Invariants
 
-- A Node record is stored once and can be related many-to-many to Subscriptions
+- A Global Node record belongs to exactly one Node Group and can be related many-to-many to Subscriptions
   through `subscription_nodes` and to Collections through
   `node_collection_members`.
 - Collections are management-only. Membership changes never synchronize a
@@ -28,9 +28,9 @@ referrals or tickets without an explicit product decision.
 - Canonical `/s/:token` output is UTF-8 LF-separated share URIs encoded with
   standard Base64. Legacy client aliases are byte-identical. Raw output is an
   authenticated debugging view only.
-- Global Library Nodes and each Subscription's Local Nodes are separate
-  semantic duplicate namespaces. Global/Global duplicates are blocked in the
-  Library; Local/Local duplicates are blocked within one Subscription. A
+- Each Node Group and each Subscription's Local Nodes are separate
+  semantic duplicate namespaces. Same-Group duplicates are blocked; equivalent
+  Global records in different Groups are allowed. Local/Local duplicates are blocked within one Subscription. A
   Global and Local Node with equal connection semantics may coexist and both
   render in their saved order.
 - Historical same-namespace duplicate relationships are not automatically
@@ -70,6 +70,12 @@ full gate; no new RC tags. Historical RC tags remain part of history.
 
 The current release baseline is `v0.2.8`. Never move an existing public
 tag. The next source change after publication is `0.2.9`.
+
+The current local branch implements **0.2.9 LOCAL CANDIDATE**. No push, remote
+branch, tag, Release or Production access is authorized for this Candidate.
+Migration 004 adds ownership Groups; migrations 001–003 are immutable.
+Legacy `/s/:token` remains UA-independent. New `/smart/:token` and
+`/client/:profile/:token` share the same token and use bounded family renderers.
 
 ## Git Safety And Privacy
 

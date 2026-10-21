@@ -16,6 +16,7 @@ async function setup() {
     .post("/api/auth/login")
     .send({ username: "admin", password: "Synthetic-delete-test-123!" });
   const csrf = login.body.csrf;
+  system.store.addNodeGroup("Delete Regression");
   const post = (url: string, body: object) =>
     agent.post(url).set("X-CSRF-Token", csrf).send(body);
   const globals = (

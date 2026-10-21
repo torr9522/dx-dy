@@ -1,3 +1,4 @@
+import { ensureRegressionGroup } from "./group-setup";
 import { test, expect } from "@playwright/test";
 
 test("DOM import preserves equal Global and Local VMess in separate namespaces", async ({
@@ -11,6 +12,7 @@ test("DOM import preserves equal Global and Local VMess in separate namespaces",
     .getByLabel("密码", { exact: true })
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await page.getByRole("button", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   const dialog = page.getByRole("dialog", { name: "粘贴节点链接" });

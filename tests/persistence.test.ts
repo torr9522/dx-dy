@@ -12,7 +12,7 @@ it("WAL persistence, backup and versioned idempotent migrations", async () => {
   try {
     const s = new Store(file);
     await s.migrate();
-    s.addNode(parseNode(vless));
+    s.addNode(parseNode(vless), "", [], true, s.addNodeGroup("Persistence"));
     expect(s.get("PRAGMA foreign_keys")?.foreign_keys).toBe(1);
     expect(s.get("PRAGMA journal_mode")?.journal_mode).toBe("wal");
     await backup(s.db, path.join(dir, "backup.sqlite"));
@@ -20,7 +20,7 @@ it("WAL persistence, backup and versioned idempotent migrations", async () => {
     const next = new Store(file);
     await next.migrate();
     expect(next.nodes()).toHaveLength(1);
-    expect(next.all("SELECT * FROM schema_migrations")).toHaveLength(3);
+    expect(next.all("SELECT * FROM schema_migrations")).toHaveLength(4);
     next.close();
     const b = new DatabaseSync(path.join(dir, "backup.sqlite"));
     expect(b.prepare("SELECT COUNT(*) AS n FROM nodes").get()?.n).toBe(1);

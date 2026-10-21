@@ -2,7 +2,7 @@ __ADMIN_DOMAIN__ {
 	log {
 		output discard
 	}
-	@compressible not path /s/*
+	@compressible not path /s/* /smart/* /client/*
 	encode @compressible zstd gzip
 	reverse_proxy app:3000
 }
@@ -11,7 +11,7 @@ __SUBSCRIPTION_DOMAIN__ {
 	log {
 		output discard
 	}
-	@subscription path /s/* /health
+	@subscription path /s/* /smart/* /client/* /health
 	handle @subscription {
 		reverse_proxy app:3000
 	}

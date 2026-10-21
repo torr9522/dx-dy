@@ -1,5 +1,18 @@
 # Current Baseline
 
+## Local Candidate boundary
+
+Public stable is v0.2.8. The local development branch is 0.2.9 LOCAL CANDIDATE;
+it is not published or approved for push. Migration `004_node_groups.sql` adds
+exactly-one ownership, Group-scoped duplicates and independent cross-group
+copies. Fresh databases have zero Groups. Existing nodes migrate into 原节点库;
+existing Collection data and all Subscription identities/order remain intact.
+
+Separate Smart and explicit client HTTP routes use three shared renderer
+families. Existing `/s/:token` serialization and UA independence remain frozen.
+See [research](research/v0.2.9/MULTI_CLIENT_SOURCE_AUDIT.md). Production is out of
+scope. The release identity below describes the unchanged public baseline.
+
 ## Release Identity
 
 - Current release version: **0.2.8**

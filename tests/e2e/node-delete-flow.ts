@@ -1,3 +1,4 @@
+import { ensureRegressionGroup } from "./group-setup";
 import { expect, type Page, type BrowserContext } from "@playwright/test";
 
 export async function cascadingDeleteFlow(page: Page, context: BrowserContext) {
@@ -17,6 +18,7 @@ export async function cascadingDeleteFlow(page: Page, context: BrowserContext) {
       .getByLabel("密码", { exact: true })
       .fill(process.env.DXDY_UI_PASSWORD || "Synthetic-e2e-password-123!");
     await page.getByRole("button", { name: "安全登录" }).click();
+    await ensureRegressionGroup(page);
   }
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   const readProfiles = async () =>
@@ -187,7 +189,7 @@ export async function cascadingDeleteFlow(page: Page, context: BrowserContext) {
       .filter({ hasText: mixed.name });
     await expect(
       row.locator(".subscription-row-actions button:visible"),
-    ).toHaveCount(4);
+    ).toHaveCount(5);
   }
   for (const p of profiles) {
     const row = page.locator(".subscription-row").filter({ hasText: p.name });

@@ -39,6 +39,7 @@ import QRCode from "qrcode";
 import type {
   Envelope,
   NodeCollection,
+  NodeGroup,
   NodeRecord,
   NormalizedNode,
   Profile,
@@ -239,6 +240,119 @@ function CopySubscription({
   );
 }
 
+function MultiClientSubscription({
+  profileId,
+  copy,
+  notify,
+}: {
+  profileId: number;
+  copy: (value: string) => Promise<void>;
+  notify: (message: string) => void;
+}) {
+  type Result = {
+    legacy_url: string;
+    smart_url: string;
+    profiles: {
+      id: string;
+      name: string;
+      family: string;
+      url: string;
+      counts: {
+        total: number;
+        rendered: number;
+        skipped: number;
+        lossy: number;
+      };
+      diagnostics: {
+        node_id: number;
+        source: string;
+        name: string;
+        status: string;
+        reason: string;
+      }[];
+    }[];
+  };
+  const [data, setData] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            setData(await api<Result>(`/subscriptions/${profileId}/clients`));
+          } catch (error) {
+            notify((error as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Layers size={15} /> 多客户端
+      </button>
+      <Modal
+        open={data !== null}
+        close={() => setData(null)}
+        title="多客户端订阅"
+        description="旧通用订阅保持不变；智能链接无法识别客户端时回退 Generic。专属链接作为兜底，共用同一个 Token。"
+      >
+        {data && (
+          <div className="client-links">
+            <div className="client-link-row">
+              <strong>现有通用订阅</strong>
+              <button onClick={() => copy(data.legacy_url)}>
+                <Copy size={15} /> 复制现有通用订阅
+              </button>
+            </div>
+            <div className="client-link-row">
+              <strong>智能通用订阅</strong>
+              <button onClick={() => copy(data.smart_url)}>
+                <Copy size={15} /> 复制智能订阅
+              </button>
+            </div>
+            <h3>客户端专属兜底链接</h3>
+            {data.profiles.map((profile) => (
+              <section className="client-profile" key={profile.id}>
+                <div className="client-link-row">
+                  <div>
+                    <strong>{profile.name}</strong>
+                    <small>
+                      {profile.family} · 兼容 {profile.counts.rendered}/
+                      {profile.counts.total} · 跳过 {profile.counts.skipped} ·
+                      有损 {profile.counts.lossy}
+                    </small>
+                  </div>
+                  <button
+                    disabled={profile.counts.rendered === 0}
+                    onClick={() => copy(profile.url)}
+                  >
+                    <Copy size={15} /> 复制 {profile.name}
+                  </button>
+                </div>
+                {profile.counts.skipped > 0 && (
+                  <details>
+                    <summary>查看不兼容诊断</summary>
+                    <ul>
+                      {profile.diagnostics
+                        .filter((item) => item.status !== "SUPPORTED")
+                        .map((item) => (
+                          <li key={`${item.source}:${item.node_id}`}>
+                            {item.name} · {item.status} · {item.reason}
+                          </li>
+                        ))}
+                    </ul>
+                  </details>
+                )}
+              </section>
+            ))}
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
 function EnabledSwitch({
   profile,
   changed,
@@ -305,6 +419,11 @@ export function SubscriptionList({
               </span>
               <div className="subscription-row-actions">
                 <CopySubscription profileId={profile.id} copy={common.copy} />
+                <MultiClientSubscription
+                  profileId={profile.id}
+                  copy={common.copy}
+                  notify={common.notify}
+                />
                 <SubscriptionQr
                   profileId={profile.id}
                   name={profile.name}
@@ -395,8 +514,10 @@ function SortableEntry({
         <strong>{entry.node.name}</strong>
         <small>
           {protocolLabel(entry.node.protocol)} ·{" "}
-          {entry.source === "global" ? "节点库" : "独立节点"} ·{" "}
-          {entry.node.enabled ? "启用" : "禁用"}
+          {entry.source === "global"
+            ? `节点库 · ${entry.node.group_name || ""}`
+            : "独立节点"}{" "}
+          · {entry.node.enabled ? "启用" : "禁用"}
         </small>
       </div>
       <span className={`source-badge ${entry.source}`}>
@@ -442,7 +563,7 @@ function SortableEntry({
 function LibrarySelector({
   profileId,
   nodes,
-  collections,
+  groups,
   initialIds,
   close,
   saved,
@@ -452,7 +573,7 @@ function LibrarySelector({
 }: {
   profileId: number;
   nodes: NodeRecord[];
-  collections: NodeCollection[];
+  groups: NodeGroup[];
   initialIds: number[];
   close: () => void;
   saved: () => Promise<void>;
@@ -464,12 +585,14 @@ function LibrarySelector({
   const [protocol, setProtocol] = useState("");
   const [tag, setTag] = useState("");
   const [status, setStatus] = useState("");
-  const [collectionId, setCollectionId] = useState<number | null>(null);
+  const [groupId, setGroupId] = useState<number | null>(groups[0]?.id ?? null);
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const semanticGroup = (nodeId: number) =>
-    nodes.find((node) => node.id === nodeId)?.semantic_key || `node:${nodeId}`;
+  const semanticGroup = (nodeId: number) => {
+    const node = nodes.find((item) => item.id === nodeId);
+    return `${node?.group_id ?? "unknown"}:${node?.semantic_key || `node:${nodeId}`}`;
+  };
   const selection = useNodeSelection(initialIds, {
     group: semanticGroup,
     onBlocked: () => notify("重复配置：该节点与已选择节点连接配置相同"),
@@ -485,9 +608,7 @@ function LibrarySelector({
     return () => window.removeEventListener("beforeunload", leave);
   }, [dirty]);
   const source =
-    collectionId === null
-      ? nodes
-      : nodes.filter((node) => node.collection_ids.includes(collectionId));
+    groupId === null ? [] : nodes.filter((node) => node.group_id === groupId);
   const visible = source.filter(
     (node) =>
       nodeMatches(node, search, protocol, tag, status) &&
@@ -548,22 +669,19 @@ function LibrarySelector({
         </button>
       </div>
       <div className="subscription-source" aria-label="节点来源">
-        <button
-          className={collectionId === null ? "active" : ""}
-          onClick={() => setCollectionId(null)}
-        >
-          全部节点 <b>{nodes.length}</b>
-        </button>
-        {collections.map((collection) => (
+        {groups.map((group) => (
           <button
-            key={collection.id}
-            className={collectionId === collection.id ? "active" : ""}
-            onClick={() => setCollectionId(collection.id)}
+            key={group.id}
+            className={groupId === group.id ? "active" : ""}
+            onClick={() => setGroupId(group.id)}
           >
-            {collection.name} <b>{collection.node_count}</b>
+            {group.name} <b>{group.node_count}</b>
           </button>
         ))}
       </div>
+      {!groups.length && (
+        <p className="notice">节点库暂无分组，请先创建分组。</p>
+      )}
       <div className="selector-filters">
         <label className="search">
           <Search size={16} />
@@ -1092,13 +1210,14 @@ function LocalEditor({
 export function SubscriptionDetail({
   initial,
   nodes,
-  collections,
+  groups,
   onBack,
   onSaved,
   ...common
 }: CommonProps & {
   initial: Profile;
   nodes: NodeRecord[];
+  groups: NodeGroup[];
   collections: NodeCollection[];
   onBack: () => void;
   onSaved: () => Promise<void>;
@@ -1160,7 +1279,7 @@ export function SubscriptionDetail({
     let count = 0;
     for (const entry of ordered) {
       if (!entry.node.semantic_key) continue;
-      const key = `${entry.source}:${entry.node.semantic_key}`;
+      const key = `${entry.source}:${entry.source === "global" ? entry.node.group_id : "local"}:${entry.node.semantic_key}`;
       if (seen.has(key)) count += 1;
       else seen.add(key);
     }
@@ -1225,7 +1344,7 @@ export function SubscriptionDetail({
       <LibrarySelector
         profileId={profile.id}
         nodes={nodes}
-        collections={collections}
+        groups={groups}
         initialIds={entries
           .filter((entry) => entry.source === "global")
           .map((entry) => entry.node.id)}

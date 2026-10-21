@@ -2015,3 +2015,25 @@ pre {
     flex: 1;
   }
 }
+.client-links {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.client-profile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.client-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.subscription-row-actions {
+  flex-wrap: wrap;
+}

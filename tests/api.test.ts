@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import request from "supertest";
-import { createApp, type Options } from "../apps/api/src/app";
+import { createApp as createFreshApp, type Options } from "../apps/api/src/app";
 import {
   digest,
   decryptToken,
@@ -21,6 +21,11 @@ import type {
   SubscriptionEntry,
 } from "../packages/shared/schema";
 const password = "Synthetic-admin-password-123!";
+async function createApp(options: Options) {
+  const system = await createFreshApp(options);
+  system.store.addNodeGroup("Regression Library");
+  return system;
+}
 const options: Options = {
   database: ":memory:",
   masterKey: "1".repeat(64),
@@ -54,7 +59,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.8",
+      version: "0.2.9",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {

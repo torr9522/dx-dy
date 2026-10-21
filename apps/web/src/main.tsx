@@ -45,6 +45,7 @@ import type {
   NormalizedNode,
   Envelope,
   NodeCollection,
+  NodeGroup,
 } from "../../../packages/shared/schema";
 import { api, setCsrf } from "./api";
 import { getField, setField, nodeMatches } from "./fields";
@@ -161,6 +162,7 @@ function App() {
   const [nodes, setNodes] = useState<NodeRecord[]>([]),
     [profiles, setProfiles] = useState<Profile[]>([]),
     [collections, setCollections] = useState<NodeCollection[]>([]),
+    [groups, setGroups] = useState<NodeGroup[]>([]),
     [settings, setSettings] = useState<SettingsData>({
       site_name: "dx-dy",
       admin_base_url: "",
@@ -175,6 +177,7 @@ function App() {
     [profile, setProfile] = useState<Profile | null>(null),
     [newProfile, setNewProfile] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
   const confirmationFocus = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
     if (confirm) confirmationFocus.current = confirm.returnFocus;
@@ -184,16 +187,21 @@ function App() {
     setTimeout(() => setToast(""), 4500);
   };
   const refresh = async () => {
-    const [n, p, s, c] = await Promise.all([
+    const [n, p, s, c, g] = await Promise.all([
       api<NodeRecord[]>("/nodes"),
       api<Profile[]>("/subscriptions"),
       api<SettingsData>("/settings"),
       api<NodeCollection[]>("/collections"),
+      api<NodeGroup[]>("/node-groups"),
     ]);
     setNodes(n);
     setProfiles(p);
     setSettings(s);
     setCollections(c);
+    setGroups(g);
+    setActiveGroupId((current) =>
+      g.some((group) => group.id === current) ? current : (g[0]?.id ?? null),
+    );
   };
   const action = async (fn: () => Promise<void>) => {
     setPending(true);
@@ -291,7 +299,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.8</small>
+          <small>dx-dy v0.2.9 LOCAL CANDIDATE</small>
         </div>
       </aside>
       <main>
@@ -343,14 +351,18 @@ function App() {
                 {page === "dashboard"
                   ? "节点集中管理，订阅随时保持同步。"
                   : page === "nodes"
-                    ? "每个节点只存一份，更新自动应用到所有订阅。"
+                    ? "分组独立管理节点，更新按节点引用应用到订阅。"
                     : page === "subscriptions"
                       ? "为设备或使用场景组合节点，独立、安全地分发。"
                       : "管理工作空间与账户安全。"}
               </p>
             </div>
             {page === "nodes" && (
-              <button className="primary" onClick={() => setImportOpen(true)}>
+              <button
+                className="primary"
+                disabled={!activeGroupId}
+                onClick={() => setImportOpen(true)}
+              >
                 <Plus size={17} />
                 添加 / 批量添加节点
               </button>
@@ -368,6 +380,9 @@ function App() {
           {page === "nodes" && (
             <NodeLibrary
               nodes={nodes}
+              groups={groups}
+              activeGroupId={activeGroupId}
+              setActiveGroupId={setActiveGroupId}
               collections={collections}
               refresh={refresh}
               notify={notify}
@@ -382,6 +397,7 @@ function App() {
                 key={profile.id}
                 initial={profile}
                 nodes={nodes}
+                groups={groups}
                 notify={notify}
                 copy={copy}
                 onSaved={async () => {
@@ -413,11 +429,14 @@ function App() {
         </div>
       </main>
       <ImportDialog
+        key={`${importOpen}:${activeGroupId}`}
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onSaved={refresh}
         notify={notify}
         collections={collections}
+        groups={groups}
+        initialGroupId={activeGroupId}
       />
       {editing && (
         <NodeDrawer
@@ -702,12 +721,16 @@ function ImportDialog({
   onSaved,
   notify,
   collections,
+  groups,
+  initialGroupId,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
   notify: (s: string) => void;
   collections: NodeCollection[];
+  groups: NodeGroup[];
+  initialGroupId: number | null;
 }) {
   const [text, setText] = useState(""),
     [rows, setRows] = useState<Preview[]>([]),
@@ -715,6 +738,7 @@ function ImportDialog({
     [names, setNames] = useState<Record<number, string>>({}),
     [busy, setBusy] = useState(false);
   const [collectionIds, setCollectionIds] = useState<number[]>([]);
+  const [groupId, setGroupId] = useState<number | null>(initialGroupId);
   const work = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -732,6 +756,26 @@ function ImportDialog({
       title="粘贴节点链接"
       description="一行一条，支持 VLESS / VMess / Trojan / SS / HY2 / TUIC。先预览，再确认导入。"
     >
+      <label className="field">
+        <span>目标分组</span>
+        <select
+          aria-label="导入目标分组"
+          value={groupId ?? ""}
+          onChange={(event) => {
+            setGroupId(event.target.value ? Number(event.target.value) : null);
+            setRows([]);
+          }}
+        >
+          <option value="" disabled>
+            请选择分组
+          </option>
+          {groups.map((group) => (
+            <option key={group.id} value={group.id}>
+              {group.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <textarea
         aria-label="节点链接"
         className="uri-input"
@@ -747,11 +791,12 @@ function ImportDialog({
         <span className="muted">每批最多 300 行，不会自动丢弃失败项</span>
         <button
           className="primary"
-          disabled={busy || !text.trim()}
+          disabled={busy || !text.trim() || !groupId}
           onClick={() =>
             work(async () => {
               const result = await api<Preview[]>("/nodes/preview", "POST", {
                 text,
+                group_id: groupId,
               });
               setRows(result);
               setSelected(
@@ -879,6 +924,7 @@ function ImportDialog({
               onClick={() =>
                 work(async () => {
                   await api("/nodes/import", "POST", {
+                    group_id: groupId,
                     collection_ids: collectionIds,
                     items: rows
                       .filter((r) => selected.has(r.index) && r.envelope)

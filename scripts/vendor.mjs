@@ -19,6 +19,8 @@ const files = [
   "core/proxy-utils/preprocessors",
   "core/proxy-utils/producers/uri.js",
   "core/proxy-utils/producers/shadowrocket.js",
+  "core/proxy-utils/producers/clashmeta.js",
+  "core/proxy-utils/producers/sing-box.js",
   "core/proxy-utils/producers/utils.js",
   "core/proxy-utils/transport-path.js",
   "core/proxy-utils/xhttp-utils.js",

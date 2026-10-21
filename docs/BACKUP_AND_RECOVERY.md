@@ -1,5 +1,12 @@
 # Backup And Recovery
 
+The 0.2.9 local Candidate's database snapshots also contain Node Groups,
+ownership, positions and metadata. Restoring a v0.2.8 database applies migration
+004, creating 原节点库 only when legacy Global Nodes exist. Restoring 0.2.9
+preserves independent cross-group duplicate records. APP_MASTER_KEY handling
+is unchanged: portable snapshots require the separately retained key; Full
+Migration includes it in the encrypted payload.
+
 ## Portable Database Backup
 
 A DB backup is a WAL-safe independent SQLite file containing Global and

@@ -97,7 +97,26 @@ describe("database migration and portability", () => {
       timestamp,
       timestamp,
     );
-    const nodeId = old.addNode(parseNode(vless), "legacy", ["preserved"]);
+    const envelope = parseNode(vless);
+    const nodeId = Number(
+      old.run(
+        "INSERT INTO nodes(name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,tags,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        envelope.normalized_config.name,
+        "legacy",
+        envelope.normalized_config.type,
+        envelope.original_uri,
+        JSON.stringify(envelope.normalized_config),
+        JSON.stringify(envelope.unknown_params),
+        envelope.parser_name,
+        envelope.parser_version,
+        JSON.stringify(envelope.parse_warnings),
+        JSON.stringify(envelope.unsupported_fields),
+        JSON.stringify(["preserved"]),
+        1,
+        timestamp,
+        timestamp,
+      ).lastInsertRowid,
+    );
     const token = "A".repeat(43);
     const subscriptionId = Number(
       old.run(
@@ -214,6 +233,7 @@ describe("database migration and portability", () => {
         .post("/api/auth/login")
         .send({ username: "admin", password }),
       csrf = login.body.csrf;
+    a.store.addNodeGroup("Backup Regression");
     const imported = (
       await agent
         .post("/api/nodes/import")
@@ -280,6 +300,14 @@ describe("database migration and portability", () => {
       })
       .expect(200);
     a.store.set("migration_setting", "preserved");
+    const copyGroup = a.store.addNodeGroup("Independent copies");
+    a.store.addNodeGroup("Empty Group");
+    await agent
+      .post(`/api/node-groups/${copyGroup}/copy`)
+      .set("X-CSRF-Token", csrf)
+      .send({ node_ids: imported.map((n: { id: number }) => n.id) })
+      .expect(201);
+    const sourceGroups = a.store.nodeGroups();
     const url = (await agent.get(`/api/subscriptions/${profile.id}/url`)).body
         .url,
       body = (await request(a.app).get(new URL(url).pathname)).text,
@@ -287,7 +315,7 @@ describe("database migration and portability", () => {
       sourceNodes = a.store.nodes();
     await snapshot(a.store.db, portable, true);
     const independent = new DatabaseSync(portable, { readOnly: true });
-    expect(validateDatabase(independent)).toHaveLength(3);
+    expect(validateDatabase(independent)).toHaveLength(4);
     expect(
       independent.prepare("SELECT COUNT(*) n FROM admin_sessions").get()?.n,
     ).toBe(0);
@@ -345,6 +373,7 @@ describe("database migration and portability", () => {
       );
       expect(b.store.settings().migration_setting).toBe("preserved");
       expect(b.store.nodes()).toEqual(sourceNodes);
+      expect(b.store.nodeGroups()).toEqual(sourceGroups);
       expect(b.store.findNode(imported[0].id)?.enabled).toBe(true);
       expect(b.store.findNode(imported[1].id)?.enabled).toBe(false);
       expect(

@@ -1,3 +1,4 @@
+import { ensureRegressionGroup } from "./group-setup";
 import {
   expect,
   test,
@@ -12,6 +13,7 @@ async function login(page: Page) {
   await page.goto("/");
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "安全登录" }).click();
+  await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
 }
 

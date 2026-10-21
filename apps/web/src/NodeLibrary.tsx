@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  NodeGroup,
   NodeCollection,
   NodeRecord,
   NodeDeleteImpact,
@@ -179,6 +180,9 @@ function CollectionChooser({
 
 export function NodeLibrary({
   nodes,
+  groups,
+  activeGroupId,
+  setActiveGroupId,
   collections,
   refresh,
   notify,
@@ -187,6 +191,9 @@ export function NodeLibrary({
   confirm,
 }: {
   nodes: NodeRecord[];
+  groups: NodeGroup[];
+  activeGroupId: number | null;
+  setActiveGroupId: (id: number | null) => void;
   collections: NodeCollection[];
   refresh: () => Promise<void>;
   notify: (message: string) => void;
@@ -195,6 +202,14 @@ export function NodeLibrary({
   confirm: Confirm;
 }) {
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [groupEditor, setGroupEditor] = useState<NodeGroup | "new" | null>(
+    null,
+  );
+  const [groupName, setGroupName] = useState("");
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [sourceGroupId, setSourceGroupId] = useState<number | null>(null);
+  const copySelection = useNodeSelection();
+  const [groupBusy, setGroupBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [protocol, setProtocol] = useState("");
   const [tag, setTag] = useState("");
@@ -206,12 +221,29 @@ export function NodeLibrary({
   const [quickNode, setQuickNode] = useState<NodeRecord | null>(null);
   const [editor, setEditor] = useState<NodeCollection | "new" | null>(null);
   const active = collections.find((item) => item.id === activeId) || null;
+  const activeGroup = groups.find((item) => item.id === activeGroupId) || null;
+  const groupNodes =
+    activeGroupId === null
+      ? []
+      : nodes.filter((node) => node.group_id === activeGroupId);
   const source = active
-    ? nodes.filter((node) => node.collection_ids.includes(active.id))
-    : nodes;
+    ? groupNodes.filter((node) => node.collection_ids.includes(active.id))
+    : groupNodes;
   const visible = source.filter((node) =>
     nodeMatches(node, search, protocol, tag, status),
   );
+  const editGroup = (group: NodeGroup | "new") => {
+    setGroupEditor(group);
+    setGroupName(group === "new" ? "" : group.name);
+  };
+  const targetKeys = new Set(groupNodes.map((node) => node.semantic_key));
+  const copyCandidates = nodes.filter(
+    (node) => node.group_id === sourceGroupId,
+  );
+  const copyDisabled = (node: NodeRecord) => targetKeys.has(node.semantic_key);
+  useEffect(() => {
+    selection.clearAll();
+  }, [activeGroupId]);
   const mutate = async (
     action: "add" | "remove" | "set",
     collectionIds: number[],
@@ -300,19 +332,60 @@ export function NodeLibrary({
     <div className="node-library card">
       <aside className="collection-sidebar" aria-label="节点库导航">
         <div className="master-pool">
-          <small>节点库</small>
-          <button
-            className={active ? "" : "active"}
-            onClick={() => chooseView(null)}
-          >
-            <span>
-              <strong>全部节点</strong>
-              <small>全局节点唯一来源</small>
-            </span>
-            <b>{nodes.length}</b>
+          <small>节点分组</small>
+          <button className="new-collection" onClick={() => editGroup("new")}>
+            <Plus size={14} /> 新建分组
           </button>
+          {groups.map((group) => (
+            <div className="collection-nav-row" key={group.id}>
+              <button
+                className={activeGroupId === group.id ? "active" : ""}
+                onClick={() => {
+                  setActiveGroupId(group.id);
+                  chooseView(null);
+                }}
+              >
+                <span>
+                  <strong>{group.name}</strong>
+                </span>
+                <b>{group.node_count}</b>
+              </button>
+              <button
+                className="icon-button"
+                aria-label={`编辑分组 ${group.name}`}
+                onClick={() => editGroup(group)}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label={`删除分组 ${group.name}`}
+                disabled={group.node_count > 0}
+                title={
+                  group.node_count ? "请先复制或删除组内节点" : "删除空分组"
+                }
+                onClick={() =>
+                  confirm({
+                    title: "删除空分组",
+                    text: `删除空分组“${group.name}”？`,
+                    run: async () => {
+                      await api(`/node-groups/${group.id}`, "DELETE");
+                      await refresh();
+                    },
+                  })
+                }
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          {!groups.length && (
+            <p className="notice">创建第一个分组后开始添加节点。</p>
+          )}
         </div>
-        <div className="collection-section">
+        <details className="collection-section">
+          <summary>Legacy Collections（保留数据）</summary>
+          <button onClick={() => chooseView(null)}>当前分组全部节点</button>
           <div className="collection-section-title">
             <span>节点集合</span>
             <small>管理视图</small>
@@ -352,22 +425,40 @@ export function NodeLibrary({
             <Plus size={14} />
             新建集合
           </button>
-        </div>
+        </details>
       </aside>
       <section className="node-library-main">
         <div className="node-view-heading">
           <div>
-            <h2>{active?.name || "全部节点"}</h2>
+            <h2>
+              {activeGroup?.name || "暂无分组"}
+              {active ? ` · ${active.name}` : ""}
+            </h2>
             <p>
               {active
                 ? active.remark || "从全部节点中整理出的管理集合"
-                : "Global Node Library · 所有节点的 Master Pool"}
+                : "Global Node Library · 当前分组内节点"}
             </p>
           </div>
           {active && (
             <button className="primary" onClick={() => setAddOpen(true)}>
               <FolderPlus size={16} />
               从节点库添加节点
+            </button>
+          )}
+          {activeGroup && (
+            <button
+              disabled={groups.length < 2}
+              onClick={() => {
+                copySelection.clearAll();
+                setSourceGroupId(
+                  groups.find((group) => group.id !== activeGroupId)?.id ??
+                    null,
+                );
+                setCopyOpen(true);
+              }}
+            >
+              <Copy size={16} /> 从其他分组添加
             </button>
           )}
         </div>
@@ -615,6 +706,132 @@ export function NodeLibrary({
           </div>
         )}
       </section>
+      <LibraryModal
+        open={groupEditor !== null}
+        close={() => !groupBusy && setGroupEditor(null)}
+        title={groupEditor === "new" ? "创建分组" : "重命名分组"}
+        description="每个节点只属于一个分组；组内连接配置不可重复。"
+      >
+        <form
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (groupBusy || !groupName.trim()) return;
+            setGroupBusy(true);
+            try {
+              const saved = await api<NodeGroup>(
+                groupEditor === "new"
+                  ? "/node-groups"
+                  : `/node-groups/${groupEditor?.id}`,
+                groupEditor === "new" ? "POST" : "PATCH",
+                { name: groupName },
+              );
+              await refresh();
+              setActiveGroupId(saved.id);
+              chooseView(null);
+              setGroupEditor(null);
+            } catch (error) {
+              notify((error as Error).message);
+            } finally {
+              setGroupBusy(false);
+            }
+          }}
+        >
+          <label className="field">
+            <span>分组名称</span>
+            <input
+              aria-label="分组名称"
+              value={groupName}
+              maxLength={100}
+              onChange={(event) => setGroupName(event.target.value)}
+            />
+          </label>
+          <div className="modal-actions">
+            <button
+              className="primary"
+              type="submit"
+              disabled={groupBusy || !groupName.trim()}
+            >
+              保存分组
+            </button>
+          </div>
+        </form>
+      </LibraryModal>
+      <LibraryModal
+        open={copyOpen}
+        close={() => !groupBusy && setCopyOpen(false)}
+        title="从其他分组添加"
+        description={`创建独立节点副本到 ${activeGroup?.name || "当前分组"}；不会共享节点 ID。`}
+      >
+        <label className="field">
+          <span>来源分组</span>
+          <select
+            aria-label="来源分组"
+            value={sourceGroupId ?? ""}
+            onChange={(event) => {
+              setSourceGroupId(Number(event.target.value));
+              copySelection.clearAll();
+            }}
+          >
+            {groups
+              .filter((group) => group.id !== activeGroupId)
+              .map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <div className="picker-list">
+          {copyCandidates.map((node) => (
+            <label className="picker-node" key={node.id}>
+              <input
+                type="checkbox"
+                aria-label={`复制 ${node.name}`}
+                disabled={copyDisabled(node)}
+                checked={copySelection.isSelected(node.id)}
+                onChange={(event) =>
+                  copySelection.toggleOne(node.id, {
+                    checked: event.target.checked,
+                  })
+                }
+              />
+              <span>
+                <strong>{node.name}</strong>
+                <small>
+                  {node.group_name} · {protocolLabel(node.protocol)}
+                  {copyDisabled(node) ? " · 目标分组已存在相同配置" : ""}
+                </small>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <span>已选择 {copySelection.selectedCount} 个节点</span>
+          <button
+            className="primary"
+            disabled={
+              groupBusy || !copySelection.selectedCount || !activeGroupId
+            }
+            onClick={async () => {
+              setGroupBusy(true);
+              try {
+                await api(`/node-groups/${activeGroupId}/copy`, "POST", {
+                  node_ids: copySelection.selectedIds,
+                });
+                await refresh();
+                setCopyOpen(false);
+                notify("独立节点副本已创建");
+              } catch (error) {
+                notify((error as Error).message);
+              } finally {
+                setGroupBusy(false);
+              }
+            }}
+          >
+            确认复制
+          </button>
+        </div>
+      </LibraryModal>
       {addOpen && (
         <AddNodesDialog
           collection={active}

@@ -18,6 +18,8 @@ import {
   resetAdminPassword,
 } from "./admin-service";
 import { normalizeHttpsOrigin, setSubscriptionBase } from "./domain-service";
+import { detectClient, renderClient } from "./client-subscription";
+import { clientProfiles } from "../../../packages/shared/client-profiles";
 import {
   decryptToken,
   digest,
@@ -157,7 +159,9 @@ export async function createApp(options: Options) {
       subscriptionOnlyHost &&
       host !== adminHost &&
       req.path !== "/health" &&
-      !req.path.startsWith("/s/")
+      !["/s/", "/smart/", "/client/"].some((prefix) =>
+        req.path.startsWith(prefix),
+      )
     )
       return res
         .status(404)
@@ -197,7 +201,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.8" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.9" });
   });
   app.post(
     "/api/auth/login",
@@ -302,6 +306,56 @@ export async function createApp(options: Options) {
       })),
     ),
   );
+  const nodeGroupSchema = z.object({
+    name: z.string().trim().min(1).max(100),
+  });
+  const getNodeGroup = (groupId: number) =>
+    store.nodeGroups().find((group) => group.id === groupId) ||
+    fail(404, "NOT_FOUND", "节点分组不存在");
+  const resolveNodeGroup = (groupId?: number) => {
+    if (groupId) return getNodeGroup(groupId).id;
+    const available = store.nodeGroups();
+    if (available.length === 1) return available[0].id;
+    return fail(400, "GROUP_REQUIRED", "请先创建并选择节点分组");
+  };
+  app.get("/api/node-groups", (_req, res) => res.json(store.nodeGroups()));
+  app.post("/api/node-groups", (req, res) => {
+    const { name } = nodeGroupSchema.parse(req.body);
+    if (
+      store.get("SELECT id FROM node_groups WHERE name=? COLLATE NOCASE", name)
+    )
+      return fail(409, "GROUP_NAME", "分组名称已存在");
+    const group = getNodeGroup(store.addNodeGroup(name));
+    res.status(201).json(group);
+  });
+  app.patch("/api/node-groups/:id", (req, res) => {
+    const groupId = id(req),
+      { name } = nodeGroupSchema.parse(req.body);
+    getNodeGroup(groupId);
+    if (
+      store.get(
+        "SELECT id FROM node_groups WHERE name=? COLLATE NOCASE AND id<>?",
+        name,
+        groupId,
+      )
+    )
+      return fail(409, "GROUP_NAME", "分组名称已存在");
+    store.run(
+      "UPDATE node_groups SET name=?,updated_at=? WHERE id=?",
+      name,
+      now(),
+      groupId,
+    );
+    res.json(getNodeGroup(groupId));
+  });
+  app.delete("/api/node-groups/:id", (req, res) => {
+    const groupId = id(req),
+      group = getNodeGroup(groupId);
+    if (group.node_count)
+      return fail(409, "GROUP_NOT_EMPTY", "请先复制或删除分组内节点");
+    store.run("DELETE FROM node_groups WHERE id=?", groupId);
+    res.json({ ok: true });
+  });
   const collectionSchema = z.object({
     name: z.string().trim().min(1).max(100),
     remark: z.string().max(2000).default(""),
@@ -491,13 +545,29 @@ export async function createApp(options: Options) {
       },
     );
   };
+  const rejectGlobalGroupDuplicates = (
+    nodes: (Envelope & {
+      id?: number;
+      group_id?: number;
+      name?: string;
+      protocol?: string;
+    })[],
+  ) => {
+    const groups = new Map<number, typeof nodes>();
+    for (const node of nodes) {
+      const groupId = Number(node.group_id);
+      groups.set(groupId, [...(groups.get(groupId) || []), node]);
+    }
+    for (const group of groups.values()) rejectSemanticDuplicates(group);
+  };
   const rejectNewGlobalDuplicates = (
     candidates: Envelope[],
+    groupId: number,
     excludeId?: number,
   ) => {
     const existing: Envelope[] = store
       .nodes()
-      .filter((node) => node.id !== excludeId);
+      .filter((node) => node.id !== excludeId && node.group_id === groupId);
     for (const candidate of candidates) {
       const key = getNodeSemanticKey(candidate);
       const match = existing.find((node) => getNodeSemanticKey(node) === key);
@@ -506,16 +576,26 @@ export async function createApp(options: Options) {
     }
   };
   app.post("/api/nodes/preview", (req, res) => {
-    const { text } = z
-      .object({ text: z.string().min(1).max(200000) })
+    const { text, group_id: requestedGroupId } = z
+      .object({
+        text: z.string().min(1).max(200000),
+        group_id: z.number().int().positive().optional(),
+      })
       .parse(req.body);
+    const group_id = resolveNodeGroup(requestedGroupId);
     if (text.split("\n").length > 300)
       return fail(400, "LIMIT", "每批最多 300 行");
-    res.json(preview(text, store.nodes()));
+    res.json(
+      preview(
+        text,
+        store.nodes().filter((node) => node.group_id === group_id),
+      ),
+    );
   });
   app.post("/api/nodes/import", (req, res) => {
-    const { items, collection_ids } = z
+    const { items, collection_ids, group_id } = z
       .object({
+        group_id: z.number().int().positive().optional(),
         collection_ids: z
           .array(z.number().int().positive())
           .max(100)
@@ -531,21 +611,79 @@ export async function createApp(options: Options) {
           .max(300),
       })
       .parse(req.body);
+    const resolvedGroupId = resolveNodeGroup(group_id);
     requireCollections(collection_ids);
     const parsed = items.map((x) => {
       const e = parseURI(x.uri);
       if (x.name) e.normalized_config.name = x.name;
       return e;
     });
-    rejectNewGlobalDuplicates(parsed);
+    rejectNewGlobalDuplicates(parsed, resolvedGroupId);
     const ids = store.transaction(() =>
       parsed.map((e) => {
-        const nodeId = store.addNode(e);
+        const nodeId = store.addNode(e, "", [], true, resolvedGroupId);
         store.setCollections(nodeId, collection_ids);
         return nodeId;
       }),
     );
     res.status(201).json(ids.map((n) => store.findNode(n)));
+  });
+  app.post("/api/node-groups/:id/copy", (req, res) => {
+    const groupId = id(req);
+    getNodeGroup(groupId);
+    const { node_ids } = z
+      .object({
+        node_ids: z
+          .array(z.number().int().positive())
+          .min(1)
+          .max(300)
+          .refine((values) => new Set(values).size === values.length),
+      })
+      .parse(req.body);
+    const byId = new Map(store.nodes().map((node) => [node.id, node]));
+    const sources = node_ids.map((nodeId) => byId.get(nodeId));
+    if (sources.some((node) => !node))
+      return fail(400, "NODE_IDS", "含不存在的节点");
+    if (sources.some((node) => node!.group_id === groupId))
+      return fail(400, "COPY_SOURCE", "只能从其他分组复制节点");
+    rejectNewGlobalDuplicates(
+      sources.map((node) => node!),
+      groupId,
+    );
+    const ids = store.transaction(() =>
+      sources.map((node) => {
+        const source = node!;
+        const envelope: Envelope = {
+          original_uri: source.original_uri,
+          normalized_config: source.normalized_config,
+          unknown_params: source.unknown_params,
+          parser_name: source.parser_name,
+          parser_version: source.parser_version,
+          parse_warnings: source.parse_warnings,
+          unsupported_fields: source.unsupported_fields,
+        };
+        const created = store.addNode(
+          envelope,
+          source.remark,
+          source.tags,
+          source.enabled,
+          groupId,
+        );
+        store.setCollections(
+          created,
+          source.collection_ids.filter((collectionId) =>
+            Boolean(
+              store.get(
+                "SELECT id FROM node_collections WHERE id=?",
+                collectionId,
+              ),
+            ),
+          ),
+        );
+        return created;
+      }),
+    );
+    res.status(201).json(ids.map((nodeId) => store.findNode(nodeId)));
   });
   const getNode = (req: Request) =>
     store.findNode(id(req)) || fail(404, "NOT_FOUND", "节点不存在");
@@ -559,7 +697,7 @@ export async function createApp(options: Options) {
     const e = editConfig(n, x.normalized_config);
     generateURI(e);
     if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
-      rejectNewGlobalDuplicates([e], n.id);
+      rejectNewGlobalDuplicates([e], n.group_id!, n.id);
     store.transaction(() => {
       store.updateNode(n.id, e, x.remark, x.tags, x.enabled);
       if (x.collection_ids) store.setCollections(n.id, x.collection_ids);
@@ -592,7 +730,7 @@ export async function createApp(options: Options) {
         .parse(req.body);
     const e = parseURI(x.uri);
     if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
-      rejectNewGlobalDuplicates([e], n.id);
+      rejectNewGlobalDuplicates([e], n.group_id!, n.id);
     store.updateNode(n.id, e, n.remark, n.tags, n.enabled);
     res.json(store.findNode(n.id));
   });
@@ -601,7 +739,7 @@ export async function createApp(options: Options) {
     z.object({ confirm: z.literal(true) }).parse(req.body);
     const e = parseURI(n.original_uri);
     if (getNodeSemanticKey(e) !== getNodeSemanticKey(n))
-      rejectNewGlobalDuplicates([e], n.id);
+      rejectNewGlobalDuplicates([e], n.group_id!, n.id);
     store.updateNode(n.id, e, n.remark, n.tags, n.enabled);
     res.json(store.findNode(n.id));
   });
@@ -670,7 +808,7 @@ export async function createApp(options: Options) {
   const rejectEntrySemanticDuplicates = (
     entries: ReturnType<typeof store.subscriptionEntries>,
   ) => {
-    rejectSemanticDuplicates(
+    rejectGlobalGroupDuplicates(
       entries
         .filter((entry) => entry.source === "global")
         .map((entry) => entry.node),
@@ -754,7 +892,7 @@ export async function createApp(options: Options) {
     if (node_ids.some((nodeId) => !byId.has(nodeId)))
       return fail(400, "NODE", "含不存在的节点");
     const selected = node_ids.map((nodeId) => byId.get(nodeId)!);
-    rejectSemanticDuplicates(selected);
+    rejectGlobalGroupDuplicates(selected);
     store.assign(id(req), node_ids);
     res.json(store.profile(getProfile(req)));
   });
@@ -953,6 +1091,26 @@ export async function createApp(options: Options) {
     const token = decryptToken(String(p.token_ciphertext), key);
     res.json({ url: buildSubscriptionUrl(token) });
   });
+  app.get("/api/subscriptions/:id/clients", (req, res) => {
+    const subscription = getProfile(req);
+    const token = decryptToken(String(subscription.token_ciphertext), key);
+    const entries = store.subscriptionEntries(Number(subscription.id));
+    const results = new Map(
+      [...new Set(clientProfiles.map((profile) => profile.family))].map(
+        (family) => [family, renderClient(entries, family)],
+      ),
+    );
+    res.json({
+      legacy_url: buildSubscriptionUrl(token),
+      smart_url: `${subscriptionBase()}/smart/${token}`,
+      profiles: clientProfiles.map((profile) => ({
+        ...profile,
+        url: `${subscriptionBase()}/client/${profile.id}/${token}`,
+        counts: results.get(profile.family)!.counts,
+        diagnostics: results.get(profile.family)!.diagnostics,
+      })),
+    });
+  });
   const render = (
     entries: ReturnType<typeof store.subscriptionEntries>,
     format: string,
@@ -964,7 +1122,9 @@ export async function createApp(options: Options) {
       duplicateOf: (typeof entries)[number];
     }[] = [];
     for (const entry of entries) {
-      const key = `${entry.source}:${getNodeSemanticKey(entry.node)}`;
+      const namespace =
+        entry.source === "global" ? `global:${entry.node.group_id}` : "local";
+      const key = `${namespace}:${getNodeSemanticKey(entry.node)}`;
       const first = seen.get(key);
       if (first) suppressed.push({ node: entry, duplicateOf: first });
       else {
@@ -995,13 +1155,26 @@ export async function createApp(options: Options) {
       selectedEntries.filter((entry) => entry.node.enabled),
       f,
     );
-    const duplicateGroups = ["global", "local"].flatMap((source) =>
-      findSemanticDuplicateGroups(
+    const globalByGroup = new Map<number, typeof selectedEntries>();
+    for (const entry of selectedEntries.filter(
+      (item) => item.source === "global",
+    )) {
+      const groupId = Number(entry.node.group_id);
+      globalByGroup.set(groupId, [
+        ...(globalByGroup.get(groupId) || []),
+        entry,
+      ]);
+    }
+    const duplicateGroups = [
+      ...[...globalByGroup.values()].flatMap((entries) =>
+        findSemanticDuplicateGroups(entries.map((entry) => entry.node)),
+      ),
+      ...findSemanticDuplicateGroups(
         selectedEntries
-          .filter((entry) => entry.source === source)
+          .filter((entry) => entry.source === "local")
           .map((entry) => entry.node),
       ),
-    );
+    ];
     res.json({
       body: output.body,
       contentType: output.contentType,
@@ -1120,6 +1293,48 @@ export async function createApp(options: Options) {
         .send(output.body);
     },
   );
+  const clientSubscription =
+    (explicit: boolean) => (req: Request, res: Response) => {
+      if (!explicit) res.vary("User-Agent");
+      const token = String(req.params.token);
+      if (!/^[A-Za-z0-9_-]{43}$/.test(token))
+        return fail(404, "NOT_FOUND", "订阅不可用");
+      const subscription = store.get(
+        "SELECT id FROM subscriptions WHERE token_hash=? AND enabled=1",
+        digest(token),
+      );
+      if (!subscription) return fail(404, "NOT_FOUND", "订阅不可用");
+      const profile = explicit
+        ? clientProfiles.find((item) => item.id === String(req.params.profile))
+        : detectClient(req.get("User-Agent") || "");
+      if (!profile) return fail(404, "CLIENT_PROFILE", "客户端配置不存在");
+      const entries = store.subscriptionEntries(Number(subscription.id));
+      const output = renderClient(entries, profile.family);
+      res
+        .set("X-Subscription-Client", profile.id)
+        .set("X-Subscription-Format", profile.family)
+        .set("X-Subscription-Total", String(output.counts.total))
+        .set("X-Subscription-Rendered", String(output.counts.rendered))
+        .set("X-Subscription-Skipped", String(output.counts.skipped))
+        .set("X-Subscription-Lossy", String(output.counts.lossy));
+      if (!output.available)
+        return fail(
+          422,
+          "NO_COMPATIBLE_NODES",
+          "没有可输出的兼容节点；请在多客户端预览中查看诊断",
+        );
+      res.type(output.contentType).send(output.body);
+    };
+  app.get(
+    "/smart/:token",
+    limiter(options.subscriptionLimit ?? 300),
+    clientSubscription(false),
+  );
+  app.get(
+    "/client/:profile/:token",
+    limiter(options.subscriptionLimit ?? 300),
+    clientSubscription(true),
+  );
   app.use("/api", (_req, _res, next) =>
     next(new ApiError(404, "NOT_FOUND", "接口不存在")),
   );
@@ -1128,7 +1343,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "dx-dy-0.2.8-source.tar.gz",
+        "dx-dy-0.2.9-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

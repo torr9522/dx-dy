@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.9] - Local Candidate
+
+- Add isolated Node Group ownership, group-scoped duplicate checks, independent
+  cross-group copies and multi-group Subscription draft selection.
+- Add migration 004; existing nodes migrate to one compatibility Group while
+  fresh empty databases retain zero Groups. Legacy Collections remain intact.
+- Add separate Smart and explicit client HTTP views backed by three shared
+  renderer families, capability diagnostics and private cache controls.
+- Preserve existing Generic URLs, token identity and migrated output bytes.
+- This Candidate is local only; no public Release or remote push is authorized.
+
 ## [0.2.8] - 2026-10-16
 
 - Allow deleting Global Library Nodes used by subscriptions. Single and batch

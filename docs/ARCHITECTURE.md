@@ -8,8 +8,8 @@ Browser / subscription client
        80 / 443
           |
   host Caddy service
-    | admin host: UI/API/s/*/health/source
-    | subscription host: /s/* and /health only
+    | admin host: UI/API/subscription views/health/source
+    | subscription host: /s/* /smart/* /client/* and /health only
           |
   127.0.0.1:<internal-port>
           |
@@ -36,6 +36,7 @@ Caddy templates live in [`deploy/native`](../deploy/native). The application has
 
 ```text
 Node * <-> * Subscription via subscription_nodes (Global relationship mirror)
+NodeGroup 1 -> * Global Node (required ownership, schema 004 Candidate)
 Subscription 1 -> * subscription_entries(position) -> Global or Local Node
 Subscription 1 -> * subscription_local_nodes
 Node * <-> * Collection   via node_collection_members
@@ -46,8 +47,10 @@ Settings(key, JSON value)
 Collections are organizational only. `subscription_entries.position` is the
 single output order for mixed Global and Local Nodes. `subscription_nodes`
 continues to mirror Global membership for compatibility and rollback
-inspection. Semantic dedupe preserves the first position without modifying
-stored relationships.
+inspection. Semantic dedupe preserves the first position within each Group or
+Local namespace without modifying stored relationships; cross-group equal
+nodes remain distinct ordered entries. New client views use shared normalized
+data and capability checks. Legacy /s output never negotiates from UA.
 
 ## Build And Release
 

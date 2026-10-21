@@ -74,6 +74,11 @@ export function validateDatabase(
         "position",
       ],
     });
+  if (versions.includes("004_node_groups.sql"))
+    Object.assign(required, {
+      node_groups: ["id", "name", "position"],
+      nodes: [...required.nodes, "group_id"],
+    });
   for (const [table, columns] of Object.entries(required)) {
     const actual = db
       .prepare(`PRAGMA table_info(${table})`)

@@ -1,4 +1,9 @@
-# dx-dy 0.2.8
+# dx-dy 0.2.9
+
+LOCAL CANDIDATE — not published. Public stable remains v0.2.8. This branch
+introduces isolated Node Groups and separate Smart/client HTTP subscription
+views. Existing Generic links remain unchanged. No push, tag or Release is
+part of Candidate validation.
 
 Global Node deletion detaches its subscription references atomically,
 preserving subscriptions, tokens, Local Nodes and the remaining saved order.

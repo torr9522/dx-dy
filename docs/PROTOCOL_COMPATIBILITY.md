@@ -15,14 +15,14 @@ the source of connection semantics.
 
 ## Supported Schemes
 
-| Protocol | Current representation and notable coverage |
-| --- | --- |
-| VLESS | UUID, host/port, Reality/TLS/Vision flow, TCP/WS/gRPC/HTTPUpgrade/XHTTP, SNI, fingerprint, public key, short ID, SpiderX, ALPN and private query fields |
-| VMess | Base64 JSON including address/port, losslessly preserved 8-4-4-4-12 hexadecimal credential, aid/security, transport/type/host/path, TLS/SNI/ALPN/fingerprint/insecure plus unknown JSON fields |
-| Trojan | Password, host/port, TLS/SNI, transport and private query fields |
-| Shadowsocks | Standard userinfo cipher/password form, host/port, plugin/query data and display fragment |
-| Hysteria2 | `hysteria2://` and `hy2://`, password, host/port, TLS/SNI, bandwidth/obfuscation and retained private fields |
-| TUIC | UUID/password, host/port, TLS/SNI and retained congestion/UDP/private options |
+| Protocol    | Current representation and notable coverage                                                                                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VLESS       | UUID, host/port, Reality/TLS/Vision flow, TCP/WS/gRPC/HTTPUpgrade/XHTTP, SNI, fingerprint, public key, short ID, SpiderX, ALPN and private query fields                                        |
+| VMess       | Base64 JSON including address/port, losslessly preserved 8-4-4-4-12 hexadecimal credential, aid/security, transport/type/host/path, TLS/SNI/ALPN/fingerprint/insecure plus unknown JSON fields |
+| Trojan      | Password, host/port, TLS/SNI, transport and private query fields                                                                                                                               |
+| Shadowsocks | Standard userinfo cipher/password form, host/port, plugin/query data and display fragment                                                                                                      |
+| Hysteria2   | `hysteria2://` and `hy2://`, password, host/port, TLS/SNI, bandwidth/obfuscation and retained private fields                                                                                   |
+| TUIC        | UUID/password, host/port, TLS/SNI and retained congestion/UDP/private options                                                                                                                  |
 
 IPv6 authorities and percent-encoded values are covered by adapter regressions.
 The catch-all normalized schema plus ordered raw sidecar protects unrecognized

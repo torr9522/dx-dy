@@ -102,6 +102,8 @@ export class Store {
       protocol: String(row.protocol),
       remark: String(row.remark),
       enabled: !!row.enabled,
+      group_id: Number(row.group_id),
+      group_name: String(row.group_name || ""),
       tags: JSON.parse(String(row.tags)),
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
@@ -126,12 +128,12 @@ export class Store {
       ]);
     }
     return this.all(
-      'SELECT n.*, (SELECT COUNT(*) FROM subscription_nodes sn WHERE sn.node_id=n.id) AS "references" FROM nodes n ORDER BY n.id DESC',
+      'SELECT n.*,g.name AS group_name, (SELECT COUNT(*) FROM subscription_nodes sn WHERE sn.node_id=n.id) AS "references" FROM nodes n JOIN node_groups g ON g.id=n.group_id ORDER BY n.id DESC',
     ).map((r) => this.node(r, memberships.get(Number(r.id)) || []));
   }
   findNode(id: number) {
     const r = this.get(
-      'SELECT n.*, (SELECT COUNT(*) FROM subscription_nodes sn WHERE sn.node_id=n.id) AS "references" FROM nodes n WHERE n.id=?',
+      'SELECT n.*,g.name AS group_name, (SELECT COUNT(*) FROM subscription_nodes sn WHERE sn.node_id=n.id) AS "references" FROM nodes n JOIN node_groups g ON g.id=n.group_id WHERE n.id=?',
       id,
     );
     return r ? this.node(r) : undefined;
@@ -148,6 +150,33 @@ export class Store {
       updated_at: String(r.updated_at),
       node_count: Number(r.node_count),
     }));
+  }
+  nodeGroups() {
+    return this.all(
+      "SELECT g.*, (SELECT COUNT(*) FROM nodes n WHERE n.group_id=g.id) AS node_count FROM node_groups g ORDER BY position,id",
+    ).map((r) => ({
+      id: Number(r.id),
+      name: String(r.name),
+      position: Number(r.position),
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+      node_count: Number(r.node_count),
+    }));
+  }
+  addNodeGroup(name: string) {
+    const timestamp = now();
+    return Number(
+      this.run(
+        "INSERT INTO node_groups(name,position,created_at,updated_at) VALUES(?,?,?,?)",
+        name.trim(),
+        Number(
+          this.get("SELECT COALESCE(MAX(position),-1)+1 AS p FROM node_groups")
+            ?.p,
+        ),
+        timestamp,
+        timestamp,
+      ).lastInsertRowid,
+    );
   }
   setCollections(nodeId: number, ids: number[]) {
     this.run("DELETE FROM node_collection_members WHERE node_id=?", nodeId);
@@ -176,11 +205,22 @@ export class Store {
     );
     this.addCollectionMembers(collectionIds, nodeIds);
   }
-  addNode(e: Envelope, remark = "", tags: string[] = [], enabled = true) {
+  addNode(
+    e: Envelope,
+    remark = "",
+    tags: string[] = [],
+    enabled = true,
+    groupId?: number,
+  ) {
     const t = now();
+    const resolvedGroup =
+      groupId ??
+      (this.nodeGroups().length === 1 ? this.nodeGroups()[0].id : undefined);
+    if (!resolvedGroup) throw new Error("A Node Group is required");
     return Number(
       this.run(
-        "INSERT INTO nodes(name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,tags,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO nodes(group_id,name,remark,protocol,original_uri,normalized_config,unknown_params,parser_name,parser_version,parse_warnings,unsupported_fields,tags,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        resolvedGroup,
         e.normalized_config.name,
         remark,
         e.normalized_config.type,
