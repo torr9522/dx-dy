@@ -1,6 +1,16 @@
 # Database And Migration
 
-## 0.2.9 local Candidate
+## 0.3.0
+
+Version 0.3.0 adds no migration. Schema 004 remains current. The web application
+no longer loads or mutates Legacy Collections, but `node_collections` and
+`node_collection_members` remain part of database validation, portable backup,
+Full Migration backup, restore and old-client API compatibility. Existing rows
+must not be deleted or inferred into Groups. New nodes and cross-group copies do
+not receive Collection membership unless an old client explicitly uses the
+deprecated compatibility API or compatibility request field.
+
+## Migration 004 (released in 0.2.9)
 
 Migration 004 adds node_groups and nodes.group_id. A foreign key plus insert
 and ownership-update triggers require exactly one valid Group per Global Node.
@@ -17,10 +27,11 @@ the service deletes owned nodes before deleting their Group.
 原节点库 is an ordinary migration-created Group, with no runtime name/ID
 protection, fallback or automatic recreation. It can be renamed or deleted.
 
-Schema 004 cannot run on an older binary. Rollback requires the pre-upgrade
-schema-003 database/config snapshot; do not point v0.2.8 at a schema-004 DB.
-Portable/full restore applies forward migrations and preserves Group ownership,
-order, legacy Collections, Subscription tokens and mixed entry ordering.
+Schema 004 cannot run on a pre-0.2.9 binary. A v0.3.0 to v0.2.9 rollback uses
+the same schema and still requires the verified manager recovery path and the
+pre-update database/config snapshot. Portable/full restore applies forward
+migrations and preserves Group ownership, order, legacy Collections,
+Subscription tokens and mixed entry ordering.
 
 ## Storage Model
 
@@ -38,6 +49,8 @@ content. SQLite enables foreign keys, WAL and a busy timeout in
   Collections and many-to-many members.
 - [`003_subscription_local_nodes.sql`](../migrations/003_subscription_local_nodes.sql):
   Subscription-owned Local Nodes and one ordered Global/Local entry sequence.
+- [`004_node_groups.sql`](../migrations/004_node_groups.sql): independent Group
+  ownership for every Global Node.
 
 Migration `003` copies every existing `subscription_nodes` relationship and
 position into `subscription_entries` without changing Tokens or Global Nodes.

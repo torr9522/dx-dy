@@ -1,11 +1,12 @@
 # Backup And Recovery
 
-The 0.2.9 local Candidate's database snapshots also contain Node Groups,
-ownership, positions and metadata. Restoring a v0.2.8 database applies migration
-004, creating 原节点库 only when legacy Global Nodes exist. Restoring 0.2.9
-preserves independent cross-group duplicate records. APP_MASTER_KEY handling
-is unchanged: portable snapshots require the separately retained key; Full
-Migration includes it in the encrypted payload.
+Version 0.3.0 database snapshots contain Node Groups, ownership, positions,
+historical Collections and memberships. Restoring a v0.2.8 database applies
+migration 004, creating 原节点库 only when legacy Global Nodes exist. Restoring
+v0.2.9 or v0.3.0 preserves independent cross-group records and historical
+Collection data. APP_MASTER_KEY handling is unchanged: portable snapshots
+require the separately retained key; Full Migration includes it in the
+encrypted payload.
 
 ## Portable Database Backup
 

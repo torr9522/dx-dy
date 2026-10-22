@@ -95,11 +95,12 @@ and sidecars remain in a protected `.update-rollback-*` directory for diagnosis.
 If recovery fails, the application remains stopped and the manager reports
 `ROLLBACK: FAIL`; a successful health response alone does not prove recovery.
 
-The previously published v0.2.8 manager lacks this staged recovery path. Run
-the target v0.2.9 Release installer with `--bootstrap-manager` before invoking
-`dx-dy update`; this ensures the new manager process owns migration failure and
-rollback handling. Changing the new release's manager does not retroactively
-change an already running old manager process.
+Before a v0.2.9 to v0.3.0 update, run the target v0.3.0 Release installer with
+`--bootstrap-manager` before invoking `dx-dy update`. The bootstrap verifies and
+atomically installs the target manager while preserving the v0.2.9 manager.
+Although v0.3.0 adds no schema migration, this keeps update and rollback
+ownership bound to the reviewed target release. Changing the new release's
+manager does not retroactively change an already running old manager process.
 
 ## Docker 0.1.8 Migration
 

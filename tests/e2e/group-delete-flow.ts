@@ -38,6 +38,8 @@ export async function groupDeleteAcceptance(
     return hash({ groups, nodes, collections, subscriptions, details });
   };
   const initial = await snapshot();
+  const csrf = (await read("/api/auth/me")).csrf;
+  const headers = { "X-CSRF-Token": csrf };
   const target = prefix + "Target-" + "Long-Group-Name-".repeat(4);
   const keeper = prefix + "Keeper";
   const names = ["A", "B", "C"].map((n) => prefix + n);
@@ -128,39 +130,30 @@ export async function groupDeleteAcceptance(
     [keeper, ["A"]],
   ]);
   const collectionName = prefix + "Collection";
-  await library(target);
-  await page
-    .locator("details")
-    .filter({ has: page.locator("summary", { hasText: "Legacy Collections" }) })
-    .locator("summary")
-    .click();
-  await page.getByRole("button", { name: "新建集合", exact: true }).click();
-  await page.getByLabel("集合名称").fill(collectionName);
-  await page.getByRole("button", { name: "保存集合", exact: true }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
-  for (const group of [target, keeper]) {
-    await library(group);
-    await page
-      .getByRole("checkbox", { name: `选择 ${names[0]}`, exact: true })
-      .check();
-    await page.getByRole("button", { name: "加入集合", exact: true }).click();
-    const d = page.getByRole("dialog");
-    await d
-      .getByRole("checkbox", { name: new RegExp(`^${collectionName}`) })
-      .check();
-    await d
-      .getByRole("button", { name: /确认|加入/ })
-      .last()
-      .click();
-    await expect(d).not.toBeVisible();
-  }
-  const allNodes = await read("/api/nodes");
-  const targetNodes = allNodes.filter(
+  const membershipNodes = await read("/api/nodes");
+  const targetNodes = membershipNodes.filter(
     (n: { group_name: string }) => n.group_name === target,
   );
-  const keptNode = allNodes.find(
+  const keptNode = membershipNodes.find(
     (n: { group_name: string }) => n.group_name === keeper,
   );
+  const collectionResponse = await context.request.post("/api/collections", {
+    headers,
+    data: { name: collectionName },
+  });
+  expect(collectionResponse.status()).toBe(201);
+  expect(collectionResponse.headers()["deprecation"]).toBe("true");
+  const collection = await collectionResponse.json();
+  const membershipResponse = await context.request.post(
+    `/api/collections/${collection.id}/nodes`,
+    {
+      headers,
+      data: { node_ids: [targetNodes[0].id, keptNode.id] },
+    },
+  );
+  expect(membershipResponse.status()).toBe(200);
+  expect(membershipResponse.headers()["deprecation"]).toBe("true");
+  const allNodes = await read("/api/nodes");
   const saved = [];
   for (const sub of [mixed, empty, another]) {
     const entries = await read(`/api/subscriptions/${sub.id}/entries`);
@@ -321,21 +314,12 @@ export async function groupDeleteAcceptance(
     }),
   ).not.toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await library();
-  await page
-    .locator("details")
-    .filter({ has: page.locator("summary", { hasText: "Legacy Collections" }) })
-    .evaluate((e) => ((e as HTMLDetailsElement).open = true));
-  await page
-    .getByRole("button", { name: `编辑集合 ${collectionName}`, exact: true })
-    .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "删除集合", exact: true })
-    .click();
-  const d = page.getByRole("dialog", { name: "删除节点集合", exact: true });
-  await d.getByRole("button", { name: "确认", exact: true }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const collectionDelete = await context.request.delete(
+    `/api/collections/${collection.id}`,
+    { headers },
+  );
+  expect(collectionDelete.status()).toBe(200);
+  expect(collectionDelete.headers()["deprecation"]).toBe("true");
   await refresh();
   expect((await snapshot()) === initial).toBe(true);
   return {

@@ -206,7 +206,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.2.9" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.3.0" });
   });
   app.post(
     "/api/auth/login",
@@ -382,6 +382,13 @@ export async function createApp(options: Options) {
     )
       fail(400, "COLLECTION", "含不存在的节点集合");
   };
+  app.use(
+    ["/api/collections", "/api/collection-memberships"],
+    (_req, res, next) => {
+      res.setHeader("Deprecation", "true");
+      next();
+    },
+  );
   app.get("/api/collections", (_req, res) => res.json(store.collections()));
   app.post("/api/collections", (req, res) => {
     const x = collectionSchema.parse(req.body),
@@ -678,17 +685,6 @@ export async function createApp(options: Options) {
           source.tags,
           source.enabled,
           groupId,
-        );
-        store.setCollections(
-          created,
-          source.collection_ids.filter((collectionId) =>
-            Boolean(
-              store.get(
-                "SELECT id FROM node_collections WHERE id=?",
-                collectionId,
-              ),
-            ),
-          ),
         );
         return created;
       }),
@@ -1353,7 +1349,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "dx-dy-0.2.9-source.tar.gz",
+        "dx-dy-0.3.0-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

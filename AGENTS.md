@@ -9,9 +9,10 @@ guide, not a record of private conversations or deployment data.
 - Brand: **dx-dy**
 - Purpose: Private Node & Subscription Manager
 - License: AGPL-3.0-only
-- Product scope: one administrator, a private node library, Collections and
-  Subscription profiles. It is not an airport/panel, commercial sales system,
-  or multi-tenant service.
+- Product scope: one administrator, independent Node Groups and Subscription
+  profiles. Historical Collections are compatibility data, not a user-visible
+  organization model. It is not an airport/panel, commercial sales system, or
+  multi-tenant service.
 
 Do not add registration, billing, packages, orders, traffic accounting,
 referrals or tickets without an explicit product decision.
@@ -21,8 +22,8 @@ referrals or tickets without an explicit product decision.
 - A Global Node record belongs to exactly one Node Group and can be related many-to-many to Subscriptions
   through `subscription_nodes` and to Collections through
   `node_collection_members`.
-- Collections are management-only. Membership changes never synchronize a
-  Subscription: **NO AUTO SUBSCRIPTION**.
+- Historical Collections never synchronize a Subscription: **NO AUTO SUBSCRIPTION**.
+  New UI and Group workflows do not create or copy membership.
 - Subscription Tokens are looked up by a hash and their recoverable value is
   encrypted with `APP_MASTER_KEY`; do not store or log plaintext Tokens.
 - Canonical `/s/:token` output is UTF-8 LF-separated share URIs encoded with
@@ -51,7 +52,8 @@ credentials.
 - SQLite with immutable released migrations
   [`001_initial.sql`](migrations/001_initial.sql) and
   [`002_node_collections.sql`](migrations/002_node_collections.sql) and
-  [`003_subscription_local_nodes.sql`](migrations/003_subscription_local_nodes.sql).
+  [`003_subscription_local_nodes.sql`](migrations/003_subscription_local_nodes.sql)
+  and [`004_node_groups.sql`](migrations/004_node_groups.sql).
 - Backend: Node.js/TypeScript, Express, Zod and `node:sqlite`.
 - Frontend: React/TypeScript and Vite.
 - Deployment: architecture-specific native artifact, bundled Node 26.10.0,
@@ -68,12 +70,13 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The current release baseline is `v0.2.8`. Never move an existing public
-tag. The next source change after publication is `0.2.9`.
+The current release baseline is `v0.2.9`. Never move an existing public tag.
+The current source version is `0.3.0`; migrations 001–004 are immutable and no
+new migration is required for the Legacy Collections UI removal.
 
-The current local branch implements **0.2.9 LOCAL CANDIDATE**. No push, remote
-branch, tag, Release or Production access is authorized for this Candidate.
-Migration 004 adds ownership Groups; migrations 001–003 are immutable.
+Version 0.3.0 removes user-visible Collection management while retaining the
+historical tables and deprecated APIs for compatibility. Migration 004 owns
+Global Nodes through Groups.
 Legacy `/s/:token` remains UA-independent. New `/smart/:token` and
 `/client/:profile/:token` share the same token and use bounded family renderers.
 

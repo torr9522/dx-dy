@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  Check,
-  ChevronUp,
   Copy,
   FolderPlus,
   Pencil,
@@ -13,7 +11,6 @@ import {
 } from "lucide-react";
 import type {
   NodeGroup,
-  NodeCollection,
   NodeRecord,
   NodeDeleteImpact,
 } from "../../../packages/shared/schema";
@@ -144,46 +141,11 @@ function Filters({
   );
 }
 
-function CollectionChooser({
-  title,
-  collections,
-  selected,
-  setSelected,
-}: {
-  title: string;
-  collections: NodeCollection[];
-  selected: number[];
-  setSelected: (ids: number[]) => void;
-}) {
-  return (
-    <fieldset className="collection-picker">
-      <legend>{title}</legend>
-      {collections.map((collection) => (
-        <label key={collection.id}>
-          <input
-            type="checkbox"
-            checked={selected.includes(collection.id)}
-            onChange={(event) =>
-              setSelected(
-                event.target.checked
-                  ? [...selected, collection.id]
-                  : selected.filter((id) => id !== collection.id),
-              )
-            }
-          />
-          {collection.name} <small>{collection.node_count}</small>
-        </label>
-      ))}
-    </fieldset>
-  );
-}
-
 export function NodeLibrary({
   nodes,
   groups,
   activeGroupId,
   setActiveGroupId,
-  collections,
   refresh,
   notify,
   copy,
@@ -194,14 +156,12 @@ export function NodeLibrary({
   groups: NodeGroup[];
   activeGroupId: number | null;
   setActiveGroupId: (id: number | null) => void;
-  collections: NodeCollection[];
   refresh: () => Promise<void>;
   notify: (message: string) => void;
   copy: (value: string) => Promise<void>;
   edit: (node: NodeRecord) => void;
   confirm: Confirm;
 }) {
-  const [activeId, setActiveId] = useState<number | null>(null);
   const [groupEditor, setGroupEditor] = useState<NodeGroup | "new" | null>(
     null,
   );
@@ -216,19 +176,12 @@ export function NodeLibrary({
   const [status, setStatus] = useState("");
   const selection = useNodeSelection();
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  const [bulkMode, setBulkMode] = useState<"add" | "remove" | null>(null);
-  const [quickNode, setQuickNode] = useState<NodeRecord | null>(null);
-  const [editor, setEditor] = useState<NodeCollection | "new" | null>(null);
-  const active = collections.find((item) => item.id === activeId) || null;
   const activeGroup = groups.find((item) => item.id === activeGroupId) || null;
   const groupNodes =
     activeGroupId === null
       ? []
       : nodes.filter((node) => node.group_id === activeGroupId);
-  const source = active
-    ? groupNodes.filter((node) => node.collection_ids.includes(active.id))
-    : groupNodes;
+  const source = groupNodes;
   const visible = source.filter((node) =>
     nodeMatches(node, search, protocol, tag, status),
   );
@@ -244,31 +197,13 @@ export function NodeLibrary({
   useEffect(() => {
     selection.clearAll();
   }, [activeGroupId]);
-  const mutate = async (
-    action: "add" | "remove" | "set",
-    collectionIds: number[],
-    nodeIds: number[],
-  ) => {
-    await api("/collection-memberships", "PUT", {
-      action,
-      collection_ids: collectionIds,
-      node_ids: nodeIds,
-    });
-    selection.clearAll();
-    await refresh();
-  };
-  const chooseView = (id: number | null) => {
-    setActiveId(id);
+  const resetFilters = () => {
     selection.resetAnchor();
     setSearch("");
     setProtocol("");
     setTag("");
     setStatus("");
   };
-  useEffect(() => {
-    if (activeId !== null && !collections.some((item) => item.id === activeId))
-      chooseView(null);
-  }, [activeId, collections]);
   useEffect(() => {
     const existing = new Set(nodes.map((node) => node.id));
     const retained = selection.selectedIds.filter((id) => existing.has(id));
@@ -371,7 +306,7 @@ export function NodeLibrary({
                 className={activeGroupId === group.id ? "active" : ""}
                 onClick={() => {
                   setActiveGroupId(group.id);
-                  chooseView(null);
+                  resetFilters();
                 }}
               >
                 <span>
@@ -400,69 +335,13 @@ export function NodeLibrary({
             <p className="notice">创建第一个分组后开始添加节点。</p>
           )}
         </div>
-        <details className="collection-section">
-          <summary>Legacy Collections（保留数据）</summary>
-          <button onClick={() => chooseView(null)}>当前分组全部节点</button>
-          <div className="collection-section-title">
-            <span>节点集合</span>
-            <small>管理视图</small>
-          </div>
-          {collections.map((collection, index) => (
-            <div className="collection-nav-row" key={collection.id}>
-              <button
-                className={activeId === collection.id ? "active" : ""}
-                onClick={() => chooseView(collection.id)}
-              >
-                <span>{collection.name}</span>
-                <b>{collection.node_count}</b>
-              </button>
-              <button
-                className="icon-button"
-                aria-label={`编辑集合 ${collection.name}`}
-                onClick={() => setEditor(collection)}
-              >
-                <Pencil size={14} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label={`上移集合 ${collection.name}`}
-                disabled={!index}
-                onClick={async () => {
-                  const ids = collections.map((item) => item.id);
-                  [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];
-                  await api("/collections/order", "PUT", { ids });
-                  await refresh();
-                }}
-              >
-                <ChevronUp size={14} />
-              </button>
-            </div>
-          ))}
-          <button className="new-collection" onClick={() => setEditor("new")}>
-            <Plus size={14} />
-            新建集合
-          </button>
-        </details>
       </aside>
       <section className="node-library-main">
         <div className="node-view-heading">
           <div>
-            <h2>
-              {activeGroup?.name || "暂无分组"}
-              {active ? ` · ${active.name}` : ""}
-            </h2>
-            <p>
-              {active
-                ? active.remark || "从全部节点中整理出的管理集合"
-                : "Global Node Library · 当前分组内节点"}
-            </p>
+            <h2>{activeGroup?.name || "暂无分组"}</h2>
+            <p>Global Node Library · 当前分组内节点</p>
           </div>
-          {active && (
-            <button className="primary" onClick={() => setAddOpen(true)}>
-              <FolderPlus size={16} />
-              从节点库添加节点
-            </button>
-          )}
           {activeGroup && (
             <button
               disabled={groups.length < 2}
@@ -489,7 +368,7 @@ export function NodeLibrary({
           setTag={setTag}
           status={status}
           setStatus={setStatus}
-          searchLabel={active ? `搜索 ${active.name} 中节点` : "搜索全部节点"}
+          searchLabel="搜索全部节点"
         />
         <div className="result-count">
           {visible.length === source.length
@@ -499,21 +378,12 @@ export function NodeLibrary({
         {!visible.length ? (
           <div className="collection-empty">
             <FolderPlus size={32} />
-            <h3>
-              {active && !source.length
-                ? `${active.name} 还没有节点`
-                : "没有匹配的节点"}
-            </h3>
+            <h3>{source.length ? "没有匹配的节点" : "当前分组还没有节点"}</h3>
             <p>
-              {active && !source.length
-                ? "从全部节点库中选择节点加入这个集合。"
-                : "调整搜索或筛选条件后重试。"}
+              {source.length
+                ? "调整搜索或筛选条件后重试。"
+                : "使用页面顶部的添加按钮导入节点。"}
             </p>
-            {active && !source.length && (
-              <button className="primary" onClick={() => setAddOpen(true)}>
-                从节点库添加节点
-              </button>
-            )}
           </div>
         ) : (
           <>
@@ -532,7 +402,7 @@ export function NodeLibrary({
                 <thead>
                   <tr>
                     <th className="select-cell">选择</th>
-                    <th>名称 / 集合</th>
+                    <th>名称</th>
                     <th>服务器</th>
                     <th>协议 / 标签</th>
                     <th>操作</th>
@@ -589,23 +459,6 @@ export function NodeLibrary({
                         >
                           {node.name}
                         </button>
-                        <div className="collection-chips">
-                          {node.collection_ids.slice(0, 2).map((id) => (
-                            <span key={id}>
-                              {collections.find((item) => item.id === id)?.name}
-                            </span>
-                          ))}
-                          {node.collection_ids.length > 2 && (
-                            <span>+{node.collection_ids.length - 2}</span>
-                          )}
-                          <button
-                            aria-label={`管理 ${node.name} 的节点集合`}
-                            onClick={() => setQuickNode(node)}
-                          >
-                            <Plus size={12} />
-                            集合
-                          </button>
-                        </div>
                       </td>
                       <td className="mono">
                         {node.normalized_config.server}:
@@ -640,16 +493,6 @@ export function NodeLibrary({
                             enabledMessage="节点已启用"
                             disabledMessage="节点已禁用"
                           />
-                          {active && (
-                            <button
-                              onClick={async () => {
-                                await mutate("remove", [active.id], [node.id]);
-                                notify(`已从 ${active.name} 移除`);
-                              }}
-                            >
-                              从 {active.name} 移除
-                            </button>
-                          )}
                           <button
                             className="icon-button"
                             aria-label={`编辑 ${node.name}`}
@@ -691,20 +534,6 @@ export function NodeLibrary({
         {!!selection.selectedCount && (
           <div className="bulk-bar" role="toolbar" aria-label="节点批量操作">
             <strong>已选择 {selection.selectedCount} 个节点</strong>
-            {active ? (
-              <button
-                onClick={() => {
-                  void mutate("remove", [active.id], selection.selectedIds);
-                }}
-              >
-                从 {active.name} 移除
-              </button>
-            ) : (
-              <>
-                <button onClick={() => setBulkMode("add")}>加入集合</button>
-                <button onClick={() => setBulkMode("remove")}>移出集合</button>
-              </>
-            )}
             <button onClick={() => setReviewOpen(true)}>
               查看已选择 {selection.selectedCount} 个
             </button>
@@ -744,7 +573,7 @@ export function NodeLibrary({
               );
               await refresh();
               setActiveGroupId(saved.id);
-              chooseView(null);
+              resetFilters();
               setGroupEditor(null);
             } catch (error) {
               notify((error as Error).message);
@@ -849,33 +678,6 @@ export function NodeLibrary({
           </button>
         </div>
       </LibraryModal>
-      {addOpen && (
-        <AddNodesDialog
-          collection={active}
-          nodes={nodes}
-          open
-          close={() => setAddOpen(false)}
-          save={async (ids) => {
-            if (!active) return;
-            await mutate("add", [active.id], ids);
-            setAddOpen(false);
-            notify(`已添加 ${ids.length} 个节点到 ${active.name}`);
-          }}
-        />
-      )}
-      {bulkMode && (
-        <BulkMembershipDialog
-          mode={bulkMode}
-          collections={collections}
-          count={selection.selectedCount}
-          close={() => setBulkMode(null)}
-          save={async (ids) => {
-            await mutate(bulkMode, ids, selection.selectedIds);
-            setBulkMode(null);
-            notify(bulkMode === "add" ? "节点集合已更新" : "已从所选集合移除");
-          }}
-        />
-      )}
       <SelectedNodesDialog
         open={reviewOpen}
         close={() => setReviewOpen(false)}
@@ -884,352 +686,6 @@ export function NodeLibrary({
         remove={selection.removeOne}
         protocolLabel={protocolLabel}
       />
-      {quickNode && (
-        <QuickMembershipDialog
-          key={quickNode.id}
-          node={quickNode}
-          collections={collections}
-          close={() => setQuickNode(null)}
-          save={async (next) => {
-            await mutate("set", next, [quickNode.id]);
-            setQuickNode(null);
-            notify("节点集合已更新");
-          }}
-        />
-      )}
-      {editor !== null && (
-        <CollectionEditorDialog
-          key={editor === "new" ? "new" : editor.id}
-          collection={editor === "new" ? null : editor}
-          open
-          close={() => setEditor(null)}
-          saved={async () => {
-            setEditor(null);
-            await refresh();
-          }}
-          confirm={confirm}
-        />
-      )}
     </div>
-  );
-}
-
-function AddNodesDialog({
-  collection,
-  nodes,
-  open,
-  close,
-  save,
-}: {
-  collection: NodeCollection | null;
-  nodes: NodeRecord[];
-  open: boolean;
-  close: () => void;
-  save: (ids: number[]) => Promise<void>;
-}) {
-  const selection = useNodeSelection(),
-    [reviewOpen, setReviewOpen] = useState(false),
-    [search, setSearch] = useState(""),
-    [protocol, setProtocol] = useState(""),
-    [tag, setTag] = useState(""),
-    [status, setStatus] = useState("");
-  const visible = useMemo(
-    () =>
-      nodes.filter((node) => nodeMatches(node, search, protocol, tag, status)),
-    [nodes, search, protocol, tag, status],
-  );
-  const disabledIds = useMemo(
-    () =>
-      new Set(
-        nodes
-          .filter(
-            (node) =>
-              collection?.id && node.collection_ids.includes(collection.id),
-          )
-          .map((node) => node.id),
-      ),
-    [nodes, collection?.id],
-  );
-  const selectableVisibleIds = visible
-    .map((node) => node.id)
-    .filter((id) => !disabledIds.has(id));
-  useEffect(() => selection.resetAnchor(), [search, protocol, tag, status]);
-  return (
-    <LibraryModal
-      open={open}
-      close={close}
-      title={`添加节点到 ${collection?.name || "节点集合"}`}
-      description="从全局节点库搜索、筛选并一次选择多个节点。"
-    >
-      <Filters
-        nodes={nodes}
-        search={search}
-        setSearch={setSearch}
-        protocol={protocol}
-        setProtocol={setProtocol}
-        tag={tag}
-        setTag={setTag}
-        status={status}
-        setStatus={setStatus}
-        searchLabel="搜索节点库"
-      />
-      <div className="selection-toolbar">
-        <SelectionMaster
-          selected={selection.selected}
-          selectableIds={selectableVisibleIds}
-          toggle={() => selection.toggleVisible(selectableVisibleIds)}
-          label="当前可选节点"
-        />
-        <small>
-          {selectableVisibleIds.length} 个可选
-          {visible.length - selectableVisibleIds.length
-            ? ` · ${visible.length - selectableVisibleIds.length} 个已在集合中`
-            : ""}
-        </small>
-      </div>
-      <div className="picker-list">
-        {visible.map((node) => {
-          const exists =
-            !!collection && node.collection_ids.includes(collection.id);
-          return (
-            <div
-              className={`${exists ? "picker-node already-member" : "picker-node selectable-row"}${selection.isSelected(node.id) ? " is-selected" : ""}`}
-              key={node.id}
-              onMouseDown={(event) => {
-                if (
-                  !exists &&
-                  event.shiftKey &&
-                  shouldToggleRow(event.target, true)
-                ) {
-                  event.preventDefault();
-                  selection.toggleOne(node.id, {
-                    shiftKey: true,
-                    visibleIds: visible.map((item) => item.id),
-                    disabledIds,
-                  });
-                }
-              }}
-              onClick={(event) => {
-                if (!exists && !event.shiftKey && shouldToggleRow(event.target))
-                  selection.toggleOne(node.id, {
-                    visibleIds: visible.map((item) => item.id),
-                    disabledIds,
-                  });
-              }}
-            >
-              <input
-                type="checkbox"
-                aria-label={`添加 ${node.name}`}
-                disabled={exists}
-                checked={exists || selection.isSelected(node.id)}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  selection.toggleOne(node.id, {
-                    checked: event.currentTarget.checked,
-                    shiftKey: event.shiftKey,
-                    visibleIds: visible.map((item) => item.id),
-                    disabledIds,
-                  });
-                }}
-                onChange={() => undefined}
-              />
-              <div>
-                <strong>{node.name}</strong>
-                <small>
-                  {protocolLabel(node.protocol)} ·{" "}
-                  {node.normalized_config.server} · {node.tags.join(" · ")}
-                </small>
-              </div>
-              {exists && (
-                <span>
-                  <Check size={14} />
-                  已在 {collection?.name} 中
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div className="modal-actions sticky">
-        <span>已选择 {selection.selectedCount} 个节点</span>
-        {!!selection.selectedCount && (
-          <>
-            <button onClick={() => setReviewOpen(true)}>
-              查看已选择 {selection.selectedCount} 个
-            </button>
-            <button onClick={selection.clearAll}>清空选择</button>
-          </>
-        )}
-        <button
-          className="primary"
-          disabled={!selection.selectedCount}
-          onClick={() => save(selection.selectedIds)}
-        >
-          添加 {selection.selectedCount} 个节点
-        </button>
-      </div>
-      <SelectedNodesDialog
-        open={reviewOpen}
-        close={() => setReviewOpen(false)}
-        nodes={nodes}
-        selected={selection.selected}
-        remove={selection.removeOne}
-        protocolLabel={protocolLabel}
-      />
-    </LibraryModal>
-  );
-}
-
-function BulkMembershipDialog({
-  mode,
-  collections,
-  count,
-  close,
-  save,
-}: {
-  mode: "add" | "remove" | null;
-  collections: NodeCollection[];
-  count: number;
-  close: () => void;
-  save: (ids: number[]) => Promise<void>;
-}) {
-  const [selected, setSelected] = useState<number[]>([]);
-  return (
-    <LibraryModal
-      open={mode !== null}
-      close={close}
-      title={mode === "add" ? "加入节点集合" : "移出节点集合"}
-      description={`为已选择的 ${count} 个节点批量更新集合关联。`}
-    >
-      <CollectionChooser
-        title={mode === "add" ? "加入一个或多个集合" : "从一个或多个集合移出"}
-        collections={collections}
-        selected={selected}
-        setSelected={setSelected}
-      />
-      <div className="modal-actions">
-        <span>已选择 {selected.length} 个集合</span>
-        <button
-          className="primary"
-          disabled={!selected.length}
-          onClick={() => save(selected)}
-        >
-          {mode === "add" ? "加入集合" : "移出集合"}
-        </button>
-      </div>
-    </LibraryModal>
-  );
-}
-
-function QuickMembershipDialog({
-  node,
-  collections,
-  close,
-  save,
-}: {
-  node: NodeRecord | null;
-  collections: NodeCollection[];
-  close: () => void;
-  save: (ids: number[]) => Promise<void>;
-}) {
-  const [selected, setSelected] = useState<number[]>(
-    node?.collection_ids || [],
-  );
-  return (
-    <LibraryModal
-      open={!!node}
-      close={close}
-      title={`管理 ${node?.name || "节点"} 的集合`}
-      description="只更新节点与集合的关联，不会改变节点或订阅。"
-    >
-      <CollectionChooser
-        title="所属节点集合"
-        collections={collections}
-        selected={selected}
-        setSelected={setSelected}
-      />
-      <div className="modal-actions">
-        <span>已选择 {selected.length} 个集合</span>
-        <button className="primary" onClick={() => save(selected)}>
-          保存集合
-        </button>
-      </div>
-    </LibraryModal>
-  );
-}
-
-function CollectionEditorDialog({
-  collection,
-  open,
-  close,
-  saved,
-  confirm,
-}: {
-  collection: NodeCollection | null;
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<void>;
-  confirm: Confirm;
-}) {
-  const [name, setName] = useState(collection?.name || ""),
-    [remark, setRemark] = useState(collection?.remark || "");
-  return (
-    <LibraryModal
-      open={open}
-      close={close}
-      title={collection ? "编辑节点集合" : "新建节点集合"}
-      description="集合用于管理和筛选，不会自动改变订阅。"
-    >
-      <label className="field">
-        <span>集合名称</span>
-        <input
-          aria-label="集合名称"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-      <label className="field">
-        <span>备注</span>
-        <textarea
-          aria-label="集合备注"
-          value={remark}
-          onChange={(e) => setRemark(e.target.value)}
-        />
-      </label>
-      <div className="modal-actions">
-        {collection && (
-          <button
-            className="danger-text"
-            onClick={() =>
-              confirm({
-                title: "删除节点集合",
-                text: `只删除集合“${collection.name}”及其节点关联；不会删除任何全局节点，也不会影响已有订阅。`,
-                successMessage: "节点集合已删除",
-                run: async () => {
-                  await api(`/collections/${collection.id}`, "DELETE", {});
-                  await saved();
-                },
-              })
-            }
-          >
-            删除集合
-          </button>
-        )}
-        <button
-          className="primary"
-          disabled={!name.trim()}
-          onClick={async () => {
-            await api(
-              collection ? `/collections/${collection.id}` : "/collections",
-              collection ? "PATCH" : "POST",
-              { name, remark },
-            );
-            await saved();
-          }}
-        >
-          保存集合
-        </button>
-      </div>
-    </LibraryModal>
   );
 }

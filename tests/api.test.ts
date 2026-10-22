@@ -59,7 +59,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.2.9",
+      version: "0.3.0",
     });
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
@@ -73,17 +73,21 @@ describe("API and domain regression", () => {
       .put(`/api/subscriptions/${subscription.id}/nodes`)
       .set("X-CSRF-Token", csrf)
       .send({ node_ids: [imported.id] });
-    const personal = (
-      await post("/api/collections", { name: "Personal", remark: "owner" })
-    ).body;
+    const personalResponse = await post("/api/collections", {
+      name: "Personal",
+      remark: "owner",
+    });
+    expect(personalResponse.headers.deprecation).toBe("true");
+    const personal = personalResponse.body;
     const friend = (
       await post("/api/collections", { name: "Friend", remark: "shared" })
     ).body;
-    expect(
-      (await agent.get("/api/collections")).body.map(
-        (c: { name: string }) => c.name,
-      ),
-    ).toEqual(["Personal", "Friend"]);
+    const collectionList = await agent.get("/api/collections");
+    expect(collectionList.headers.deprecation).toBe("true");
+    expect(collectionList.body.map((c: { name: string }) => c.name)).toEqual([
+      "Personal",
+      "Friend",
+    ]);
     const before = system.store.profile(
       system.store.get(
         "SELECT * FROM subscriptions WHERE id=?",
@@ -229,7 +233,7 @@ describe("API and domain regression", () => {
         collection.id,
       )?.count,
     ).toBe(1);
-    await agent
+    const membershipResponse = await agent
       .put("/api/collection-memberships")
       .set("X-CSRF-Token", csrf)
       .send({
@@ -238,6 +242,7 @@ describe("API and domain regression", () => {
         node_ids: imported.map((node) => node.id),
       })
       .expect(200);
+    expect(membershipResponse.headers.deprecation).toBe("true");
     expect(
       system.store.collections().find((item) => item.id === collection.id)
         ?.node_count,

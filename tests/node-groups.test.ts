@@ -88,6 +88,14 @@ describe("isolated Node Group ownership", () => {
           .mutate("/api/nodes/import", { group_id: groups[0].id, items })
           .expect(201)
       ).body;
+      const legacyCollection = (
+        await s.mutate("/api/collections", { name: "Legacy copy source" })
+      ).body;
+      await s
+        .mutate(`/api/collections/${legacyCollection.id}/nodes`, {
+          node_ids: [first[2].id],
+        })
+        .expect(200);
       const second = (
         await s
           .mutate("/api/nodes/import", {
@@ -125,6 +133,10 @@ describe("isolated Node Group ownership", () => {
           .expect(201)
       ).body[0];
       expect(copy.id).not.toBe(first[2].id);
+      expect(s.store.findNode(first[2].id)?.collection_ids).toEqual([
+        legacyCollection.id,
+      ]);
+      expect(copy.collection_ids).toEqual([]);
       for (const field of [
         "original_uri",
         "normalized_config",
@@ -178,6 +190,9 @@ describe("isolated Node Group ownership", () => {
           "patch",
         )
         .expect(200);
+      expect(s.store.findNode(current.id)?.collection_ids).toEqual([
+        legacyCollection.id,
+      ]);
       expect(s.store.findNode(copy.id)!.normalized_config.port).toBe(
         copy.normalized_config.port,
       );

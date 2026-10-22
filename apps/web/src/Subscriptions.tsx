@@ -38,7 +38,6 @@ import {
 import QRCode from "qrcode";
 import type {
   Envelope,
-  NodeCollection,
   NodeGroup,
   NodeRecord,
   NormalizedNode,
@@ -873,7 +872,7 @@ function LocalImport({
       <div className="subpage-heading">
         <div>
           <h2>添加节点链接</h2>
-          <p className="muted">节点仅属于当前订阅，不会进入节点库或集合。</p>
+          <p className="muted">节点仅属于当前订阅，不会进入全局节点库。</p>
         </div>
       </div>
       <textarea
@@ -1218,7 +1217,6 @@ export function SubscriptionDetail({
   initial: Profile;
   nodes: NodeRecord[];
   groups: NodeGroup[];
-  collections: NodeCollection[];
   onBack: () => void;
   onSaved: () => Promise<void>;
 }) {

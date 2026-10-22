@@ -382,12 +382,22 @@ describe("database migration and portability", () => {
       ).toBe(nonRfcVmessUuid);
       expect(b.store.collections()[0].name).toBe("Portable");
       expect(
+        imported.every((node: { id: number }) => {
+          const restored = b.store.findNode(node.id)!;
+          return (
+            restored.collection_ids.includes(collection.id) &&
+            restored.tags.includes("portable")
+          );
+        }),
+      ).toBe(true);
+      expect(
         b.store
           .nodes()
+          .filter((node) => node.group_id === copyGroup)
           .every(
-            (n) =>
-              n.collection_ids.includes(collection.id) &&
-              n.tags.includes("portable"),
+            (node) =>
+              node.collection_ids.length === 0 &&
+              node.tags.includes("portable"),
           ),
       ).toBe(true);
       expect(b.store.profiles()[0].node_ids).toEqual(

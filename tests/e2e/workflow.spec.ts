@@ -8,6 +8,7 @@ import {
   vmess,
 } from "../fixtures";
 import QRCode from "qrcode";
+import { existsSync, readFileSync } from "node:fs";
 import { cascadingDeleteFlow } from "./node-delete-flow";
 for (const width of [1440, 768, 390]) {
   test(`subscription row quick actions at ${width}px`, async ({
@@ -328,11 +329,19 @@ test("complete browser workflow with synthetic nodes", async ({
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const savedAuth = "test-results/regression-auth.json";
+  if (existsSync(savedAuth)) {
+    const state = JSON.parse(readFileSync(savedAuth, "utf8"));
+    await context.addCookies(state.cookies);
+  }
   await page.goto("/");
-  await page
-    .getByLabel("密码", { exact: true })
-    .fill("Synthetic-e2e-password-123!");
-  await page.getByRole("button", { name: "安全登录" }).click();
+  const login = page.getByRole("button", { name: "安全登录" });
+  if (await login.isVisible()) {
+    await page
+      .getByLabel("密码", { exact: true })
+      .fill("Synthetic-e2e-password-123!");
+    await login.click();
+  }
   await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
@@ -866,7 +875,7 @@ test("filtered selection accumulates, supports rows and visible shift ranges", a
   await expect(sixthCheckbox).not.toBeChecked();
   await rows
     .nth(5)
-    .getByRole("button", { name: /管理 .* 的节点集合/ })
+    .getByRole("button", { name: /^编辑 / })
     .click();
   await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
   await expect(sixthCheckbox).not.toBeChecked();
@@ -899,229 +908,105 @@ test("filtered selection accumulates, supports rows and visible shift ranges", a
     });
 });
 
-test("node collections organize nodes without becoming subscription authority", async ({
+test("legacy collections are absent while historical memberships stay intact", async ({
   page,
   context,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const collectionRequests: string[] = [];
+  await page.route("**/api/collections**", async (route) => {
+    collectionRequests.push(route.request().url());
+    await route.continue();
+  });
+  const savedAuth = "test-results/regression-auth.json";
+  if (existsSync(savedAuth)) {
+    const state = JSON.parse(readFileSync(savedAuth, "utf8"));
+    await context.addCookies(state.cookies);
+  }
   await page.goto("/");
-  await page
-    .getByLabel("密码", { exact: true })
-    .fill("Synthetic-e2e-password-123!");
-  await page.getByRole("button", { name: "安全登录" }).click();
+  const login = page.getByRole("button", { name: "安全登录" });
+  if (await login.isVisible()) {
+    await page
+      .getByLabel("密码", { exact: true })
+      .fill("Synthetic-e2e-password-123!");
+    await login.click();
+  }
   await ensureRegressionGroup(page);
   await expect(
     page.getByRole("heading", { name: "总览", exact: true }),
   ).toBeVisible();
   const csrf = (await (await context.request.get("/api/auth/me")).json()).csrf,
     headers = { "X-CSRF-Token": csrf };
+  const legacyResponse = await context.request.post("/api/collections", {
+    headers,
+    data: { name: "E2E historical collection", remark: "preserve" },
+  });
+  expect(legacyResponse.headers()["deprecation"]).toBe("true");
+  const legacy = await legacyResponse.json();
   const imported = await (
     await context.request.post("/api/nodes/import", {
       headers,
       data: {
+        collection_ids: [legacy.id],
         items: [
-          { uri: vless, name: "Collection VLESS" },
-          { uri: vmess, name: "Collection VMess" },
+          { uri: vless, name: "Historical VLESS" },
+          { uri: vmess, name: "Historical VMess" },
         ],
       },
     })
   ).json();
-  for (const [index, node] of imported.entries()) {
-    const full = (await (await context.request.get(`/api/nodes`)).json()).find(
-      (item: { id: number }) => item.id === node.id,
-    );
-    await context.request.patch(`/api/nodes/${node.id}`, {
-      headers,
-      data: {
-        normalized_config: full.normalized_config,
-        remark: full.remark,
-        tags: [index ? "日本" : "美国", index ? "测试" : "AI"],
-        enabled: true,
-      },
-    });
-  }
   await page.reload();
   await page.getByRole("button", { name: "节点库", exact: true }).click();
-  for (const name of ["E2E-G", "E2E-A"]) {
-    const legacy = page.locator("details.collection-section");
-    if (!(await legacy.evaluate((element: HTMLDetailsElement) => element.open)))
-      await legacy.locator("summary").click();
-    await page.getByRole("button", { name: "新建集合" }).click();
-    await page.getByLabel("集合名称").fill(name);
-    await page.getByLabel("集合备注").fill("E2E collection");
-    await page.getByRole("button", { name: "保存集合" }).click();
-    await expect(
-      page.getByRole("button", { name: new RegExp(name) }).first(),
-    ).toBeVisible();
-  }
-  await expect(page.getByText("节点库", { exact: true }).last()).toBeVisible();
-  await expect(page.getByText("节点集合", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /E2E-G 0/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "E2E-G 还没有节点" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "从节点库添加节点" }).last().click();
-  await page.getByLabel("搜索节点库", { exact: true }).fill("Collection");
-  await page.getByLabel("搜索节点库协议").selectOption("vless");
-  await page.getByLabel("搜索节点库标签").selectOption("AI");
-  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
-  await page.getByLabel("搜索节点库协议").selectOption("");
-  await page.getByLabel("搜索节点库标签").selectOption("");
-  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
-  await page.getByRole("button", { name: "添加 2 个节点" }).click();
-  await expect(page.getByRole("button", { name: /E2E-G 2/ })).toBeVisible();
-  await page.getByLabel("搜索 E2E-G 中节点", { exact: true }).fill("VLESS");
-  await expect(
-    page.getByRole("button", { name: "Collection VLESS", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "从 E2E-G 移除" }).click();
-  await page.getByRole("button", { name: /全部节点/ }).click();
-  await expect(
-    page.getByRole("button", { name: "Collection VLESS", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("checkbox", { name: "选择 Collection VLESS" }).check();
-  await page.getByRole("checkbox", { name: "选择 Collection VMess" }).check();
-  await page.getByRole("button", { name: "加入集合", exact: true }).click();
-  await page.getByRole("checkbox", { name: /E2E-A/ }).check();
+  await expect(page.getByText("Legacy Collections")).toHaveCount(0);
+  await expect(page.getByText("节点集合", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "新建集合" })).toHaveCount(0);
+  await expect(page.locator(".collection-chips")).toHaveCount(0);
+  expect(collectionRequests).toEqual([]);
+
   await page
-    .getByRole("button", { name: "加入集合", exact: true })
-    .last()
+    .getByRole("button", { name: "编辑 Historical VLESS", exact: true })
     .click();
-  await expect(
-    page.locator(".collection-chips").filter({ hasText: "E2E-A" }),
-  ).toHaveCount(2);
-  await page.getByRole("checkbox", { name: "选择 Collection VLESS" }).check();
-  await page.getByRole("checkbox", { name: "选择 Collection VMess" }).check();
-  await page.getByRole("button", { name: "移出集合", exact: true }).click();
-  await page.getByRole("checkbox", { name: /E2E-A/ }).check();
-  await page
-    .getByRole("button", { name: "移出集合", exact: true })
-    .last()
+  const drawer = page.getByRole("dialog", { name: "Historical VLESS" });
+  await expect(drawer.getByText(/集合/)).toHaveCount(0);
+  await drawer.getByRole("button", { name: "保存更改" }).click();
+  await expect(drawer).not.toBeVisible();
+  const afterEdit = await (await context.request.get("/api/nodes")).json();
+  expect(
+    afterEdit.find((node: { id: number }) => node.id === imported[0].id)
+      .collection_ids,
+  ).toEqual([legacy.id]);
+
+  await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
+  const importDialog = page.getByRole("dialog", { name: "粘贴节点链接" });
+  await expect(importDialog.getByText(/集合/)).toHaveCount(0);
+  await importDialog
+    .getByLabel("节点链接", { exact: true })
+    .fill(
+      "trojan://legacy-removal@new-business.example.test:443?sni=new-business.example.test#No-New-Membership",
+    );
+  await importDialog
+    .getByRole("button", { name: "解析预览", exact: true })
     .click();
-  await expect(
-    page.locator(".collection-chips").filter({ hasText: "E2E-A" }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: /E2E-G 1/ }).click();
-  await page.getByRole("button", { name: "从节点库添加节点" }).click();
-  await expect(page.getByText("已在 E2E-G 中")).toBeVisible();
-  await page.getByLabel("搜索节点库", { exact: true }).fill("Collection");
-  await page.getByRole("checkbox", { name: "全选当前可选节点" }).check();
-  await expect(
-    page.getByText("已选择 1 个节点", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "添加 1 个节点" }).click();
-  await page.screenshot({
-    path: "test-results/collections-desktop.png",
-    fullPage: true,
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator(".collection-sidebar")).toBeVisible();
-  await page.screenshot({
-    path: "test-results/collections-mobile.png",
-    fullPage: true,
-  });
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await importDialog
+    .getByRole("button", { name: "确认导入", exact: true })
+    .click();
+  await expect(importDialog).not.toBeVisible();
+  const afterImport = await (await context.request.get("/api/nodes")).json();
+  const fresh = afterImport.find(
+    (node: { name: string }) => node.name === "No-New-Membership",
+  );
+  expect(fresh.collection_ids).toEqual([]);
+  expect(collectionRequests).toEqual([]);
+
   const profile = await (
     await context.request.post("/api/subscriptions", {
       headers,
-      data: { name: "Collection selector E2E" },
+      data: { name: "Legacy removal E2E" },
     })
   ).json();
   await page.reload();
   await page.getByRole("button", { name: "订阅", exact: true }).click();
-  await page
-    .locator(".subscription-row")
-    .filter({ hasText: profile.name })
-    .getByRole("button", { name: "管理订阅" })
-    .click();
-  await page.getByRole("button", { name: "添加节点", exact: true }).click();
-  await page.getByRole("button", { name: /从节点库选择节点/ }).click();
-  await expect(
-    page
-      .getByLabel("节点来源")
-      .getByRole("button", { name: /Regression Library/ }),
-  ).toBeVisible();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /Regression Library/ })
-    .click();
-  await page.getByLabel("搜索可选节点").fill("Collection VLESS");
-  await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /Regression Library/ })
-    .click();
-  await page.getByLabel("搜索可选节点").fill("Collection VMess");
-  await page.getByRole("checkbox", { name: "全选当前筛选节点" }).check();
-  await page.getByRole("button", { name: "查看已选", exact: true }).click();
-  await expect(
-    page.getByRole("dialog").getByText("Collection VLESS", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("dialog").getByText("Collection VMess", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "关闭" }).click();
-  await page
-    .getByLabel("节点来源")
-    .getByRole("button", { name: /Regression Library/ })
-    .click();
-  await page.getByLabel("搜索可选节点").fill("Collection VLESS");
-  await expect(
-    page.getByRole("checkbox", { name: "选择订阅节点 Collection VLESS" }),
-  ).toBeChecked();
-  await page.getByRole("button", { name: "保存并返回" }).click();
-  const canonicalUrl = (
-    await (
-      await context.request.get(`/api/subscriptions/${profile.id}/url`)
-    ).json()
-  ).url;
-  const canonicalBody = await (await context.request.get(canonicalUrl)).text();
-  const collections = await (
-    await context.request.get("/api/collections")
-  ).json();
-  const collectionG = collections.find(
-      (c: { name: string }) => c.name === "E2E-G",
-    ),
-    collectionA = collections.find((c: { name: string }) => c.name === "E2E-A");
-  await context.request.delete(`/api/collections/${collectionG.id}/nodes`, {
-    headers,
-    data: { node_ids: [imported[1].id] },
-  });
-  expect(
-    (await (await context.request.get(`/api/subscriptions`)).json()).find(
-      (s: { id: number }) => s.id === profile.id,
-    ).node_ids,
-  ).toEqual(imported.map((n: { id: number }) => n.id));
-  expect(await (await context.request.get(canonicalUrl)).text()).toBe(
-    canonicalBody,
-  );
-  await context.request.delete(`/api/collections/${collectionG.id}`, {
-    headers,
-  });
-  expect(
-    (await (await context.request.get(`/api/subscriptions`)).json()).find(
-      (s: { id: number }) => s.id === profile.id,
-    ).node_ids,
-  ).toEqual(imported.map((n: { id: number }) => n.id));
-  expect(await (await context.request.get(canonicalUrl)).text()).toBe(
-    canonicalBody,
-  );
-  await page.reload();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
-  await page.locator("details.collection-section > summary").click();
-  await page
-    .getByRole("button", { name: new RegExp(`编辑集合 ${collectionA.name}`) })
-    .click();
-  await page.getByRole("button", { name: "删除集合" }).click();
-  await expect(page.getByRole("dialog")).toContainText("不会影响已有订阅");
-  await page.getByRole("button", { name: "确认", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Collection VLESS", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Collection VMess", exact: true }),
-  ).toBeVisible();
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await expect(page.getByLabel("Admin Base URL")).toHaveValue(
     "http://127.0.0.1:3100",
@@ -1155,7 +1040,8 @@ test("node collections organize nodes without becoming subscription authority", 
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.locator(".toast")).toContainText("订阅域名已更新");
   await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
-  for (const n of imported)
+  await context.request.delete(`/api/collections/${legacy.id}`, { headers });
+  for (const n of [...imported, fresh])
     await context.request.delete(`/api/nodes/${n.id}`, {
       headers,
       data: { confirm: true },

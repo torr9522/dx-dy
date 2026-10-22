@@ -2,62 +2,30 @@ import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  useSortable,
-  arrayMove,
-  verticalListSortingStrategy,
-  sortableKeyboardCoordinates,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
   LayoutDashboard,
   Network,
   Layers,
   Settings,
   Plus,
-  Search,
   Sun,
   Moon,
   LogOut,
   ArrowRight,
   ShieldCheck,
-  Copy,
-  GripVertical,
   X,
   Check,
-  ChevronUp,
-  ChevronDown,
-  ExternalLink,
 } from "lucide-react";
-import QRCode from "qrcode";
 import type {
   NodeRecord,
   Profile,
   NormalizedNode,
   Envelope,
-  NodeCollection,
   NodeGroup,
 } from "../../../packages/shared/schema";
 import { api, setCsrf } from "./api";
-import { getField, setField, nodeMatches } from "./fields";
+import { getField, setField } from "./fields";
 import { NodeLibrary } from "./NodeLibrary";
 import { SubscriptionDetail, SubscriptionList } from "./Subscriptions";
-import {
-  SelectedNodesDialog,
-  SelectionMaster,
-  shouldToggleRow,
-  semanticDuplicateOf,
-  useNodeSelection,
-} from "./nodeSelection";
 import "./style.css";
 type SettingsData = {
   site_name: string;
@@ -161,7 +129,6 @@ function App() {
     [page, setPage] = useState("dashboard");
   const [nodes, setNodes] = useState<NodeRecord[]>([]),
     [profiles, setProfiles] = useState<Profile[]>([]),
-    [collections, setCollections] = useState<NodeCollection[]>([]),
     [groups, setGroups] = useState<NodeGroup[]>([]),
     [settings, setSettings] = useState<SettingsData>({
       site_name: "dx-dy",
@@ -187,17 +154,15 @@ function App() {
     setTimeout(() => setToast(""), 4500);
   };
   const refresh = async () => {
-    const [n, p, s, c, g] = await Promise.all([
+    const [n, p, s, g] = await Promise.all([
       api<NodeRecord[]>("/nodes"),
       api<Profile[]>("/subscriptions"),
       api<SettingsData>("/settings"),
-      api<NodeCollection[]>("/collections"),
       api<NodeGroup[]>("/node-groups"),
     ]);
     setNodes(n);
     setProfiles(p);
     setSettings(s);
-    setCollections(c);
     setGroups(g);
     setActiveGroupId((current) =>
       g.some((group) => group.id === current) ? current : (g[0]?.id ?? null),
@@ -299,7 +264,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.2.9 LOCAL CANDIDATE</small>
+          <small>dx-dy v0.3.0 PUBLIC RELEASE</small>
         </div>
       </aside>
       <main>
@@ -383,7 +348,6 @@ function App() {
               groups={groups}
               activeGroupId={activeGroupId}
               setActiveGroupId={setActiveGroupId}
-              collections={collections}
               refresh={refresh}
               notify={notify}
               copy={copy}
@@ -405,7 +369,6 @@ function App() {
                 }}
                 onBack={() => setProfile(null)}
                 confirm={setConfirm}
-                collections={collections}
               />
             ) : (
               <SubscriptionList
@@ -434,7 +397,6 @@ function App() {
         onClose={() => setImportOpen(false)}
         onSaved={refresh}
         notify={notify}
-        collections={collections}
         groups={groups}
         initialGroupId={activeGroupId}
       />
@@ -447,7 +409,6 @@ function App() {
           notify={notify}
           copy={copy}
           confirm={setConfirm}
-          collections={collections}
         />
       )}
       <NewProfile
@@ -678,49 +639,11 @@ function Dashboard({
     </>
   );
 }
-function CollectionPicker({
-  collections,
-  selected,
-  setSelected,
-  label,
-}: {
-  collections: NodeCollection[];
-  selected: number[];
-  setSelected: (ids: number[]) => void;
-  label: string;
-}) {
-  return (
-    <fieldset className="collection-picker">
-      <legend>{label}</legend>
-      {collections.length ? (
-        collections.map((c) => (
-          <label key={c.id}>
-            <input
-              type="checkbox"
-              checked={selected.includes(c.id)}
-              onChange={(e) =>
-                setSelected(
-                  e.target.checked
-                    ? [...selected, c.id]
-                    : selected.filter((id) => id !== c.id),
-                )
-              }
-            />
-            {c.name}
-          </label>
-        ))
-      ) : (
-        <span className="muted">尚无节点集合</span>
-      )}
-    </fieldset>
-  );
-}
 function ImportDialog({
   open,
   onClose,
   onSaved,
   notify,
-  collections,
   groups,
   initialGroupId,
 }: {
@@ -728,7 +651,6 @@ function ImportDialog({
   onClose: () => void;
   onSaved: () => Promise<void>;
   notify: (s: string) => void;
-  collections: NodeCollection[];
   groups: NodeGroup[];
   initialGroupId: number | null;
 }) {
@@ -737,7 +659,6 @@ function ImportDialog({
     [selected, setSelected] = useState<Set<number>>(new Set()),
     [names, setNames] = useState<Record<number, string>>({}),
     [busy, setBusy] = useState(false);
-  const [collectionIds, setCollectionIds] = useState<number[]>([]);
   const [groupId, setGroupId] = useState<number | null>(initialGroupId);
   const work = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -821,12 +742,6 @@ function ImportDialog({
       </div>
       {rows.length > 0 && (
         <>
-          <CollectionPicker
-            collections={collections}
-            selected={collectionIds}
-            setSelected={setCollectionIds}
-            label="导入到节点集合（可多选）"
-          />
           <div className="import-summary">
             {rows.filter((r) => r.status === "success").length} 成功 ·{" "}
             {rows.filter((r) => r.status === "warning").length} 警告 ·{" "}
@@ -925,7 +840,6 @@ function ImportDialog({
                 work(async () => {
                   await api("/nodes/import", "POST", {
                     group_id: groupId,
-                    collection_ids: collectionIds,
                     items: rows
                       .filter((r) => selected.has(r.index) && r.envelope)
                       .map((r) => ({
@@ -965,7 +879,6 @@ function NodeDrawer({
   notify,
   copy,
   confirm,
-  collections,
 }: {
   node: NodeRecord;
   onClose: () => void;
@@ -973,7 +886,6 @@ function NodeDrawer({
   notify: (s: string) => void;
   copy: (s: string) => Promise<void>;
   confirm: ConfirmSetter;
-  collections: NodeCollection[];
 }) {
   const [config, setConfig] = useState<NormalizedNode>(
       structuredClone(node.normalized_config),
@@ -981,7 +893,6 @@ function NodeDrawer({
     [remark, setRemark] = useState(node.remark),
     [tags, setTags] = useState(node.tags.join(", ")),
     [enabled, setEnabled] = useState(node.enabled),
-    [collectionIds, setCollectionIds] = useState(node.collection_ids),
     [tab, setTab] = useState("form"),
     [newUri, setNewUri] = useState(""),
     [diff, setDiff] = useState<
@@ -1216,12 +1127,6 @@ function NodeDrawer({
           <Field label="标签（逗号分隔）">
             <input value={tags} onChange={(e) => setTags(e.target.value)} />
           </Field>
-          <CollectionPicker
-            collections={collections}
-            selected={collectionIds}
-            setSelected={setCollectionIds}
-            label="节点集合（可多选）"
-          />
           <label className="checkbox">
             <input
               type="checkbox"
@@ -1390,7 +1295,6 @@ function NodeDrawer({
                     .map((t) => t.trim())
                     .filter(Boolean),
                   enabled,
-                  collection_ids: collectionIds,
                 });
                 await onSaved();
                 notify("节点已更新，关联订阅自动同步");
@@ -1455,715 +1359,6 @@ function NewProfile({
         </div>
       </form>
     </Modal>
-  );
-}
-function SortableNode({
-  node,
-  remove,
-  up,
-  down,
-  duplicate = false,
-}: {
-  node: NodeRecord;
-  remove: () => void;
-  up: () => void;
-  down: () => void;
-  duplicate?: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: node.id });
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className="selected-node"
-    >
-      <button
-        className="drag"
-        aria-label={`拖动 ${node.name}`}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical size={18} />
-      </button>
-      <div>
-        <strong>{node.name}</strong>
-        <small>
-          {labelProtocol(node.protocol)} · {node.enabled ? "启用" : "禁用"}
-        </small>
-        {duplicate && <small className="duplicate-note">重复配置</small>}
-      </div>
-      <button
-        aria-label={`上移 ${node.name}`}
-        className="icon-button"
-        onClick={up}
-      >
-        <ChevronUp size={15} />
-      </button>
-      <button
-        aria-label={`下移 ${node.name}`}
-        className="icon-button"
-        onClick={down}
-      >
-        <ChevronDown size={15} />
-      </button>
-      <button
-        className="icon-button"
-        aria-label={`移除 ${node.name}`}
-        onClick={remove}
-      >
-        <X size={15} />
-      </button>
-    </div>
-  );
-}
-function DeleteSubscriptionAction({
-  profileId,
-  name,
-  confirm,
-  onDeleted,
-}: {
-  profileId: number;
-  name: string;
-  confirm: ConfirmSetter;
-  onDeleted: () => Promise<void>;
-}) {
-  const button = useRef<HTMLButtonElement>(null);
-  return (
-    <button
-      ref={button}
-      className="danger-text subscription-delete"
-      aria-label="删除订阅"
-      title="删除订阅"
-      onClick={() =>
-        confirm({
-          title: "删除订阅",
-          text: `即将删除订阅“${name}”。删除后当前订阅链接立即失效；仅删除 Subscription Profile 和关联关系，全局节点本身不会被删除。`,
-          successMessage: "订阅已删除",
-          returnFocus: () => {
-            if (button.current?.isConnected) button.current.focus();
-            else
-              document
-                .querySelector<HTMLButtonElement>(
-                  'button[data-page="subscriptions"]',
-                )
-                ?.focus();
-          },
-          run: async () => {
-            await api(`/subscriptions/${profileId}`, "DELETE", {});
-            await onDeleted();
-          },
-        })
-      }
-    >
-      删除订阅
-    </button>
-  );
-}
-function SubscriptionActions({
-  profileId,
-  name,
-  copy,
-  notify,
-  compact = false,
-  deleteAction,
-}: {
-  profileId: number;
-  name: string;
-  copy: (s: string) => Promise<void>;
-  notify: (s: string) => void;
-  compact?: boolean;
-  deleteAction?: React.ReactNode;
-}) {
-  const previewButton = useRef<HTMLButtonElement>(null),
-    qrButton = useRef<HTMLButtonElement>(null);
-  const [url, setUrl] = useState(""),
-    [qr, setQr] = useState(""),
-    [qrOpen, setQrOpen] = useState(false),
-    [busy, setBusy] = useState(false),
-    [output, setOutput] = useState<{
-      decoded: string;
-      nodes: { name: string; protocol: string }[];
-      selected_node_count: number;
-      emitted_node_count: number;
-      suppressed_duplicate_count: number;
-      duplicate_groups: {
-        node_id: number;
-        name: string;
-        protocol: string;
-      }[][];
-    } | null>(null);
-  const work = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      notify((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  // Fetch on every action so rotations/settings changes cannot leave a stale cached URL.
-  const currentUrl = async () => {
-    const result = await api<{ url: string }>(
-      `/subscriptions/${profileId}/url`,
-    );
-    setUrl(result.url);
-    return result.url;
-  };
-  return (
-    <>
-      <div
-        className={
-          compact ? "subscription-actions compact" : "subscription-actions"
-        }
-        role="group"
-        aria-label={name + "订阅快捷操作"}
-      >
-        <button
-          disabled={busy}
-          title="复制订阅链接"
-          aria-label="复制订阅链接"
-          onClick={() => work(async () => copy(await currentUrl()))}
-        >
-          <Copy size={15} />
-          {compact ? "复制订阅" : "复制订阅链接"}
-        </button>
-        {!compact && (
-          <button
-            ref={previewButton}
-            disabled={busy}
-            title="预览通用订阅"
-            aria-label="预览"
-            onClick={() =>
-              work(async () =>
-                setOutput(await api(`/subscriptions/${profileId}/preview`)),
-              )
-            }
-          >
-            <ExternalLink size={15} />
-            预览
-          </button>
-        )}
-        <button
-          ref={qrButton}
-          disabled={busy}
-          title="显示订阅二维码"
-          aria-label="二维码"
-          onClick={() =>
-            work(async () => {
-              const link = await currentUrl();
-              setQr(await QRCode.toDataURL(link, { width: 300, margin: 2 }));
-              setQrOpen(true);
-            })
-          }
-        >
-          二维码
-        </button>
-        {compact && deleteAction}
-      </div>
-      <Modal
-        open={!!output}
-        returnFocus={() => previewButton.current?.focus()}
-        onClose={() => setOutput(null)}
-        title="通用订阅预览"
-        description="含敏感节点凭据，仅管理员可见。"
-      >
-        <p>已选择：{output?.selected_node_count ?? 0} 个节点</p>
-        <p>实际订阅输出：{output?.emitted_node_count ?? 0} 个唯一节点</p>
-        {!!output?.suppressed_duplicate_count && (
-          <div className="duplicate-warning" role="status">
-            检测到 {output.suppressed_duplicate_count}{" "}
-            个重复连接配置，订阅输出已抑制。
-          </div>
-        )}
-        <ol aria-label="订阅节点顺序">
-          {output?.nodes.map((node, i) => (
-            <li key={i}>
-              {node.protocol.toUpperCase()} · {node.name}
-            </li>
-          ))}
-        </ol>
-        <details>
-          <summary>高级：查看解码后的 URI（含凭据）</summary>
-          <pre className="output">{output?.decoded || "（空订阅）"}</pre>
-        </details>
-      </Modal>
-      <Modal
-        open={qrOpen}
-        returnFocus={() => qrButton.current?.focus()}
-        onClose={() => setQrOpen(false)}
-        title="订阅二维码"
-        description="扫码获取订阅凭证，请勿公开截图。"
-      >
-        <img
-          className="qr"
-          src={qr}
-          alt="订阅二维码"
-          data-subscription-url={url}
-        />
-        <a href={url} className="mono" rel="noreferrer">
-          订阅链接
-        </a>
-      </Modal>
-    </>
-  );
-}
-// Kept during the 0.2.5 UI transition for legacy component regression coverage.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function ProfileDetail({
-  initial,
-  nodes,
-  notify,
-  copy,
-  onSaved,
-  onBack,
-  confirm,
-  collections,
-}: {
-  initial: Profile;
-  nodes: NodeRecord[];
-  notify: (s: string) => void;
-  copy: (s: string) => Promise<void>;
-  onSaved: () => Promise<void>;
-  onBack: () => void;
-  confirm: ConfirmSetter;
-  collections: NodeCollection[];
-}) {
-  const [profile, setProfile] = useState(initial),
-    [search, setSearch] = useState(""),
-    [filter, setFilter] = useState(""),
-    [tag, setTag] = useState(""),
-    [status, setStatus] = useState(""),
-    [collectionId, setCollectionId] = useState<number | null>(null),
-    [reviewOpen, setReviewOpen] = useState(false),
-    [busy, setBusy] = useState(false);
-  const semanticGroup = (id: number) =>
-    nodes.find((node) => node.id === id)?.semantic_key || `node:${id}`;
-  const selection = useNodeSelection(initial.node_ids, {
-    group: semanticGroup,
-    onBlocked: () => notify("重复配置：该节点与已选择节点连接配置相同"),
-  });
-  const ids = selection.selectedIds;
-  const setIds = selection.replace;
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
-  const work = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      notify((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const selected = ids
-    .map((id) => nodes.find((n) => n.id === id))
-    .filter((n): n is NodeRecord => !!n);
-  const sourceNodes =
-    collectionId === null
-      ? nodes
-      : nodes.filter((node) => node.collection_ids.includes(collectionId));
-  const candidateNodes = sourceNodes.filter((node) =>
-    nodeMatches(node, search, filter, tag, status),
-  );
-  const candidateIds = candidateNodes.map((node) => node.id);
-  const reservedGroups = new Set(ids.map(semanticGroup));
-  const candidateSelectableIds: number[] = [];
-  for (const node of candidateNodes) {
-    if (selection.isSelected(node.id)) {
-      candidateSelectableIds.push(node.id);
-      reservedGroups.add(semanticGroup(node.id));
-    } else if (!reservedGroups.has(semanticGroup(node.id))) {
-      candidateSelectableIds.push(node.id);
-      reservedGroups.add(semanticGroup(node.id));
-    }
-  }
-  const duplicateOf = (nodeId: number) =>
-    semanticDuplicateOf(nodeId, selection.selected, semanticGroup);
-  const duplicateConflicts = new Set(
-    ids
-      .filter((nodeId) => duplicateOf(nodeId) !== undefined)
-      .map(semanticGroup),
-  ).size;
-  const selectedCollection = collections.find((c) => c.id === collectionId);
-  useEffect(
-    () => selection.resetAnchor(),
-    [search, filter, tag, status, collectionId],
-  );
-  const move = (from: number, to: number) => {
-    if (to >= 0 && to < ids.length) setIds(arrayMove(ids, from, to));
-  };
-  const drag = ({ active, over }: DragEndEvent) => {
-    if (over && active.id !== over.id)
-      move(ids.indexOf(Number(active.id)), ids.indexOf(Number(over.id)));
-  };
-  return (
-    <>
-      <button className="text-button" onClick={onBack}>
-        ← 返回订阅列表
-      </button>
-      <section className="card section-pad profile-form">
-        <div className="form-grid">
-          <Field label="名称">
-            <input
-              value={profile.name}
-              onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-            />
-          </Field>
-          <Field label="备注">
-            <input
-              value={profile.remark}
-              onChange={(e) =>
-                setProfile({ ...profile, remark: e.target.value })
-              }
-            />
-          </Field>
-        </div>
-        <div className="modal-actions">
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={profile.enabled}
-              onChange={(e) =>
-                setProfile({ ...profile, enabled: e.target.checked })
-              }
-            />
-            启用订阅
-          </label>
-          <button
-            className="primary"
-            disabled={busy}
-            onClick={() =>
-              work(async () => {
-                await api(`/subscriptions/${profile.id}`, "PATCH", profile);
-                await onSaved();
-                notify("订阅信息已保存");
-              })
-            }
-          >
-            保存信息
-          </button>
-        </div>
-      </section>
-      <div className="assignment-grid">
-        <section className="card section-pad">
-          <h2>选择节点</h2>
-          <p className="muted">
-            来源只筛选候选节点；订阅仍由明确勾选的节点决定
-          </p>
-          {!!duplicateConflicts && (
-            <div className="duplicate-warning" role="alert">
-              当前订阅存在 {duplicateConflicts}{" "}
-              个重复配置，请取消重复节点后再保存。
-            </div>
-          )}
-          <div className="subscription-source" aria-label="节点来源">
-            <div className="source-master">
-              <small>节点库</small>
-              <button
-                className={collectionId === null ? "active" : ""}
-                onClick={() => {
-                  setCollectionId(null);
-                  setSearch("");
-                }}
-              >
-                <span>全部节点</span>
-                <b>{nodes.length}</b>
-              </button>
-            </div>
-            <div className="source-collections">
-              <small>节点集合</small>
-              <div>
-                {collections.map((c) => (
-                  <button
-                    key={c.id}
-                    className={collectionId === c.id ? "active" : ""}
-                    onClick={() => {
-                      setCollectionId(c.id);
-                      setSearch("");
-                    }}
-                  >
-                    <span>{c.name}</span>
-                    <b>{c.node_count}</b>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <label className="search subscription-search">
-            <Search size={16} />
-            <input
-              aria-label="搜索可选节点"
-              placeholder={
-                selectedCollection
-                  ? `搜索 ${selectedCollection.name} 中节点…`
-                  : "搜索全部节点…"
-              }
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
-          <div className="row-actions selector-filters">
-            <select
-              aria-label="选择器协议"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            >
-              <option value="">所有协议</option>
-              {protocols.map((p) => (
-                <option key={p} value={p}>
-                  {labelProtocol(p)}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="选择器标签"
-              value={tag}
-              onChange={(e) => setTag(e.target.value)}
-            >
-              <option value="">所有标签</option>
-              {[...new Set(nodes.flatMap((n) => n.tags))].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-            <select
-              aria-label="选择器状态"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="">所有状态</option>
-              <option value="enabled">启用</option>
-              <option value="disabled">禁用</option>
-            </select>
-            <small>
-              {candidateNodes.length === sourceNodes.length
-                ? `${sourceNodes.length} 个候选节点`
-                : `${candidateNodes.length} / ${sourceNodes.length} 个候选节点`}
-            </small>
-          </div>
-          <div className="selection-toolbar">
-            <SelectionMaster
-              selected={selection.selected}
-              selectableIds={candidateSelectableIds}
-              toggle={() => selection.toggleVisible(candidateSelectableIds)}
-              label="当前候选节点"
-            />
-          </div>
-          <div className="node-picker">
-            {candidateNodes.map((n) => {
-              const duplicateNodeId = duplicateOf(n.id);
-              const duplicate =
-                !selection.isSelected(n.id) && duplicateNodeId !== undefined;
-              return (
-                <div
-                  key={n.id}
-                  className={`picker-node selectable-row${selection.isSelected(n.id) ? " is-selected" : ""}${duplicate ? " is-duplicate" : ""}`}
-                  aria-disabled={duplicate || undefined}
-                  onMouseDown={(event) => {
-                    if (event.shiftKey && shouldToggleRow(event.target, true)) {
-                      event.preventDefault();
-                      selection.toggleOne(n.id, {
-                        shiftKey: true,
-                        visibleIds: candidateIds,
-                      });
-                    }
-                  }}
-                  onClick={(event) => {
-                    if (!event.shiftKey && shouldToggleRow(event.target))
-                      selection.toggleOne(n.id, {
-                        visibleIds: candidateNodes.map((node) => node.id),
-                      });
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={`选择订阅节点 ${n.name}`}
-                    checked={selection.isSelected(n.id)}
-                    aria-disabled={duplicate || undefined}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      selection.toggleOne(n.id, {
-                        checked: event.currentTarget.checked,
-                        shiftKey: event.shiftKey,
-                        visibleIds: candidateIds,
-                      });
-                    }}
-                    onChange={() => undefined}
-                  />
-                  <div>
-                    <strong>{n.name}</strong>
-                    <small>
-                      {labelProtocol(n.protocol)} · {n.normalized_config.server}
-                    </small>
-                    {duplicate && (
-                      <small className="duplicate-note">
-                        重复配置 · 与已选择节点相同
-                      </small>
-                    )}
-                  </div>
-                  <span className={n.enabled ? "state enabled" : "state"}>
-                    {n.enabled ? "启用" : "禁用"}
-                  </span>
-                </div>
-              );
-            })}
-            {!candidateNodes.length && (
-              <div className="selector-empty">
-                <Network size={28} />
-                <strong>
-                  {selectedCollection && !sourceNodes.length
-                    ? `${selectedCollection.name} 暂无节点`
-                    : "没有匹配的节点"}
-                </strong>
-                <small>
-                  {selectedCollection && !sourceNodes.length
-                    ? `你可以先到节点库 → ${selectedCollection.name} → 从节点库添加节点。`
-                    : "调整搜索或筛选条件后重试。"}
-                </small>
-              </div>
-            )}
-          </div>
-          {!!selection.selectedCount && (
-            <div
-              className="bulk-bar"
-              role="toolbar"
-              aria-label="订阅节点批量操作"
-            >
-              <strong>已选择 {selection.selectedCount} 个节点</strong>
-              <button onClick={() => setReviewOpen(true)}>
-                查看已选择 {selection.selectedCount} 个
-              </button>
-              <button onClick={selection.clearAll}>清空选择</button>
-              <button
-                className="primary"
-                disabled={busy}
-                onClick={() =>
-                  work(async () => {
-                    await api(`/subscriptions/${profile.id}/nodes`, "PUT", {
-                      node_ids: ids,
-                    });
-                    await onSaved();
-                    notify("节点关联与顺序已保存");
-                  })
-                }
-              >
-                保存
-              </button>
-            </div>
-          )}
-        </section>
-        <section className="card section-pad">
-          <div className="section-heading">
-            <h2>
-              已选节点 <span className="count">{ids.length}</span>
-            </h2>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() =>
-                work(async () => {
-                  await api(`/subscriptions/${profile.id}/nodes`, "PUT", {
-                    node_ids: ids,
-                  });
-                  await onSaved();
-                  notify("节点关联与顺序已保存");
-                })
-              }
-            >
-              保存节点与顺序
-            </button>
-          </div>
-          <p className="muted">
-            拖动排序；也可使用上下箭头。禁用节点不会输出。
-          </p>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={drag}
-          >
-            <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-              {selected.map((n, i) => (
-                <SortableNode
-                  node={n}
-                  key={n.id}
-                  remove={() => selection.removeOne(n.id)}
-                  up={() => move(i, i - 1)}
-                  down={() => move(i, i + 1)}
-                  duplicate={duplicateOf(n.id) !== undefined}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-          {!ids.length && (
-            <p className="notice">
-              没有显式关联时返回空订阅，绝不会返回全节点。
-            </p>
-          )}
-        </section>
-      </div>
-      <section className="card section-pad">
-        <h2>订阅分发</h2>
-        <p className="muted">
-          链接即访问凭证，请不要公开分享。轮换后旧链接立即失效。
-        </p>
-        <div className="subscription-links">
-          <p className="muted">
-            适用于 Shadowrocket、v2rayN、v2rayNG 及其他支持标准 Base64 URI
-            Subscription 的客户端。
-          </p>
-          <div className="link-row">
-            <strong>通用订阅</strong>
-            <span className="mono muted">/s/••••••••</span>
-            <SubscriptionActions
-              profileId={profile.id}
-              name={profile.name}
-              copy={copy}
-              notify={notify}
-            />
-          </div>
-        </div>
-        <div className="modal-actions">
-          <button
-            onClick={() =>
-              confirm({
-                title: "轮换订阅 Token",
-                text: "旧链接将立即失效。所有客户端需重新添加新的订阅链接。",
-                run: async () => {
-                  await api(`/subscriptions/${profile.id}/rotate`, "POST", {});
-                  await onSaved();
-                },
-              })
-            }
-          >
-            重新生成 Token
-          </button>
-          <DeleteSubscriptionAction
-            profileId={profile.id}
-            name={profile.name}
-            confirm={confirm}
-            onDeleted={async () => {
-              await onSaved();
-              onBack();
-            }}
-          />
-        </div>
-      </section>
-      <SelectedNodesDialog
-        open={reviewOpen}
-        close={() => setReviewOpen(false)}
-        nodes={nodes}
-        selected={selection.selected}
-        remove={selection.removeOne}
-        protocolLabel={labelProtocol}
-        duplicateOf={duplicateOf}
-      />
-    </>
   );
 }
 function SettingsPage({

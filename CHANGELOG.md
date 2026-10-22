@@ -1,6 +1,18 @@
 # Changelog
 
-## [0.2.9] - Local Candidate
+## [0.3.0] - 2026-10-22
+
+- Remove Legacy Collections from the Node Library, import flow and Node editor;
+  Node Groups are now the only user-visible Global Node organization model.
+- Stop the new web application from reading or mutating Collection membership,
+  and stop cross-group copies from inheriting historical memberships.
+- Preserve existing Collection tables, rows and memberships, plus deprecated
+  compatibility APIs, schema validation, portable backups, Full Migration
+  backups, restore and v0.2.9 rollback compatibility.
+- Keep Group ownership, multi-group Subscription selection, Generic/Smart/
+  explicit client output and schema 004 unchanged.
+
+## [0.2.9] - 2026-10-22
 
 - Add isolated Node Group ownership, group-scoped duplicate checks, independent
   cross-group copies and multi-group Subscription draft selection.
@@ -25,7 +37,6 @@
   release pruning runs in the still-active manager process.
 - Bind rollback to the pre-update database's logical SHA-256 so a different but
   structurally valid backup cannot be activated.
-- This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16
 
