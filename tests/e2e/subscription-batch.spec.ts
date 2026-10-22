@@ -83,6 +83,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
     .locator(".subscription-distribution")
     .getByRole("button", { name: "复制订阅链接" })
     .click();
+  await expect(page.locator(".toast")).toContainText("已复制");
   const subscriptionUrl = await page.evaluate(() =>
     navigator.clipboard.readText(),
   );

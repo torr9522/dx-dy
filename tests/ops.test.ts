@@ -794,18 +794,34 @@ describe("native manager", () => {
   it("rejects local update assets unless an explicit test mode is active", () => {
     const f = nativeFixture();
     prepareUpdate(f);
-    const result = spawnSync("bash", ["ops/dx-dy", "update"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: `${f.bin}:${process.env.PATH}`,
-        DXDY_CONFIG_DIR: f.config,
-        DXDY_UPDATE_MOCK_DIR: f.root,
-        DXDY_MANAGER_PATH: f.managerPath,
-        DXDY_UPDATE_YES: "1",
+    const testEnv = {
+      PATH: `${f.bin}:${process.env.PATH || "/usr/bin:/bin"}`,
+      DXDY_CONFIG_DIR: f.config,
+      DXDY_UPDATE_MOCK_DIR: f.root,
+      DXDY_MANAGER_PATH: f.managerPath,
+      DXDY_UPDATE_YES: "1",
+    };
+    const needsSudo = (process.getuid?.() ?? 0) !== 0;
+    const result = spawnSync(
+      needsSudo ? "sudo" : "bash",
+      needsSudo
+        ? [
+            "-n",
+            "env",
+            ...Object.entries(testEnv).map(([key, value]) => `${key}=${value}`),
+            "bash",
+            "ops/dx-dy",
+            "update",
+          ]
+        : ["ops/dx-dy", "update"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: needsSudo
+          ? { PATH: process.env.PATH || "/usr/bin:/bin" }
+          : { ...process.env, ...testEnv },
       },
-    });
+    );
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Local update assets are disabled");
   });
