@@ -81,7 +81,12 @@ dx-dy backup full
 dx-dy logs app 200
 ```
 
-`dx-dy admin reset-password` 通过隐藏 stdin 调用应用 CLI，不把密码放进 argv 或日志。更新从 GitHub Release 选择当前架构 artifact，校验 SHA-256，做 WAL-safe backup，安装到新版本目录并原子切换 `current`；启动或健康检查失败时恢复数据库和旧链接。
+Schema 变更升级前，先从目标 GitHub Release 下载 `install.sh`，执行
+`bash install.sh --bootstrap-manager`；它会校验 manifest、manager SHA-256、
+shell 语法和版本，保留旧 manager 后原子接管，但不会停止服务或访问数据库。
+随后运行 `dx-dy update`。
+
+`dx-dy admin reset-password` 通过隐藏 stdin 调用应用 CLI，不把密码放进 argv 或日志。更新从 GitHub Release 选择当前架构 artifact，校验 SHA-256 和 manifest/`RELEASE.json` 身份，做 WAL-safe backup，安装到新版本目录并原子切换 `current`；启动或健康检查失败时通过独立恢复路径恢复数据库、旧 systemd unit 和旧链接。更新由互斥锁串行化，中断状态会在再次执行 update 时完成或安全回滚。
 
 ## 域名、备份与迁移
 

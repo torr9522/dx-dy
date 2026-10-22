@@ -10,6 +10,21 @@ Before committing installation state, the installer starts the staged bundled No
 
 The root manager is a separate `dx-dy` Release asset. The single-file installer downloads it into private staging, verifies `manager_asset` and `manager_sha256` from `release-manifest.json`, checks shell syntax, and only then atomically renames it into `/usr/local/bin/dx-dy`. It never assumes that `install.sh` is beside a Git checkout or an `ops/` directory.
 
+Before a schema-changing update, an existing native installation must bootstrap
+the manager from the target Release while the old application and database are
+still active:
+
+```sh
+bash install.sh --bootstrap-manager
+dx-dy update
+```
+
+Bootstrap validates the Release repository, version, commit-shaped identity,
+manager SHA-256, shell syntax and reported manager version before replacement.
+It preserves the exact previous manager under `/opt/dx-dy/managers`, uses an
+exclusive lock and an atomic rename, and does not stop services or open the
+database. Repeating a completed bootstrap is safe.
+
 The wizard accepts hostnames only, supports single/dual-domain mode, initializes one administrator through stdin and generates a protected `APP_MASTER_KEY`. The application account is a non-login `dx-dy` system user.
 
 ## Layout And Permissions
@@ -56,7 +71,19 @@ Running the installer after default uninstall enters retained-data reinstall mod
 
 ## Update And Rollback
 
-Update reads the latest public manifest, chooses the installed architecture, verifies SHA-256, creates a WAL-safe DB backup, extracts a new version directory, stops the app and atomically switches `current`. Failed start/health restores the old link and DB backup. Current, previous and a small recent set are retained.
+Update reads the latest public manifest, chooses the installed architecture,
+verifies SHA-256 and checks that the artifact `RELEASE.json` version,
+architecture and commit match the manifest. It creates a WAL-safe DB backup,
+extracts a new version directory, stops the app and atomically switches
+`current`. Failed start/health restores the old link, old systemd unit and DB
+backup. Current, previous and a small recent set are retained.
+
+Only one update runs at a time. A root-only update-state file records the old
+and new releases, versions and backup before activation. Re-running `dx-dy
+update` after interruption either finalizes a healthy activated release,
+discards a pre-activation attempt, or restores the previous release through the
+same staged database recovery path. The state is removed only after a verified
+healthy outcome.
 
 Cross-schema update recovery must restore the pre-update snapshot with the old
 application into a separate, absent database path. The old application cannot
@@ -67,10 +94,11 @@ and sidecars remain in a protected `.update-rollback-*` directory for diagnosis.
 If recovery fails, the application remains stopped and the manager reports
 `ROLLBACK: FAIL`; a successful health response alone does not prove recovery.
 
-The previously published v0.2.8 manager lacks this staged recovery path. A
-schema-changing upgrade from that manager requires a separately validated
-manager bootstrap/recovery procedure before production deployment; changing
-the new release's manager does not retroactively change the installed old one.
+The previously published v0.2.8 manager lacks this staged recovery path. Run
+the target v0.2.9 Release installer with `--bootstrap-manager` before invoking
+`dx-dy update`; this ensures the new manager process owns migration failure and
+rollback handling. Changing the new release's manager does not retroactively
+change an already running old manager process.
 
 ## Docker 0.1.8 Migration
 

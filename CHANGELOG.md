@@ -18,6 +18,11 @@
 - Restore failed schema-changing updates through a separate validated
   old-version database, retain the failed database for diagnosis and stop on
   recovery errors instead of reporting success from health alone.
+- Bootstrap the verified v0.2.9 manager before schema migration, preserve the
+  public v0.2.8 manager, serialize updates and reconcile interrupted activation
+  through a durable update-state record.
+- Retain the previous release recorded by a successful update even when old
+  release pruning runs in the still-active manager process.
 - This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16

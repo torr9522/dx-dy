@@ -20,6 +20,7 @@ LEGACY_MODE=0
 LEGACY_RUNNING=0
 REINSTALL_MODE=0
 GENERATED_PASSWORD=0
+BOOTSTRAP_MANAGER=0
 PRESERVED_MASTER_KEY=""
 DXDY_REPOSITORY="${DXDY_REPOSITORY:-$DXDY_DEFAULT_REPOSITORY}"
 
@@ -44,13 +45,15 @@ Supported arch:
   arm64
 
 Options:
-  -h, --help  Show this help and exit
-  --version   Show the installer version and exit
+  --bootstrap-manager  Verify and atomically install this release's manager
+  -h, --help           Show this help and exit
+  --version            Show the installer version and exit
 EOF
 }
 parse_args() {
   case "${1:-}" in
     "") [[ $# -eq 0 ]] || { usage >&2; return 2; } ;;
+    --bootstrap-manager) [[ $# -eq 1 ]] || { printf 'ERROR: --bootstrap-manager does not accept arguments.\n' >&2; usage >&2; return 2; }; BOOTSTRAP_MANAGER=1 ;;
     -h|--help) [[ $# -eq 1 ]] || { printf 'ERROR: --help does not accept arguments.\n' >&2; usage >&2; return 2; }; usage; exit 0 ;;
     --version) [[ $# -eq 1 ]] || { printf 'ERROR: --version does not accept arguments.\n' >&2; usage >&2; return 2; }; printf 'dx-dy installer %s\n' "$DXDY_VERSION"; exit 0 ;;
     *) printf 'ERROR: unknown option: %s\n' "$1" >&2; usage >&2; return 2 ;;
@@ -191,6 +194,62 @@ fetch_asset() {
   elif ! curl -fsSL --proto '=https' --tlsv1.2 "${base%/}/$(basename "$name")" -o "$target"; then
     die "Failed to download release asset: $name"
   fi
+}
+
+download_verified_manager() {
+  local manager_asset expected actual installed_version
+  fetch_asset release-manifest.json "$STAGING/release-manifest.json"
+  jq -e --arg v "$DXDY_VERSION" --arg r "$DXDY_REPOSITORY" '
+    .version==$v and .repository==$r and .release_model=="native-systemd" and
+    .manager_asset=="dx-dy" and (.git_commit|test("^[a-f0-9]{40}$"))
+  ' "$STAGING/release-manifest.json" >/dev/null || die "Release manifest validation failed."
+  manager_asset="$(jq -er '.manager_asset' "$STAGING/release-manifest.json")"
+  fetch_asset "$manager_asset" "$STAGING/dx-dy-manager"
+  expected="$(jq -er '.manager_sha256' "$STAGING/release-manifest.json")"
+  actual="$(sha256sum "$STAGING/dx-dy-manager" | cut -d' ' -f1)"
+  [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] || die "Manager checksum failed."
+  bash -n "$STAGING/dx-dy-manager" || die "Manager shell syntax validation failed."
+  chmod 0755 "$STAGING/dx-dy-manager"
+  installed_version="$(DXDY_CONFIG_DIR="$CONFIG_DIR" DXDY_MANAGER_PATH="$MANAGER_PATH" "$STAGING/dx-dy-manager" version)" || die "Manager executable validation failed."
+  [[ "$installed_version" == "dx-dy $DXDY_VERSION" ]] || die "Manager version validation failed."
+  VERIFIED_MANAGER_SHA256="$expected"
+}
+
+bootstrap_manager() {
+  local lock_dir old_version old_hash backup_dir backup_target manager_temp actual
+  [[ -f "$CONFIG_DIR/install.conf" && -x "$MANAGER_PATH" && -L "$INSTALL_ROOT/current" ]] || die "A complete native dx-dy installation is required."
+  grep -q '^DXDY_RELEASE_MODEL=native-systemd$' "$CONFIG_DIR/install.conf" || die "The installed release model is not native-systemd."
+  lock_dir="$ROOT_PREFIX/run/lock"; install -d -m 0755 "$lock_dir"
+  exec 9>"$lock_dir/dx-dy-manager-bootstrap.lock"
+  flock -n 9 || die "Another manager bootstrap is already running."
+  if [[ "$TEST_MODE" == 1 && -n "${DXDY_TEST_LOCK_HOLD_SECONDS:-}" ]]; then sleep "$DXDY_TEST_LOCK_HOLD_SECONDS"; fi
+  STAGING="$(mktemp -d)"
+  download_verified_manager
+  actual="$(sha256sum "$MANAGER_PATH" | cut -d' ' -f1)"
+  if [[ "$actual" == "$VERIFIED_MANAGER_SHA256" ]]; then
+    info "Manager bootstrap already complete for dx-dy $DXDY_VERSION."
+    return
+  fi
+  old_version="$("$MANAGER_PATH" version)" || die "Installed manager cannot report its version."
+  [[ "$old_version" =~ ^dx-dy\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]] || die "Installed manager version is invalid."
+  old_version="${BASH_REMATCH[1]}"; old_hash="$actual"
+  backup_dir="$INSTALL_ROOT/managers/$old_version-$old_hash"; install -d -m 0700 "$backup_dir"
+  backup_target="$backup_dir/dx-dy"
+  if [[ -e "$backup_target" ]]; then
+    [[ "$(sha256sum "$backup_target" | cut -d' ' -f1)" == "$old_hash" ]] || die "Preserved manager hash mismatch."
+  else
+    install -m 0755 "$MANAGER_PATH" "$backup_target.new"
+    mv -Tf "$backup_target.new" "$backup_target"
+  fi
+  manager_temp="${MANAGER_PATH}.new.$$"
+  install -m 0755 "$STAGING/dx-dy-manager" "$manager_temp"
+  [[ "$(sha256sum "$manager_temp" | cut -d' ' -f1)" == "$VERIFIED_MANAGER_SHA256" ]] || { rm -f "$manager_temp"; die "Staged manager verification failed."; }
+  if [[ "${DXDY_BOOTSTRAP_FAIL_BEFORE_RENAME:-0}" == 1 && "$TEST_MODE" == 1 ]]; then rm -f "$manager_temp"; die "Injected manager installation failure."; fi
+  mv -Tf "$manager_temp" "$MANAGER_PATH"
+  actual="$(sha256sum "$MANAGER_PATH" | cut -d' ' -f1)"
+  [[ "$actual" == "$VERIFIED_MANAGER_SHA256" ]] || die "Installed manager verification failed."
+  info "Manager bootstrap complete: dx-dy $old_version -> $DXDY_VERSION."
+  info "Previous manager retained: $backup_target"
 }
 
 prepare_test_artifact() {
@@ -370,7 +429,9 @@ initialize_and_start() {
 main() {
   parse_args "$@"
   info "dx-dy Native Installer" "Version $DXDY_VERSION"
-  require_root; detect_platform; preflight; install_dependencies
+  require_root
+  if [[ "$BOOTSTRAP_MANAGER" == 1 ]]; then bootstrap_manager; return; fi
+  detect_platform; preflight; install_dependencies
   if [[ "$LEGACY_MODE" == 1 || "$REINSTALL_MODE" == 1 ]]; then
     if [[ "$REINSTALL_MODE" == 1 ]]; then info "Reusing retained domains and administrator data."; fi
     ADMIN_DOMAIN="$(sed -n 's/^DXDY_ADMIN_DOMAIN=//p' "$CONFIG_DIR/install.conf" | head -1)"

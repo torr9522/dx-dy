@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -84,7 +84,8 @@ function singleFileFixture(
   const password = path.join(root, "password");
   const bin = path.join(root, "bin");
   const installedManager = path.join(root, "usr/local/bin/dx-dy");
-  const manager = "#!/usr/bin/env bash\nprintf 'release-manager\\n'\n";
+  const manager =
+    "#!/usr/bin/env bash\nif [[ \"${1:-}\" == version ]]; then printf 'dx-dy 0.2.9\\n'; else printf 'release-manager\\n'; fi\n";
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
   mkdirSync(assets);
@@ -108,7 +109,7 @@ function singleFileFixture(
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    '{"version":"0.2.9","release_model":"native-systemd","architecture":"amd64"}\n',
+    `{ "version":"0.2.9", "release_model":"native-systemd", "architecture":"amd64", "git_commit":"${"a".repeat(40)}" }\n`,
   );
   const artifact = "dx-dy-0.2.9-linux-amd64.tar.gz";
   expect(
@@ -126,6 +127,8 @@ function singleFileFixture(
     path.join(assets, "release-manifest.json"),
     JSON.stringify({
       version: "0.2.9",
+      repository: "torr9522/dx-dy",
+      git_commit: "a".repeat(40),
       release_model: "native-systemd",
       architectures: ["amd64", "arm64"],
       artifacts: [
@@ -198,6 +201,53 @@ function runSingleFile(
       DXDY_CURL_BEHAVIOR: fixture.managerDelivery,
       DXDY_EXISTING_MANAGER: fixture.installedManager,
     },
+  });
+}
+
+function prepareInstalledManager(
+  fixture: ReturnType<typeof singleFileFixture>,
+) {
+  const config = path.join(fixture.root, "etc/dx-dy");
+  const install = path.join(fixture.root, "opt/dx-dy");
+  mkdirSync(config, { recursive: true });
+  mkdirSync(path.join(install, "releases/0.2.8"), { recursive: true });
+  symlinkSync("releases/0.2.8", path.join(install, "current"));
+  writeFileSync(
+    path.join(config, "install.conf"),
+    "DXDY_RELEASE_MODEL=native-systemd\n",
+  );
+  mkdirSync(path.dirname(fixture.installedManager), { recursive: true });
+  executable(
+    fixture.installedManager,
+    "if [[ \"${1:-}\" == version ]]; then printf 'dx-dy 0.2.8\\n'; else printf 'old manager\\n'; fi",
+  );
+  return {
+    old: readFileSync(fixture.installedManager),
+    database: path.join(fixture.root, "var/lib/dx-dy/dx-dy.db"),
+  };
+}
+
+function runManagerBootstrap(
+  fixture: ReturnType<typeof singleFileFixture>,
+  extra: NodeJS.ProcessEnv = {},
+) {
+  return spawnSync("bash", [fixture.script, "--bootstrap-manager"], {
+    cwd: fixture.root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      DXDY_TEST_MODE: "1",
+      DXDY_ROOT_PREFIX: fixture.root,
+      DXDY_ASSET_DIR: fixture.assets,
+      ...extra,
+    },
+  });
+}
+
+function waitForExit(child: ReturnType<typeof spawn>) {
+  return new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code));
   });
 }
 
@@ -325,6 +375,103 @@ describe("native installer", () => {
     );
   });
 
+  it("bootstraps a verified manager before migration and preserves the public manager", () => {
+    const fixture = singleFileFixture();
+    const before = prepareInstalledManager(fixture);
+    mkdirSync(path.dirname(before.database), { recursive: true });
+    writeFileSync(before.database, "schema003-business-data");
+    const result = runManagerBootstrap(fixture);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      "Manager bootstrap complete: dx-dy 0.2.8 -> 0.2.9",
+    );
+    expect(readFileSync(fixture.installedManager, "utf8")).toBe(
+      fixture.manager,
+    );
+    const retained = path.join(
+      fixture.root,
+      "opt/dx-dy/managers",
+      `0.2.8-${createHash("sha256").update(before.old).digest("hex")}`,
+      "dx-dy",
+    );
+    expect(readFileSync(retained)).toEqual(before.old);
+    expect(readFileSync(before.database, "utf8")).toBe(
+      "schema003-business-data",
+    );
+    const again = runManagerBootstrap(fixture);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).toContain("already complete");
+  });
+
+  it("leaves the old manager active when bootstrap checksum validation fails", () => {
+    const fixture = singleFileFixture();
+    const before = prepareInstalledManager(fixture);
+    writeFileSync(path.join(fixture.assets, "dx-dy"), "corrupt manager\n");
+    const result = runManagerBootstrap(fixture);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Manager checksum failed");
+    expect(readFileSync(fixture.installedManager)).toEqual(before.old);
+  });
+
+  it("leaves the old manager active when bootstrap installation is interrupted", () => {
+    const fixture = singleFileFixture();
+    const before = prepareInstalledManager(fixture);
+    const result = runManagerBootstrap(fixture, {
+      DXDY_BOOTSTRAP_FAIL_BEFORE_RENAME: "1",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Injected manager installation failure");
+    expect(readFileSync(fixture.installedManager)).toEqual(before.old);
+    expect(existsSync(`${fixture.installedManager}.new.${result.pid}`)).toBe(
+      false,
+    );
+  });
+
+  it("rejects a checksum-valid manager with invalid shell syntax", () => {
+    const fixture = singleFileFixture();
+    const before = prepareInstalledManager(fixture);
+    const invalid = "#!/usr/bin/env bash\nif then\n";
+    writeFileSync(path.join(fixture.assets, "dx-dy"), invalid);
+    const manifest = JSON.parse(
+      readFileSync(path.join(fixture.assets, "release-manifest.json"), "utf8"),
+    );
+    manifest.manager_sha256 = createHash("sha256")
+      .update(invalid)
+      .digest("hex");
+    writeFileSync(
+      path.join(fixture.assets, "release-manifest.json"),
+      JSON.stringify(manifest),
+    );
+    const result = runManagerBootstrap(fixture);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Manager shell syntax validation failed");
+    expect(readFileSync(fixture.installedManager)).toEqual(before.old);
+  });
+
+  it("serializes concurrent manager bootstrap attempts", async () => {
+    const fixture = singleFileFixture();
+    prepareInstalledManager(fixture);
+    const env = {
+      ...process.env,
+      DXDY_TEST_MODE: "1",
+      DXDY_ROOT_PREFIX: fixture.root,
+      DXDY_ASSET_DIR: fixture.assets,
+      DXDY_TEST_LOCK_HOLD_SECONDS: "1",
+    };
+    const first = spawn("bash", [fixture.script, "--bootstrap-manager"], {
+      cwd: fixture.root,
+      env,
+      stdio: "ignore",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const second = runManagerBootstrap(fixture);
+    expect(second.status).not.toBe(0);
+    expect(second.stderr).toContain(
+      "Another manager bootstrap is already running",
+    );
+    expect(await waitForExit(first)).toBe(0);
+  });
+
   it("rejects an unusable bundled runtime before committing installation", () => {
     const fixture = singleFileFixture("asset", true);
     const result = runSingleFile(fixture, true);
@@ -365,7 +512,7 @@ describe("native installer", () => {
       encoding: "utf8",
     });
     expect(result.stderr).toBe("");
-    expect(result.status).toBe(0);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("Retained native data detected");
     expect(result.stdout).toContain("Reusing retained domains");
     expect(readFileSync(database, "utf8")).toBe("retained database");
@@ -470,6 +617,10 @@ function nativeFixture() {
   symlinkSync("releases/0.1.9", path.join(install, "current"));
   writeFileSync(path.join(current, "RELEASE.json"), '{"version":"0.1.9"}\n');
   writeFileSync(
+    path.join(current, "dx-dy.service"),
+    "[Service]\nExecStart=/opt/dx-dy/current/runtime/bin/node /opt/dx-dy/current/app/dist/server.mjs\n",
+  );
+  writeFileSync(
     path.join(current, "Caddyfile.single"),
     "__ADMIN_DOMAIN__ { reverse_proxy 127.0.0.1:__INTERNAL_PORT__ }\n",
   );
@@ -523,7 +674,8 @@ function nativeFixture() {
   executable(path.join(bin, "chown"), `printf 'chown %s\\n' "$*" >>"${calls}"`);
   executable(
     path.join(bin, "curl"),
-    `printf '{"name":"dx-dy","status":"ok","version":"0.1.9"}\\n'`,
+    `if [[ "\${DXDY_MOCK_NEW_HEALTH_FAIL:-0}" == 1 && "$(readlink -f '${install}/current')" == '${install}/releases/0.2.9' ]]; then exit 22; fi
+printf '{"name":"dx-dy","status":"ok","version":"0.1.9"}\\n'`,
   );
   executable(
     path.join(bin, "journalctl"),
@@ -590,7 +742,12 @@ function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    JSON.stringify({ version, release_model: "native-systemd" }),
+    JSON.stringify({
+      version,
+      release_model: "native-systemd",
+      architecture: "amd64",
+      git_commit: "a".repeat(40),
+    }),
   );
   const artifact = `dx-dy-${version}-linux-amd64.tar.gz`;
   expect(
@@ -617,6 +774,8 @@ function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
     path.join(f.root, "release-manifest.json"),
     JSON.stringify({
       version,
+      repository: "torr9522/dx-dy",
+      git_commit: "a".repeat(40),
       release_model: "native-systemd",
       architectures: ["amd64", "arm64"],
       artifacts: [
@@ -632,6 +791,25 @@ function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
 }
 
 describe("native manager", () => {
+  it("rejects local update assets unless an explicit test mode is active", () => {
+    const f = nativeFixture();
+    prepareUpdate(f);
+    const result = spawnSync("bash", ["ops/dx-dy", "update"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${f.bin}:${process.env.PATH}`,
+        DXDY_CONFIG_DIR: f.config,
+        DXDY_UPDATE_MOCK_DIR: f.root,
+        DXDY_MANAGER_PATH: f.managerPath,
+        DXDY_UPDATE_YES: "1",
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Local update assets are disabled");
+  });
+
   it("uses systemd for lifecycle and journalctl for logs", () => {
     const f = nativeFixture();
     expect(manager(f, ["status"]).stdout).toContain(
@@ -696,8 +874,33 @@ describe("native manager", () => {
     expect(result.stdout).toContain("Already current.");
   });
 
+  it("serializes concurrent update attempts", async () => {
+    const f = nativeFixture();
+    const env = {
+      ...process.env,
+      PATH: `${f.bin}:${process.env.PATH}`,
+      DXDY_CONFIG_DIR: f.config,
+      DXDY_ALLOW_TEST_PATHS: "1",
+      DXDY_UPDATE_MOCK_DIR: f.root,
+      DXDY_MANAGER_PATH: f.managerPath,
+      DXDY_TEST_LOCK_HOLD_SECONDS: "1",
+    };
+    const first = spawn("bash", ["ops/dx-dy", "update"], {
+      cwd: process.cwd(),
+      env,
+      stdio: "ignore",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const second = manager(f, ["update"]);
+    expect(second.status).not.toBe(0);
+    expect(second.stderr).toContain("Another update is already running");
+    expect(await waitForExit(first)).toBe(0);
+  });
+
   it("installs an update through a new release directory and atomic symlink", () => {
     const f = nativeFixture();
+    for (const version of ["0.1.6", "0.1.7", "0.1.8"])
+      mkdirSync(path.join(f.install, "releases", version));
     prepareUpdate(f);
     const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
     expect(result.status).toBe(0);
@@ -708,6 +911,7 @@ describe("native manager", () => {
     expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
       "DXDY_VERSION=0.2.9",
     );
+    expect(existsSync(path.join(f.install, "releases/0.1.9"))).toBe(true);
   });
 
   it("restores the old release link and database after failed update start", () => {
@@ -726,6 +930,126 @@ describe("native manager", () => {
       "DXDY_VERSION=0.1.9",
     );
     expect(readFileSync(f.calls, "utf8")).toContain("database.mjs restore");
+  });
+
+  it("discards a persisted update interrupted before release activation", () => {
+    const f = nativeFixture();
+    const oldRelease = path.join(f.install, "releases/0.1.9");
+    const newRelease = path.join(f.install, "releases/0.2.9");
+    mkdirSync(newRelease, { recursive: true });
+    const backup = path.join(f.backups, "interrupted.db");
+    writeFileSync(backup, "database");
+    const state = path.join(f.config, "update-state.json");
+    writeFileSync(
+      state,
+      JSON.stringify({
+        format: 1,
+        phase: "prepared",
+        old_release: oldRelease,
+        new_release: newRelease,
+        backup,
+        old_version: "0.1.9",
+        new_version: "0.2.9",
+        old_previous: "",
+      }),
+    );
+    const result = manager(f, ["update"]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("before release activation");
+    expect(existsSync(state)).toBe(false);
+    expect(readlinkSync(path.join(f.install, "current"))).toBe(
+      "releases/0.1.9",
+    );
+  });
+
+  it("finalizes a persisted update when the activated release is healthy", () => {
+    const f = nativeFixture();
+    prepareUpdate(f);
+    const oldRelease = path.join(f.install, "releases/0.1.9");
+    const newRelease = path.join(f.install, "releases/0.2.9");
+    cpSync(path.join(f.root, "dx-dy-0.2.9-linux-amd64"), newRelease, {
+      recursive: true,
+    });
+    rmSync(path.join(f.install, "current"));
+    symlinkSync("releases/0.2.9", path.join(f.install, "current"));
+    const config = path.join(f.config, "install.conf");
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8").replace(
+        "DXDY_VERSION=0.1.9",
+        "DXDY_VERSION=0.2.9",
+      ),
+    );
+    const backup = path.join(f.backups, "interrupted.db");
+    writeFileSync(backup, "database");
+    const state = path.join(f.config, "update-state.json");
+    writeFileSync(
+      state,
+      JSON.stringify({
+        format: 1,
+        phase: "switched",
+        old_release: oldRelease,
+        new_release: newRelease,
+        backup,
+        old_version: "0.1.9",
+        new_version: "0.2.9",
+        old_previous: "",
+      }),
+    );
+    const result = manager(f, ["update"]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Finalized an interrupted update");
+    expect(existsSync(state)).toBe(false);
+    expect(readlinkSync(path.join(f.install, "current"))).toBe(
+      "releases/0.2.9",
+    );
+  });
+
+  it("rolls back a persisted unhealthy switched update before retrying", () => {
+    const f = nativeFixture();
+    prepareUpdate(f);
+    const oldRelease = path.join(f.install, "releases/0.1.9");
+    const newRelease = path.join(f.install, "releases/0.2.9");
+    cpSync(path.join(f.root, "dx-dy-0.2.9-linux-amd64"), newRelease, {
+      recursive: true,
+    });
+    rmSync(path.join(f.install, "current"));
+    symlinkSync("releases/0.2.9", path.join(f.install, "current"));
+    const config = path.join(f.config, "install.conf");
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8").replace(
+        "DXDY_VERSION=0.1.9",
+        "DXDY_VERSION=0.2.9",
+      ),
+    );
+    const backup = path.join(f.backups, "interrupted.db");
+    writeFileSync(backup, "database");
+    const state = path.join(f.config, "update-state.json");
+    writeFileSync(
+      state,
+      JSON.stringify({
+        format: 1,
+        phase: "switched",
+        old_release: oldRelease,
+        new_release: newRelease,
+        backup,
+        old_version: "0.1.9",
+        new_version: "0.2.9",
+        old_previous: "",
+      }),
+    );
+    const result = manager(f, ["update"], "", {
+      DXDY_MOCK_NEW_HEALTH_FAIL: "1",
+    });
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stderr).toContain("ROLLBACK: PASS");
+    expect(existsSync(state)).toBe(false);
+    expect(readlinkSync(path.join(f.install, "current"))).toBe(oldRelease);
+    expect(readFileSync(config, "utf8")).toContain("DXDY_VERSION=0.1.9");
+    expect(readFileSync(path.join(f.data, "dx-dy.db"), "utf8")).toBe(
+      "database",
+    );
   });
 
   for (const invalidBackup of [false, true])
