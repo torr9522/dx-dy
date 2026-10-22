@@ -948,6 +948,9 @@ describe("native manager", () => {
         old_release: oldRelease,
         new_release: newRelease,
         backup,
+        backup_fingerprint: createHash("sha256")
+          .update(readFileSync(backup))
+          .digest("hex"),
         old_version: "0.1.9",
         new_version: "0.2.9",
         old_previous: "",
@@ -991,6 +994,9 @@ describe("native manager", () => {
         old_release: oldRelease,
         new_release: newRelease,
         backup,
+        backup_fingerprint: createHash("sha256")
+          .update(readFileSync(backup))
+          .digest("hex"),
         old_version: "0.1.9",
         new_version: "0.2.9",
         old_previous: "",
@@ -1034,6 +1040,9 @@ describe("native manager", () => {
         old_release: oldRelease,
         new_release: newRelease,
         backup,
+        backup_fingerprint: createHash("sha256")
+          .update(readFileSync(backup))
+          .digest("hex"),
         old_version: "0.1.9",
         new_version: "0.2.9",
         old_previous: "",
@@ -1052,8 +1061,8 @@ describe("native manager", () => {
     );
   });
 
-  for (const invalidBackup of [false, true])
-    it(`handles an update that has really migrated schema 003 to 004 before failing (${invalidBackup ? "invalid backup stays stopped" : "validated rollback preserves schema and tokens"})`, async () => {
+  for (const backupFailure of ["none", "invalid", "different"] as const)
+    it(`handles an update that has really migrated schema 003 to 004 before failing (${backupFailure === "none" ? "validated rollback preserves schema and tokens" : backupFailure === "invalid" ? "invalid backup stays stopped" : "business-different backup stays stopped"})`, async () => {
       const f = nativeFixture();
       prepareUpdate(f);
       const old = path.join(f.install, "releases/0.1.9");
@@ -1087,6 +1096,13 @@ describe("native manager", () => {
       const migrated = new Store(future);
       await migrated.migrate();
       migrated.close();
+      const different = path.join(f.root, "different-valid.db");
+      cpSync(database, different);
+      const other = new DatabaseSync(different);
+      other
+        .prepare("UPDATE subscriptions SET remark=?")
+        .run("structurally valid but wrong business state");
+      other.close();
       const cli = path.join(old, "app/dist/database.mjs");
       const build = spawnSync(
         "pnpm",
@@ -1113,7 +1129,7 @@ describe("native manager", () => {
       );
       executable(
         path.join(f.bin, "systemctl"),
-        `printf 'systemctl %s\\n' "$*" >>'${f.calls}'\nif [[ "$*" == 'start dx-dy.service' && ! -f '${f.root}/failed-once' ]]; then\n cp '${future}' '${database}'\n touch '${f.root}/failed-once'\n ${invalidBackup ? `for file in '${f.backups}'/*.db; do printf invalid >"$file"; done` : ":"}\n exit 1\nfi`,
+        `printf 'systemctl %s\\n' "$*" >>'${f.calls}'\nif [[ "$*" == 'start dx-dy.service' && ! -f '${f.root}/failed-once' ]]; then\n cp '${future}' '${database}'\n touch '${f.root}/failed-once'\n ${backupFailure === "invalid" ? `for file in '${f.backups}'/*.db; do printf invalid >"$file"; done` : backupFailure === "different" ? `for file in '${f.backups}'/*.db; do cp '${different}' "$file"; done` : ":"}\n exit 1\nfi`,
       );
       const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
       expect(result.status).not.toBe(0);
@@ -1129,18 +1145,20 @@ describe("native manager", () => {
         const count = actual
           .prepare("SELECT COUNT(*) AS n FROM schema_migrations")
           .get()?.n;
-        expect(count).toBe(invalidBackup ? 4 : 3);
+        expect(count, result.stdout + result.stderr).toBe(
+          backupFailure === "none" ? 3 : 4,
+        );
       } finally {
         actual.close();
       }
       expect(result.stdout + result.stderr).toContain(
-        invalidBackup ? "ROLLBACK: FAIL" : "ROLLBACK: PASS",
+        backupFailure === "none" ? "ROLLBACK: PASS" : "ROLLBACK: FAIL",
       );
       const starts = readFileSync(f.calls, "utf8")
         .split("\n")
         .filter((line) => line === "systemctl start dx-dy.service");
-      expect(starts).toHaveLength(invalidBackup ? 1 : 2);
-      if (!invalidBackup) {
+      expect(starts).toHaveLength(backupFailure === "none" ? 2 : 1);
+      if (backupFailure === "none") {
         const retained = readdirSync(f.data).find((name) =>
           name.startsWith(".update-rollback-"),
         );

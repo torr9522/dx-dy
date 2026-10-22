@@ -23,6 +23,8 @@
   through a durable update-state record.
 - Retain the previous release recorded by a successful update even when old
   release pruning runs in the still-active manager process.
+- Bind rollback to the pre-update database's logical SHA-256 so a different but
+  structurally valid backup cannot be activated.
 - This Candidate is local only; no public Release or remote push is authorized.
 
 ## [0.2.8] - 2026-10-16

@@ -79,8 +79,8 @@ extracts a new version directory, stops the app and atomically switches
 backup. Current, previous and a small recent set are retained.
 
 Only one update runs at a time. A root-only update-state file records the old
-and new releases, versions and backup before activation. Re-running `dx-dy
-update` after interruption either finalizes a healthy activated release,
+and new releases, versions, backup and its logical database SHA-256 before
+activation. Re-running `dx-dy update` after interruption either finalizes a healthy activated release,
 discards a pre-activation attempt, or restores the previous release through the
 same staged database recovery path. The state is removed only after a verified
 healthy outcome.
@@ -89,7 +89,8 @@ Cross-schema update recovery must restore the pre-update snapshot with the old
 application into a separate, absent database path. The old application cannot
 validate the newer database left by a failed migration. Only after its own CLI
 has validated the snapshot, decrypted Tokens and applied its supported
-migrations does the manager replace the active database. The failed database
+migrations, and its schema/table-content fingerprint matches the pre-update
+snapshot does the manager replace the active database. The failed database
 and sidecars remain in a protected `.update-rollback-*` directory for diagnosis.
 If recovery fails, the application remains stopped and the manager reports
 `ROLLBACK: FAIL`; a successful health response alone does not prove recovery.

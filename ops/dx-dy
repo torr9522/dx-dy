@@ -237,26 +237,55 @@ prune_releases() {
   while IFS= read -r dir; do [[ "$dir" == "$current" || "$dir" == "$previous" ]] || rm -rf -- "$dir"; done < <(find "$DXDY_INSTALL_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr | awk 'NR>3{sub(/^[^ ]+ /,"");print}')
 }
 
+database_fingerprint() {
+  local file="$1" result program
+  # shellcheck disable=SC2016
+  program='
+    import { createHash } from "node:crypto";
+    import { DatabaseSync } from "node:sqlite";
+    const database = new DatabaseSync(process.argv[1], { readOnly: true });
+    const hash = createHash("sha256");
+    const tables = database.prepare("SELECT name,sql FROM sqlite_master WHERE type=? AND name NOT LIKE ? ORDER BY name").all("table", "sqlite_%");
+    for (const table of tables) {
+      hash.update(JSON.stringify([table.name, table.sql]));
+      const quoted = `"${String(table.name).replaceAll("\"", "\"\"")}"`;
+      if (table.name !== "admin_sessions")
+        for (const row of database.prepare(`SELECT * FROM ${quoted} ORDER BY rowid`).all())
+          hash.update(JSON.stringify(row, (_key, value) => typeof value === "bigint" ? value.toString() : value));
+    }
+    database.close();
+    process.stdout.write(hash.digest("hex"));
+  '
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then
+    result="$( (cd "$APP" || exit; "$NODE" --input-type=module -e "$program" "$file") 2>/dev/null || true)"
+    if [[ "$result" =~ ^[a-f0-9]{64}$ ]]; then printf '%s' "$result"; else sha256sum "$file" | cut -d' ' -f1; fi
+  else
+    (cd "$APP" && runuser -u dx-dy -- "$NODE" --input-type=module -e "$program" "$file")
+  fi
+}
+
 write_update_state() {
-  local phase="$1" old_release="$2" new_release="$3" backup="$4" old_version="$5" new_version="$6" old_previous="$7" temp
+  local phase="$1" old_release="$2" new_release="$3" backup="$4" backup_fingerprint="$5" old_version="$6" new_version="$7" old_previous="$8" temp
   temp="$(mktemp "$CONFIG_DIR/update-state.json.XXXXXX")"
-  jq -n --arg phase "$phase" --arg old_release "$old_release" --arg new_release "$new_release" --arg backup "$backup" --arg old_version "$old_version" --arg new_version "$new_version" --arg old_previous "$old_previous" \
-    '{format:1,phase:$phase,old_release:$old_release,new_release:$new_release,backup:$backup,old_version:$old_version,new_version:$new_version,old_previous:$old_previous}' >"$temp"
+  jq -n --arg phase "$phase" --arg old_release "$old_release" --arg new_release "$new_release" --arg backup "$backup" --arg backup_fingerprint "$backup_fingerprint" --arg old_version "$old_version" --arg new_version "$new_version" --arg old_previous "$old_previous" \
+    '{format:1,phase:$phase,old_release:$old_release,new_release:$new_release,backup:$backup,backup_fingerprint:$backup_fingerprint,old_version:$old_version,new_version:$new_version,old_previous:$old_previous}' >"$temp"
   chmod 0600 "$temp"; mv -Tf "$temp" "$UPDATE_STATE_FILE"
 }
 
 recover_interrupted_update() {
   UPDATE_RECOVERY_ACTION=none
   [[ -f "$UPDATE_STATE_FILE" ]] || return 0
-  local phase old_release new_release backup old_version new_version old_previous current
+  local phase old_release new_release backup backup_fingerprint old_version new_version old_previous current
   phase="$(jq -er '.phase' "$UPDATE_STATE_FILE")" || die "Interrupted update state is invalid."
   old_release="$(jq -er '.old_release' "$UPDATE_STATE_FILE")"; new_release="$(jq -er '.new_release' "$UPDATE_STATE_FILE")"
   backup="$(jq -er '.backup' "$UPDATE_STATE_FILE")"; old_version="$(jq -er '.old_version' "$UPDATE_STATE_FILE")"
+  backup_fingerprint="$(jq -er '.backup_fingerprint' "$UPDATE_STATE_FILE")"
   new_version="$(jq -er '.new_version' "$UPDATE_STATE_FILE")"; old_previous="$(jq -er '.old_previous' "$UPDATE_STATE_FILE")"
   [[ "$phase" == prepared || "$phase" == switched ]] || die "Interrupted update phase is invalid."
   [[ "$old_release" == "$DXDY_INSTALL_ROOT/releases/"* && -d "$old_release" ]] || die "Interrupted update old release is invalid."
   [[ "$new_release" == "$DXDY_INSTALL_ROOT/releases/"* && -d "$new_release" ]] || die "Interrupted update new release is invalid."
   [[ "$backup" == "$DXDY_BACKUP_DIR/"* && -s "$backup" ]] || die "Interrupted update backup is invalid."
+  [[ "$backup_fingerprint" =~ ^[a-f0-9]{64}$ ]] || die "Interrupted update backup fingerprint is invalid."
   [[ "$old_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Interrupted update versions are invalid."
   current="$(readlink -f "$CURRENT_LINK")"
   if [[ "$phase" == prepared && "$current" == "$old_release" ]]; then
@@ -270,14 +299,14 @@ recover_interrupted_update() {
   ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
   set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"; set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_previous"
   install -m 0644 "$old_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
-  if ! restore_update_backup "$backup"; then die "ROLLBACK: FAIL; interrupted update database recovery failed. Application remains stopped."; fi
+  if ! restore_update_backup "$backup" "$backup_fingerprint"; then die "ROLLBACK: FAIL; interrupted update database recovery failed. Application remains stopped."; fi
   if ! systemctl start "$SERVICE" || ! wait_health; then die "ROLLBACK: FAIL; interrupted update restored data but the previous application is not healthy."; fi
   rm -f "$UPDATE_STATE_FILE"; UPDATE_RECOVERY_ACTION=rollback
   warn "ROLLBACK: PASS; interrupted update restored the previous release and database. Run update again to retry."
 }
 
 restore_update_backup() {
-  local source="$1" staging candidate previous file restore_file moved=()
+  local source="$1" expected_fingerprint="$2" staging candidate actual_fingerprint previous file restore_file moved=()
   staging="$(mktemp -d "$DXDY_DATA_DIR/.update-rollback-XXXXXX")" || return 1
   candidate="$staging/restored.db"
   if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then
@@ -296,6 +325,11 @@ restore_update_backup() {
     (cd "$APP" && runuser -u dx-dy -- env DATABASE_PATH="$candidate" "$NODE" "$APP/dist/database.mjs" restore "$source") || return 1
   fi
   [[ -s "$candidate" ]] || return 1
+  actual_fingerprint="$(database_fingerprint "$candidate")" || return 1
+  if [[ "$actual_fingerprint" != "$expected_fingerprint" ]]; then
+    warn "Rollback database fingerprint mismatch (expected $expected_fingerprint, restored $actual_fingerprint)."
+    return 1
+  fi
   # All writers are stopped. Retain the failed database and its sidecars for
   # diagnosis, then atomically activate the validated old-schema database.
   for file in "$DATABASE" "$DATABASE-wal" "$DATABASE-shm"; do
@@ -323,7 +357,7 @@ cmd_update() {
   load_instance
   [[ "${UPDATE_RECOVERY_ACTION:-none}" != rollback ]] || return 0
   [[ "$DXDY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Invalid repository coordinate."
-  local temp api latest base artifact expected actual old_release new_release backup result=0 old_version old_previous
+  local temp api latest base artifact expected actual old_release new_release backup backup_fingerprint result=0 old_version old_previous
   temp="$(mktemp -d)"; TEMP_DIRS+=("$temp")
   api="https://api.github.com/repos/$DXDY_REPOSITORY/releases/latest"
   if [[ -n "${DXDY_UPDATE_MOCK_DIR:-}" ]]; then cp "$DXDY_UPDATE_MOCK_DIR/release.json" "$temp/release.json"; else curl -fsSL --proto '=https' --tlsv1.2 "$api" -o "$temp/release.json"; fi
@@ -336,24 +370,26 @@ cmd_update() {
   expected="$(jq -er --arg n "$artifact" '.artifacts[]|select(.name==$n)|.sha256' "$temp/manifest.json")"; actual="$(sha256sum "$temp/$artifact"|cut -d' ' -f1)"; [[ "$expected" == "$actual" ]] || die "Artifact checksum failed."
   fetch_update_asset "$base" dx-dy "$temp/dx-dy"; expected="$(jq -er '.manager_sha256' "$temp/manifest.json")"; actual="$(sha256sum "$temp/dx-dy"|cut -d' ' -f1)"; [[ "$expected" == "$actual" ]] || die "Manager checksum failed."
   backup="$(backup_target db)"; run_cli database.mjs backup "$backup" >/dev/null
+  backup_fingerprint="$(database_fingerprint "$backup")" || die "Backup fingerprint failed."
+  [[ "$backup_fingerprint" =~ ^[a-f0-9]{64}$ ]] || die "Backup fingerprint failed."
   old_release="$(readlink -f "$CURRENT_LINK")"; old_version="$DXDY_VERSION"; old_previous="${DXDY_PREVIOUS_RELEASE:-}"; new_release="$DXDY_INSTALL_ROOT/releases/$latest"; rm -rf -- "$new_release"; mkdir -p "$temp/extract"; tar -xzf "$temp/$artifact" -C "$temp/extract"
   jq -e --arg v "$latest" --arg a "$DXDY_ARCH" --arg c "$(jq -er '.git_commit' "$temp/manifest.json")" '.version==$v and .release_model=="native-systemd" and .architecture==$a and .git_commit==$c' "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH/RELEASE.json" >/dev/null || die "Artifact release identity validation failed."
   cp -a "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH" "$new_release"
   if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then
     chown -R root:root "$new_release"; chmod -R a-w "$new_release"
   fi
-  write_update_state prepared "$old_release" "$new_release" "$backup" "$old_version" "$latest" "$old_previous"
+  write_update_state prepared "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous"
   systemctl stop "$SERVICE"; ln -sfn "releases/$latest" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
   set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_release"; set_config_value "$CONFIG_FILE" DXDY_VERSION "$latest"
   install -m 0644 "$new_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
-  write_update_state switched "$old_release" "$new_release" "$backup" "$old_version" "$latest" "$old_previous"
+  write_update_state switched "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous"
   systemctl start "$SERVICE" || result=$?
   [[ $result -eq 0 ]] && wait_health || result=1
   if [[ $result -ne 0 ]]; then
     systemctl stop "$SERVICE" || true; ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
     set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"; set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_previous"
     install -m 0644 "$old_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
-    if ! restore_update_backup "$backup"; then
+    if ! restore_update_backup "$backup" "$backup_fingerprint"; then
       die "ROLLBACK: FAIL; database recovery failed. Application remains stopped; backups and failed database retained."
     fi
     if ! systemctl start "$SERVICE" || ! wait_health; then
