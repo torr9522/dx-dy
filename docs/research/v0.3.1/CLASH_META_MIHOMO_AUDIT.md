@@ -49,7 +49,7 @@ UA-independent, while `/smart/:token` performs the exact detection and
 
 Synthetic fixtures are used exclusively. Official Mihomo v1.19.33 accepted one
 generated configuration containing VLESS Reality/Vision, VLESS WS, VLESS gRPC,
-VLESS HTTPUpgrade, VLESS XHTTP, VMess TLS, Trojan, standard Shadowsocks,
+VLESS HTTPUpgrade, VLESS XHTTP, VMess TLS/TCP, VMess TLS/WS, Trojan TCP/WS/gRPC, standard Shadowsocks,
 Shadowsocks 2022, Hysteria2, TUIC and IPv6. Tests also assert critical scalar,
 transport, TLS, Reality, obfuscation and UDP relay fields before invoking the
 official parser.

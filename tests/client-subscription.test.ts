@@ -113,6 +113,25 @@ describe("shared structured renderer contracts", () => {
         .replace("&spx=%2Fsynthetic", "")
         .replace("fake-public-key", Buffer.alloc(32, 7).toString("base64url"));
       const ss2022 = `ss://${Buffer.from(`2022-blake3-aes-128-gcm:${Buffer.alloc(16, 9).toString("base64")}`).toString("base64url")}@example.com:8388#CM-SS2022`;
+      const vmessWs =
+        "vmess://" +
+        Buffer.from(
+          JSON.stringify({
+            v: "2",
+            ps: "CM-VMESS-WS",
+            add: "example.com",
+            port: "443",
+            id: uuid,
+            aid: "0",
+            scy: "auto",
+            net: "ws",
+            type: "none",
+            host: "cdn.example.com",
+            path: "/vmess",
+            tls: "tls",
+            sni: "example.com",
+          }),
+        ).toString("base64");
       const cases = [
         ["CM-VLESS-REALITY", reality],
         ["CM-VLESS-WS", fixtures[1][1]],
@@ -121,7 +140,16 @@ describe("shared structured renderer contracts", () => {
         ["CM-VLESS-XHTTP", fixtures[4][1]],
         ["CM-IPV6", fixtures[5][1]],
         ["CM-VMESS-TLS", fixtures[6][1]],
+        ["CM-VMESS-WS", vmessWs],
         ["CM-TROJAN", fixtures[7][1]],
+        [
+          "CM-TROJAN-WS",
+          "trojan://synthetic-pass@example.com:443?sni=example.com&type=ws&path=%2Ftrojan&host=cdn.example.com#CM-TROJAN-WS",
+        ],
+        [
+          "CM-TROJAN-GRPC",
+          "trojan://synthetic-pass@example.com:443?sni=example.com&type=grpc&serviceName=trojan#CM-TROJAN-GRPC",
+        ],
         ["CM-SS", fixtures[8][1]],
         ["CM-HY2", fixtures[9][1]],
         ["CM-TUIC", fixtures[10][1]],
@@ -147,6 +175,9 @@ describe("shared structured renderer contracts", () => {
         "vless",
         "vless",
         "vmess",
+        "vmess",
+        "trojan",
+        "trojan",
         "trojan",
         "ss",
         "hysteria2",
@@ -187,19 +218,42 @@ describe("shared structured renderer contracts", () => {
         cipher: "auto",
         alterId: 0,
       });
+      expect(proxies[7]).toMatchObject({
+        type: "vmess",
+        tls: true,
+        network: "ws",
+        servername: "example.com",
+        "ws-opts": {
+          path: "/vmess",
+          headers: { Host: "cdn.example.com" },
+        },
+      });
       expect(proxies[9]).toMatchObject({
+        type: "trojan",
+        network: "ws",
+        "ws-opts": {
+          path: "/trojan",
+          headers: { Host: "cdn.example.com" },
+        },
+      });
+      expect(proxies[10]).toMatchObject({
+        type: "trojan",
+        network: "grpc",
+        "grpc-opts": { "grpc-service-name": "trojan" },
+      });
+      expect(proxies[12]).toMatchObject({
         type: "hysteria2",
         obfs: "salamander",
         "obfs-password": "fake-obfs",
         sni: "example.com",
       });
-      expect(proxies[10]).toMatchObject({
+      expect(proxies[13]).toMatchObject({
         type: "tuic",
         "congestion-controller": "bbr",
         "udp-relay-mode": "native",
         sni: "example.com",
       });
-      expect(proxies[11]).toMatchObject({
+      expect(proxies[14]).toMatchObject({
         type: "ss",
         cipher: "2022-blake3-aes-128-gcm",
       });
