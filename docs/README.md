@@ -15,6 +15,8 @@ Reference documents:
 - [Design Decisions](DESIGN_DECISIONS.md) - accepted boundaries and tradeoffs
 - [Protocol Compatibility](PROTOCOL_COMPATIBILITY.md) - parser/renderer contract
 - [Subscription Format Research](SUBSCRIPTION_FORMAT.md) - external evidence
+- [Clash Meta / Mihomo Audit](research/v0.3.1/CLASH_META_MIHOMO_AUDIT.md) -
+  upstream identity, UA and parser evidence
 - [Database and Migration](DATABASE_AND_MIGRATION.md) - schema and safety model
 - [Backup and Recovery](BACKUP_AND_RECOVERY.md) - portable/full backups
 - [Installation and Operations](INSTALLATION_AND_OPERATIONS.md) - installer and

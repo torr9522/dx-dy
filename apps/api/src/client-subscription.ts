@@ -17,6 +17,8 @@ export function detectClient(userAgent: string) {
     return clientProfiles[0];
   const matches = [
     { id: "v2rayn", pattern: /^v2rayN\/\d+(?:\.\d+){1,3}$/i },
+    // MetaCubeXD imports and refreshes subscriptions with this exact UA.
+    { id: "clash-meta", pattern: /^clash\.meta$/ },
     {
       id: "clash-party",
       pattern: /^mihomo\.party\/v\d+(?:\.\d+)+(?:[-+\w.]*)? \(clash\.meta\)$/i,

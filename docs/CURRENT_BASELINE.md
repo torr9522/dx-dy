@@ -2,24 +2,23 @@
 
 ## Release Boundary
 
-The immutable public baseline is v0.2.9 at commit
-`e6e627d75eaf5c04d1599048af746005e8be0f93`. Version 0.3.0 removes the
-Legacy Collections user interface without changing the database schema.
+The immutable public baseline is v0.3.0 at commit
+`feb88bd2b52c6d1dfe5ba99de1a9cfa9c849960e`. Version 0.3.1 adds an explicit
+Clash Meta / Mihomo client profile without changing the database schema.
 Independent Node Groups remain the sole user-visible Global Node ownership and
-organization model. Generic, Smart and explicit client subscription routes
-retain their v0.2.9 behavior.
+organization model. Canonical Generic subscriptions retain their v0.3.0 bytes.
 
 ## Release Identity
 
-- Current source version: **0.3.0**
-- Previous stable: **v0.2.9**
+- Current source version: **0.3.1**
+- Previous stable: **v0.3.0**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 - Database schema: **004**
 
-Public tags are immutable. Version 0.3.0 does not rewrite migrations 001-004,
+Public tags are immutable. Version 0.3.1 does not rewrite migrations 001-004,
 drop a table, or transform existing business data.
 
 ## Persistence And Invariants
@@ -32,7 +31,7 @@ drop a table, or transform existing business data.
 - Same-Group semantic duplicates are blocked; equivalent records in different
   Groups are independent IDs
 - Historical Collections and memberships remain in backups and restores, but
-  the v0.3.0 web application does not load or mutate them
+  the web application does not load or mutate them
 - Deprecated Collection APIs remain available for old-client compatibility
 - Subscription Local Nodes belong to one Subscription and share the ordered
   `subscription_entries` sequence with Global Nodes
@@ -71,5 +70,5 @@ rollback, and runs private known-identity scanning when configured.
 
 ## Version Boundary
 
-The v0.2.9 source, tag and Release remain immutable. The approved next source
-version is v0.3.0. No v0.2.10 release exists or is planned by this baseline.
+The v0.3.0 source, tag and Release remain immutable. The approved next source
+version is v0.3.1. No v0.3.1 tag or Release exists at this development baseline.

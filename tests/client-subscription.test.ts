@@ -46,6 +46,10 @@ describe("source-evidenced client detection", () => {
   it.each([
     ["v2rayN/7.15.0", "v2rayn"],
     ["Mozilla v2rayN/7.15.0", "generic"],
+    ["clash.meta", "clash-meta"],
+    ["Clash.Meta", "generic"],
+    ["clash.meta/1.19.33", "generic"],
+    ["Mozilla/5.0 clash.meta", "generic"],
     ["clash-verge/v2.4.4", "clash-verge"],
     ["FlClash/v0.8.0 clash-verge Platform/windows", "flclash"],
     ["mihomo.party/v1.9.0 (clash.meta)", "clash-party"],
@@ -96,6 +100,118 @@ describe("shared structured renderer contracts", () => {
           { stdio: "pipe" },
         );
       }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it("validates the Clash Meta protocol matrix with the official Mihomo parser", () => {
+    const binary = process.env.DXDY_MIHOMO_BINARY;
+    if (!binary) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "dxdy-clash-meta-"));
+    try {
+      const reality = fixtures[0][1]
+        .replace("&spx=%2Fsynthetic", "")
+        .replace("fake-public-key", Buffer.alloc(32, 7).toString("base64url"));
+      const ss2022 = `ss://${Buffer.from(`2022-blake3-aes-128-gcm:${Buffer.alloc(16, 9).toString("base64")}`).toString("base64url")}@example.com:8388#CM-SS2022`;
+      const cases = [
+        ["CM-VLESS-REALITY", reality],
+        ["CM-VLESS-WS", fixtures[1][1]],
+        ["CM-VLESS-GRPC", fixtures[2][1]],
+        ["CM-VLESS-HTTPUPGRADE", fixtures[3][1]],
+        ["CM-VLESS-XHTTP", fixtures[4][1]],
+        ["CM-IPV6", fixtures[5][1]],
+        ["CM-VMESS-TLS", fixtures[6][1]],
+        ["CM-TROJAN", fixtures[7][1]],
+        ["CM-SS", fixtures[8][1]],
+        ["CM-HY2", fixtures[9][1]],
+        ["CM-TUIC", fixtures[10][1]],
+        ["CM-SS2022", ss2022],
+      ] as const;
+      const result = renderClient(
+        cases.map(([, uri], index) => entry(uri, index + 1)),
+        "mihomo",
+      );
+      expect(result.counts).toEqual({
+        total: cases.length,
+        rendered: cases.length,
+        skipped: 0,
+        lossy: 0,
+      });
+      const config = parseYaml(result.body);
+      const proxies = config.proxies as Record<string, unknown>[];
+      expect(proxies.map((proxy) => proxy.type)).toEqual([
+        "vless",
+        "vless",
+        "vless",
+        "vless",
+        "vless",
+        "vless",
+        "vmess",
+        "trojan",
+        "ss",
+        "hysteria2",
+        "tuic",
+        "ss",
+      ]);
+      expect(proxies[0]).toMatchObject({
+        tls: true,
+        network: "tcp",
+        flow: "xtls-rprx-vision",
+        servername: "example.com",
+        "client-fingerprint": "chrome",
+        "reality-opts": {
+          "public-key": Buffer.alloc(32, 7).toString("base64url"),
+          "short-id": "abcd",
+        },
+      });
+      expect(proxies[1]).toMatchObject({
+        network: "ws",
+        "ws-opts": { path: "/socket", headers: { Host: "cdn.example.com" } },
+      });
+      expect(proxies[2]).toMatchObject({
+        network: "grpc",
+        "grpc-opts": { "grpc-service-name": "test" },
+      });
+      expect(proxies[3]).toMatchObject({
+        network: "ws",
+        "ws-opts": { "v2ray-http-upgrade": true },
+      });
+      expect(proxies[4]).toMatchObject({
+        network: "xhttp",
+        "xhttp-opts": { path: "/x", host: "cdn.example.com", mode: "auto" },
+      });
+      expect(proxies[5].server).toBe("2001:db8::1");
+      expect(proxies[6]).toMatchObject({
+        type: "vmess",
+        tls: true,
+        cipher: "auto",
+        alterId: 0,
+      });
+      expect(proxies[9]).toMatchObject({
+        type: "hysteria2",
+        obfs: "salamander",
+        "obfs-password": "fake-obfs",
+        sni: "example.com",
+      });
+      expect(proxies[10]).toMatchObject({
+        type: "tuic",
+        "congestion-controller": "bbr",
+        "udp-relay-mode": "native",
+        sni: "example.com",
+      });
+      expect(proxies[11]).toMatchObject({
+        type: "ss",
+        cipher: "2022-blake3-aes-128-gcm",
+      });
+      expect(new Set(proxies.map((proxy) => proxy.name)).size).toBe(
+        cases.length,
+      );
+      expect(config["proxy-groups"][0].proxies).toEqual(
+        proxies.map((proxy) => proxy.name),
+      );
+      const file = path.join(directory, "clash-meta.yaml");
+      writeFileSync(file, result.body, { mode: 0o600 });
+      execFileSync(binary, ["-t", "-f", file], { stdio: "pipe" });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -240,6 +356,7 @@ describe("subscription route isolation", () => {
       for (const ua of [
         "clash-verge/v2.4.4",
         "FlClash/v0.8.0 clash-verge Platform/windows",
+        "clash.meta",
         "",
         "sing-box/1.12",
       ]) {
@@ -262,6 +379,31 @@ describe("subscription route isolation", () => {
         .expect(200);
       expect(detected.headers["x-subscription-format"]).toBe("mihomo");
       expect(parseYaml(detected.text).proxies).toHaveLength(1);
+      const clashMeta = await request(s.app)
+        .get(smart)
+        .set("User-Agent", "clash.meta")
+        .expect(200);
+      expect(clashMeta.headers["x-subscription-client"]).toBe("clash-meta");
+      expect(clashMeta.headers["x-subscription-format"]).toBe("mihomo");
+      expect(clashMeta.headers.vary).toContain("User-Agent");
+      expect(clashMeta.headers["cache-control"]).toContain("no-store");
+      expect(parseYaml(clashMeta.text).proxies).toHaveLength(1);
+      expect(preview.profiles).toHaveLength(9);
+      const explicitClashMeta = preview.profiles.find(
+        (item: { id: string }) => item.id === "clash-meta",
+      );
+      expect(explicitClashMeta).toMatchObject({
+        name: "Clash Meta / Mihomo",
+        family: "mihomo",
+      });
+      const explicitResponse = await request(s.app)
+        .get(new URL(explicitClashMeta.url).pathname)
+        .set("User-Agent", "curl/8.0")
+        .expect(200);
+      expect(explicitResponse.headers["x-subscription-client"]).toBe(
+        "clash-meta",
+      );
+      expect(explicitResponse.headers["x-subscription-format"]).toBe("mihomo");
       for (const p of preview.profiles) {
         expect(new URL(p.url).pathname.split("/").at(-1)).toBe(
           legacy.split("/").at(-1),

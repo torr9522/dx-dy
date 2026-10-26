@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] - 2026-10-26
+
+- Add a source-evidenced Clash Meta / Mihomo client profile that maps the exact
+  MetaCubeXD `clash.meta` subscription User-Agent to the shared Mihomo YAML
+  renderer.
+- Add an explicit `/client/clash-meta/:token` view without rotating Tokens or
+  changing the canonical Generic endpoint.
+- Validate VLESS Reality/WS/gRPC/HTTPUpgrade/XHTTP, VMess, Trojan, Shadowsocks,
+  Shadowsocks 2022, Hysteria2, TUIC and IPv6 fixtures with official Mihomo.
+- Keep schema 004, Node Groups, historical Collections, backups and manager
+  update/rollback behavior unchanged.
+
 ## [0.3.0] - 2026-10-22
 
 - Remove Legacy Collections from the Node Library, import flow and Node editor;

@@ -45,6 +45,13 @@ test("subscription distribution reuses the list multi-client dialog at all width
   const read = async (route: string) =>
     (await context.request.get(route)).json();
   const clients = await read(`/api/subscriptions/${profile.id}/clients`);
+  const clashMeta = clients.profiles.find(
+    (client: { id: string }) => client.id === "clash-meta",
+  );
+  expect(clashMeta).toMatchObject({
+    name: "Clash Meta / Mihomo",
+    family: "mihomo",
+  });
   const preview = await read(`/api/subscriptions/${profile.id}/preview`);
   const before = await read(`/api/subscriptions/${profile.id}/entries`);
   const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
@@ -60,6 +67,9 @@ test("subscription distribution reuses the list multi-client dialog at all width
       exact: true,
     });
     await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByText("Clash Meta / Mihomo", { exact: true }),
+    ).toBeVisible();
     const listText = await dialog.innerText();
     await dialog
       .getByRole("button", { name: "复制智能订阅", exact: true })

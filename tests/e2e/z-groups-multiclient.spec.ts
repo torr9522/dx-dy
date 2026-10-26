@@ -282,6 +282,12 @@ for (const width of [1440, 768, 390]) {
     });
     expect(mihomo.headers()["x-subscription-rendered"]).toBe("3");
     expect(mihomo.headers()["vary"]).toContain("User-Agent");
+    const clashMeta = await context.request.get(smart, {
+      headers: { "User-Agent": "clash.meta" },
+    });
+    expect(clashMeta.headers()["x-subscription-client"]).toBe("clash-meta");
+    expect(clashMeta.headers()["x-subscription-format"]).toBe("mihomo");
+    expect(clashMeta.headers()["x-subscription-rendered"]).toBe("3");
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);

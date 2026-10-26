@@ -1,9 +1,9 @@
-# dx-dy 0.3.0
+# dx-dy 0.3.1
 
-Version 0.3.0 makes independent Node Groups the only user-visible organization
-model. Legacy Collection tables, memberships and deprecated compatibility APIs
-remain available for backup, restore and rollback, but the web application no
-longer reads or writes Collection membership.
+Version 0.3.1 adds an explicit Clash Meta / Mihomo subscription profile and
+source-evidenced `clash.meta` Smart routing. It reuses the existing Mihomo YAML
+renderer; Legacy Generic output, Node Groups, schema 004 and persisted data are
+unchanged.
 
 Global Node deletion detaches its subscription references atomically,
 preserving subscriptions, tokens, Local Nodes and the remaining saved order.
@@ -60,8 +60,8 @@ bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/ins
 安装器会安装宿主 Caddy，询问管理域名、可选独立订阅域名和管理员凭据，然后创建：
 
 ```text
-/opt/dx-dy/releases/0.3.0/
-/opt/dx-dy/current -> releases/0.3.0
+/opt/dx-dy/releases/0.3.1/
+/opt/dx-dy/current -> releases/0.3.1
 /etc/dx-dy/
 /var/lib/dx-dy/dx-dy.db
 /var/backups/dx-dy/
@@ -94,7 +94,7 @@ shell 语法和版本，保留旧 manager 后原子接管，但不会停止服�
 
 单域模式提供管理 UI/API、`/s/*`、`/health` 和 AGPL source endpoint。双域订阅 Host 只开放 `/s/*` 与 `/health`；其它路径返回 404。基础设施域名通过 `dx-dy domain` 修改。
 
-`dx-dy backup db` 创建 WAL-safe portable SQLite backup。`dx-dy backup full` 创建以 scrypt + AES-256-GCM 保护数据库和 `APP_MASTER_KEY` 的 `.psmbackup`。0.3.0 保持已有数据库、Token、订阅、历史 Collection 数据和备份格式兼容，并将每个 Node Group 与每个 Subscription 的 Local Nodes 作为独立重复命名空间。
+`dx-dy backup db` 创建 WAL-safe portable SQLite backup。`dx-dy backup full` 创建以 scrypt + AES-256-GCM 保护数据库和 `APP_MASTER_KEY` 的 `.psmbackup`。0.3.1 保持已有数据库、Token、订阅、历史 Collection 数据和备份格式兼容，并将每个 Node Group 与每个 Subscription 的 Local Nodes 作为独立重复命名空间。
 
 检测到 0.1.8 Docker 安装时，installer 进入显式迁移模式：先创建 portable/full backups，保留旧 Compose 栈和 image，停止旧 app/Caddy 后启动 native services；失败会恢复旧栈。成功后也不会自动卸载 Docker，只有 `dx-dy cleanup-legacy` 会在再次确认后清理旧 dx-dy containers。
 
