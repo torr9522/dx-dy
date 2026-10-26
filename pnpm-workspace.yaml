@@ -1,5 +1,7 @@
 packages:
-  - '.'
+  - "."
+overrides:
+  body-parser: 2.4.0
 allowBuilds:
   argon2: true
   esbuild: true
