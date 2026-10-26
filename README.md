@@ -1,9 +1,9 @@
-# dx-dy 0.3.1
+# dx-dy 0.3.2
 
-Version 0.3.1 adds an explicit Clash Meta / Mihomo subscription profile and
-source-evidenced `clash.meta` Smart routing. It reuses the existing Mihomo YAML
-renderer; Legacy Generic output, Node Groups, schema 004 and persisted data are
-unchanged.
+Version 0.3.2 fixes native dual-domain upgrades by transactionally reconciling
+the generated Caddy fragment, so Smart and explicit client endpoints remain
+available on the subscription domain. Clash Meta / Mihomo rendering, Legacy
+Generic output, Node Groups, schema 004 and persisted data are unchanged.
 
 Global Node deletion detaches its subscription references atomically,
 preserving subscriptions, tokens, Local Nodes and the remaining saved order.
@@ -60,8 +60,8 @@ bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/ins
 安装器会安装宿主 Caddy，询问管理域名、可选独立订阅域名和管理员凭据，然后创建：
 
 ```text
-/opt/dx-dy/releases/0.3.1/
-/opt/dx-dy/current -> releases/0.3.1
+/opt/dx-dy/releases/0.3.2/
+/opt/dx-dy/current -> releases/0.3.2
 /etc/dx-dy/
 /var/lib/dx-dy/dx-dy.db
 /var/backups/dx-dy/
@@ -88,13 +88,13 @@ Schema 变更升级前，先从目标 GitHub Release 下载 `install.sh`，执�
 shell 语法和版本，保留旧 manager 后原子接管，但不会停止服务或访问数据库。
 随后运行 `dx-dy update`。
 
-`dx-dy admin reset-password` 通过隐藏 stdin 调用应用 CLI，不把密码放进 argv 或日志。更新从 GitHub Release 选择当前架构 artifact，校验 SHA-256 和 manifest/`RELEASE.json` 身份，做 WAL-safe backup，安装到新版本目录并原子切换 `current`；启动或健康检查失败时通过独立恢复路径恢复数据库、旧 systemd unit 和旧链接。更新由互斥锁串行化，中断状态会在再次执行 update 时完成或安全回滚。
+`dx-dy admin reset-password` 通过隐藏 stdin 调用应用 CLI，不把密码放进 argv 或日志。更新从 GitHub Release 选择当前架构 artifact，校验 SHA-256 和 manifest/`RELEASE.json` 身份，做 WAL-safe backup，安装到新版本目录并原子切换 `current`。它还会从已保存域名和新版本模板重建 dx-dy 管理的 Caddy fragment，验证完整 Caddy 配置、原子替换、reload 并检查两个域名的 health；任一步骤失败都会恢复旧 fragment，并通过独立恢复路径恢复数据库、旧 systemd unit 和旧链接。更新由互斥锁串行化，中断状态会在再次执行 update 时完成或安全回滚。
 
 ## 域名、备份与迁移
 
-单域模式提供管理 UI/API、`/s/*`、`/health` 和 AGPL source endpoint。双域订阅 Host 只开放 `/s/*` 与 `/health`；其它路径返回 404。基础设施域名通过 `dx-dy domain` 修改。
+单域模式提供管理 UI/API、订阅端点、`/health` 和 AGPL source endpoint。双域订阅 Host 只开放 `/s/*`、`/smart/*`、`/client/*` 与 `/health`；其它路径返回 404。基础设施域名通过 `dx-dy domain` 修改。
 
-`dx-dy backup db` 创建 WAL-safe portable SQLite backup。`dx-dy backup full` 创建以 scrypt + AES-256-GCM 保护数据库和 `APP_MASTER_KEY` 的 `.psmbackup`。0.3.1 保持已有数据库、Token、订阅、历史 Collection 数据和备份格式兼容，并将每个 Node Group 与每个 Subscription 的 Local Nodes 作为独立重复命名空间。
+`dx-dy backup db` 创建 WAL-safe portable SQLite backup。`dx-dy backup full` 创建以 scrypt + AES-256-GCM 保护数据库和 `APP_MASTER_KEY` 的 `.psmbackup`。0.3.2 保持已有数据库、Token、订阅、历史 Collection 数据和备份格式兼容，并将每个 Node Group 与每个 Subscription 的 Local Nodes 作为独立重复命名空间。
 
 检测到 0.1.8 Docker 安装时，installer 进入显式迁移模式：先创建 portable/full backups，保留旧 Compose 栈和 image，停止旧 app/Caddy 后启动 native services；失败会恢复旧栈。成功后也不会自动卸载 Docker，只有 `dx-dy cleanup-legacy` 会在再次确认后清理旧 dx-dy containers。
 

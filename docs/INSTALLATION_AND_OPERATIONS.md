@@ -42,7 +42,12 @@ The wizard accepts hostnames only, supports single/dual-domain mode, initializes
 
 ## Caddy And Domains
 
-Caddy owns HTTP/HTTPS, ACME and renewal. dx-dy adds `/etc/caddy/dx-dy.caddy` and one import line to the standard Caddyfile. Existing non-dx-dy content is backed up and retained. Single domain exposes all routes; a separate subscription host exposes only `/s/*` and `/health`. Domain changes render and validate a candidate before reload and restore old files on failure.
+Caddy owns HTTP/HTTPS, ACME and renewal. dx-dy adds the generated,
+dx-dy-owned `/etc/caddy/dx-dy.caddy` fragment and one import line to the
+standard Caddyfile. Existing non-dx-dy content is backed up and retained.
+Single domain exposes all routes; a separate subscription host exposes only
+`/s/*`, `/smart/*`, `/client/*` and `/health`. Domain changes render and
+validate a candidate before reload and restore old files on failure.
 
 ## Manager
 
@@ -73,13 +78,17 @@ Running the installer after default uninstall enters retained-data reinstall mod
 
 Update reads the latest public manifest, chooses the installed architecture,
 verifies SHA-256 and checks that the artifact `RELEASE.json` version,
-architecture and commit match the manifest. It creates a WAL-safe DB backup,
-extracts a new version directory, stops the app and atomically switches
-`current`. Failed start/health restores the old link, old systemd unit and DB
-backup. Current, previous and a small recent set are retained.
+architecture and commit match the manifest. It creates a WAL-safe DB backup
+and a root-only backup of the managed Caddy fragment, extracts a new version
+directory, stops the app and atomically switches `current`. The manager renders
+the new canonical single/dual-domain fragment from the saved domains, validates
+it together with the unchanged main Caddyfile, atomically replaces it, reloads
+Caddy and verifies both domains. Failed validation, reload, application health
+or Caddy health restores the old fragment, link, systemd unit and DB backup.
+Current, previous and a small recent set are retained.
 
 Only one update runs at a time. A root-only update-state file records the old
-and new releases, versions, backup and its logical database SHA-256 before
+and new releases, versions, database/Caddy backups and their fingerprints before
 activation. Re-running `dx-dy update` after interruption either finalizes a healthy activated release,
 discards a pre-activation attempt, or restores the previous release through the
 same staged database recovery path. The state is removed only after a verified
@@ -95,10 +104,10 @@ and sidecars remain in a protected `.update-rollback-*` directory for diagnosis.
 If recovery fails, the application remains stopped and the manager reports
 `ROLLBACK: FAIL`; a successful health response alone does not prove recovery.
 
-Before a v0.2.9 to v0.3.0 update, run the target v0.3.0 Release installer with
+Before an update that changes manager behavior, run the target Release installer with
 `--bootstrap-manager` before invoking `dx-dy update`. The bootstrap verifies and
-atomically installs the target manager while preserving the v0.2.9 manager.
-Although v0.3.0 adds no schema migration, this keeps update and rollback
+atomically installs the target manager while preserving the previous manager.
+This keeps update and rollback
 ownership bound to the reviewed target release. Changing the new release's
 manager does not retroactively change an already running old manager process.
 

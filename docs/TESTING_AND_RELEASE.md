@@ -53,4 +53,4 @@ Historical 0.1.0-0.1.7 RC tags remain. From 0.1.8 onward:
 6. push only `master`, wait for CI, then push the reviewed tag;
 7. verify the stable GitHub Release and anonymous downloads of installer, manager, manifest, checksums, source and both native artifacts.
 
-Release workflow permissions are `contents: read` for builders and `contents: write` only for publication. It has no packages permission, deployment secret or GHCR step. The `v0.3.0` release is frozen; the current development source is `0.3.1`. Public tags are never moved.
+Release workflow permissions are `contents: read` for builders and `contents: write` only for publication. It has no packages permission, deployment secret or GHCR step. The `v0.3.1` release is immutable; the current development source is `0.3.2`. Public tags are never moved.

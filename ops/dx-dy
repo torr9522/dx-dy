@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.3.1"
+readonly DXDY_MANAGER_VERSION="0.3.2"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.1 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.2 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
@@ -158,9 +158,81 @@ cmd_restore() {
 }
 
 render_caddy() {
-  local admin="$1" subscription="$2" output="$3" template
-  if [[ "$admin" == "$subscription" ]]; then template="$CURRENT_LINK/Caddyfile.single"; else template="$CURRENT_LINK/Caddyfile.dual"; fi
+  render_caddy_from_release "$CURRENT_LINK" "$1" "$2" "$3"
+}
+render_caddy_from_release() {
+  local release="$1" admin="$2" subscription="$3" output="$4" template
+  if [[ "$admin" == "$subscription" ]]; then template="$release/Caddyfile.single"; else template="$release/Caddyfile.dual"; fi
+  [[ -f "$template" ]] || return 1
   sed -e "s/__ADMIN_DOMAIN__/$admin/g" -e "s/__SUBSCRIPTION_DOMAIN__/$subscription/g" -e "s/__INTERNAL_PORT__/$DXDY_INTERNAL_PORT/g" "$template" >"$output"
+}
+validate_caddy_candidate() {
+  local candidate="$1" staging import_line count combined
+  caddy validate --config "$candidate" --adapter caddyfile >/dev/null || return 1
+  [[ -f "$CADDY_MAIN" ]] || return 1
+  import_line="import $CADDY_IMPORT"
+  count="$(grep -Fxc "$import_line" "$CADDY_MAIN" || true)"
+  [[ "$count" == 1 ]] || return 1
+  staging="$(mktemp -d)" || return 1
+  TEMP_DIRS+=("$staging")
+  combined="$staging/Caddyfile"
+  awk -v line="$import_line" -v candidate="$candidate" '$0 == line { print "import " candidate; next } { print }' "$CADDY_MAIN" >"$combined"
+  caddy validate --config "$combined" --adapter caddyfile >/dev/null
+}
+caddy_health() { curl -fsS --max-time 10 "https://$1/health"; }
+wait_caddy_health() {
+  local admin="$DXDY_ADMIN_DOMAIN" subscription="$DXDY_SUBSCRIPTION_DOMAIN" attempts=15 i
+  [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]] && attempts=1
+  for ((i=0; i<attempts; i++)); do
+    if caddy_health "$admin" >/dev/null 2>&1 && { [[ "$subscription" == "$admin" ]] || caddy_health "$subscription" >/dev/null 2>&1; }; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+backup_caddy_fragment() {
+  local directory target
+  [[ -f "$CADDY_IMPORT" ]] || return 1
+  directory="$CONFIG_DIR/caddy-backups"
+  install -d -m 0700 "$directory"
+  target="$(mktemp "$directory/dx-dy.caddy.$(date -u +%Y%m%d-%H%M%SZ).XXXXXX.bak")" || return 1
+  cp -a "$CADDY_IMPORT" "$target" || return 1
+  chmod 0600 "$target"
+  printf '%s' "$target"
+}
+restore_caddy_fragment() {
+  local backup="$1" expected="$2" staged
+  [[ -f "$backup" && "$expected" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ "$(sha256sum "$backup" | cut -d' ' -f1)" == "$expected" ]] || return 1
+  staged="${CADDY_IMPORT}.rollback.$$"
+  install -m 0644 "$backup" "$staged" || return 1
+  mv -Tf "$staged" "$CADDY_IMPORT" || return 1
+  caddy validate --config "$CADDY_MAIN" --adapter caddyfile >/dev/null || return 1
+  systemctl reload caddy.service || return 1
+  wait_caddy_health
+}
+reconcile_caddy() {
+  local release="$1" backup="$2" backup_fingerprint="$3" staging candidate staged changed=1
+  staging="$(mktemp -d)" || return 1
+  TEMP_DIRS+=("$staging")
+  candidate="$staging/dx-dy.caddy"
+  render_caddy_from_release "$release" "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN" "$candidate" || return 1
+  validate_caddy_candidate "$candidate" || return 1
+  if cmp -s "$candidate" "$CADDY_IMPORT"; then changed=0; else
+    staged="${CADDY_IMPORT}.next.$$"
+    install -m 0644 "$candidate" "$staged" || return 1
+    if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "${DXDY_TEST_INTERRUPT_BEFORE_CADDY_RENAME:-0}" == 1 ]]; then
+      rm -f "$staged"
+      return 1
+    fi
+    mv -Tf "$staged" "$CADDY_IMPORT" || return 1
+  fi
+  if ! systemctl reload caddy.service || ! wait_caddy_health; then
+    if [[ $changed -eq 1 ]]; then
+      restore_caddy_fragment "$backup" "$backup_fingerprint" || die "ROLLBACK: FAIL; previous Caddy configuration could not be restored."
+    fi
+    return 1
+  fi
+  if [[ $changed -eq 1 ]]; then printf 'Caddy configuration reconciled and healthy.\n'; else printf 'Caddy configuration already current and healthy.\n'; fi
 }
 set_config_value() {
   local file="$1" key="$2" value="$3" temp
@@ -265,22 +337,23 @@ database_fingerprint() {
 }
 
 write_update_state() {
-  local phase="$1" old_release="$2" new_release="$3" backup="$4" backup_fingerprint="$5" old_version="$6" new_version="$7" old_previous="$8" temp
+  local phase="$1" old_release="$2" new_release="$3" backup="$4" backup_fingerprint="$5" old_version="$6" new_version="$7" old_previous="$8" caddy_backup="$9" caddy_fingerprint="${10}" temp
   temp="$(mktemp "$CONFIG_DIR/update-state.json.XXXXXX")"
-  jq -n --arg phase "$phase" --arg old_release "$old_release" --arg new_release "$new_release" --arg backup "$backup" --arg backup_fingerprint "$backup_fingerprint" --arg old_version "$old_version" --arg new_version "$new_version" --arg old_previous "$old_previous" \
-    '{format:1,phase:$phase,old_release:$old_release,new_release:$new_release,backup:$backup,backup_fingerprint:$backup_fingerprint,old_version:$old_version,new_version:$new_version,old_previous:$old_previous}' >"$temp"
+  jq -n --arg phase "$phase" --arg old_release "$old_release" --arg new_release "$new_release" --arg backup "$backup" --arg backup_fingerprint "$backup_fingerprint" --arg old_version "$old_version" --arg new_version "$new_version" --arg old_previous "$old_previous" --arg caddy_backup "$caddy_backup" --arg caddy_fingerprint "$caddy_fingerprint" \
+    '{format:2,phase:$phase,old_release:$old_release,new_release:$new_release,backup:$backup,backup_fingerprint:$backup_fingerprint,old_version:$old_version,new_version:$new_version,old_previous:$old_previous,caddy_backup:$caddy_backup,caddy_fingerprint:$caddy_fingerprint}' >"$temp"
   chmod 0600 "$temp"; mv -Tf "$temp" "$UPDATE_STATE_FILE"
 }
 
 recover_interrupted_update() {
   UPDATE_RECOVERY_ACTION=none
   [[ -f "$UPDATE_STATE_FILE" ]] || return 0
-  local phase old_release new_release backup backup_fingerprint old_version new_version old_previous current
+  local phase old_release new_release backup backup_fingerprint old_version new_version old_previous current caddy_backup caddy_fingerprint
   phase="$(jq -er '.phase' "$UPDATE_STATE_FILE")" || die "Interrupted update state is invalid."
   old_release="$(jq -er '.old_release' "$UPDATE_STATE_FILE")"; new_release="$(jq -er '.new_release' "$UPDATE_STATE_FILE")"
   backup="$(jq -er '.backup' "$UPDATE_STATE_FILE")"; old_version="$(jq -er '.old_version' "$UPDATE_STATE_FILE")"
   backup_fingerprint="$(jq -er '.backup_fingerprint' "$UPDATE_STATE_FILE")"
   new_version="$(jq -er '.new_version' "$UPDATE_STATE_FILE")"; old_previous="$(jq -er '.old_previous' "$UPDATE_STATE_FILE")"
+  caddy_backup="$(jq -r '.caddy_backup // ""' "$UPDATE_STATE_FILE")"; caddy_fingerprint="$(jq -r '.caddy_fingerprint // ""' "$UPDATE_STATE_FILE")"
   [[ "$phase" == prepared || "$phase" == switched ]] || die "Interrupted update phase is invalid."
   [[ "$old_release" == "$DXDY_INSTALL_ROOT/releases/"* && -d "$old_release" ]] || die "Interrupted update old release is invalid."
   [[ "$new_release" == "$DXDY_INSTALL_ROOT/releases/"* && -d "$new_release" ]] || die "Interrupted update new release is invalid."
@@ -292,7 +365,13 @@ recover_interrupted_update() {
     rm -f "$UPDATE_STATE_FILE"; warn "Discarded an interrupted update before release activation."; return 0
   fi
   if [[ "$current" == "$new_release" ]] && health >/dev/null 2>&1; then
-    rm -f "$UPDATE_STATE_FILE"; warn "Finalized an interrupted update after verified application health."; return 0
+    if [[ -z "$caddy_backup" ]]; then
+      caddy_backup="$(backup_caddy_fragment)" || die "Interrupted update Caddy backup failed."
+      caddy_fingerprint="$(sha256sum "$caddy_backup" | cut -d' ' -f1)"
+    fi
+    if reconcile_caddy "$new_release" "$caddy_backup" "$caddy_fingerprint"; then
+      rm -f "$UPDATE_STATE_FILE"; warn "Finalized an interrupted update after verified application and Caddy health."; return 0
+    fi
   fi
   warn "Recovering an interrupted update with the previous release."
   systemctl stop "$SERVICE" || true
@@ -300,6 +379,7 @@ recover_interrupted_update() {
   set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"; set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_previous"
   install -m 0644 "$old_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
   if ! restore_update_backup "$backup" "$backup_fingerprint"; then die "ROLLBACK: FAIL; interrupted update database recovery failed. Application remains stopped."; fi
+  if [[ -n "$caddy_backup" ]] && ! restore_caddy_fragment "$caddy_backup" "$caddy_fingerprint"; then die "ROLLBACK: FAIL; interrupted update Caddy recovery failed. Application remains stopped."; fi
   if ! systemctl start "$SERVICE" || ! wait_health; then die "ROLLBACK: FAIL; interrupted update restored data but the previous application is not healthy."; fi
   rm -f "$UPDATE_STATE_FILE"; UPDATE_RECOVERY_ACTION=rollback
   warn "ROLLBACK: PASS; interrupted update restored the previous release and database. Run update again to retry."
@@ -357,7 +437,7 @@ cmd_update() {
   load_instance
   [[ "${UPDATE_RECOVERY_ACTION:-none}" != rollback ]] || return 0
   [[ "$DXDY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Invalid repository coordinate."
-  local temp api latest base artifact expected actual old_release new_release backup backup_fingerprint result=0 old_version old_previous
+  local temp api latest base artifact expected actual old_release new_release backup backup_fingerprint result=0 old_version old_previous caddy_backup caddy_fingerprint
   temp="$(mktemp -d)"; TEMP_DIRS+=("$temp")
   api="https://api.github.com/repos/$DXDY_REPOSITORY/releases/latest"
   if [[ -n "${DXDY_UPDATE_MOCK_DIR:-}" ]]; then cp "$DXDY_UPDATE_MOCK_DIR/release.json" "$temp/release.json"; else curl -fsSL --proto '=https' --tlsv1.2 "$api" -o "$temp/release.json"; fi
@@ -372,25 +452,32 @@ cmd_update() {
   backup="$(backup_target db)"; run_cli database.mjs backup "$backup" >/dev/null
   backup_fingerprint="$(database_fingerprint "$backup")" || die "Backup fingerprint failed."
   [[ "$backup_fingerprint" =~ ^[a-f0-9]{64}$ ]] || die "Backup fingerprint failed."
+  caddy_backup="$(backup_caddy_fragment)" || die "Caddy configuration backup failed."
+  caddy_fingerprint="$(sha256sum "$caddy_backup" | cut -d' ' -f1)"
+  [[ "$caddy_fingerprint" =~ ^[a-f0-9]{64}$ ]] || die "Caddy configuration backup fingerprint failed."
   old_release="$(readlink -f "$CURRENT_LINK")"; old_version="$DXDY_VERSION"; old_previous="${DXDY_PREVIOUS_RELEASE:-}"; new_release="$DXDY_INSTALL_ROOT/releases/$latest"; rm -rf -- "$new_release"; mkdir -p "$temp/extract"; tar -xzf "$temp/$artifact" -C "$temp/extract"
   jq -e --arg v "$latest" --arg a "$DXDY_ARCH" --arg c "$(jq -er '.git_commit' "$temp/manifest.json")" '.version==$v and .release_model=="native-systemd" and .architecture==$a and .git_commit==$c' "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH/RELEASE.json" >/dev/null || die "Artifact release identity validation failed."
   cp -a "$temp/extract/dx-dy-$latest-linux-$DXDY_ARCH" "$new_release"
   if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" != 1 ]]; then
     chown -R root:root "$new_release"; chmod -R a-w "$new_release"
   fi
-  write_update_state prepared "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous"
+  write_update_state prepared "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous" "$caddy_backup" "$caddy_fingerprint"
   systemctl stop "$SERVICE"; ln -sfn "releases/$latest" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
   set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_release"; set_config_value "$CONFIG_FILE" DXDY_VERSION "$latest"
   install -m 0644 "$new_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
-  write_update_state switched "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous"
+  write_update_state switched "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous" "$caddy_backup" "$caddy_fingerprint"
   systemctl start "$SERVICE" || result=$?
   [[ $result -eq 0 ]] && wait_health || result=1
+  [[ $result -eq 0 ]] && reconcile_caddy "$new_release" "$caddy_backup" "$caddy_fingerprint" || result=1
   if [[ $result -ne 0 ]]; then
     systemctl stop "$SERVICE" || true; ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
     set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"; set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_previous"
     install -m 0644 "$old_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
     if ! restore_update_backup "$backup" "$backup_fingerprint"; then
       die "ROLLBACK: FAIL; database recovery failed. Application remains stopped; backups and failed database retained."
+    fi
+    if ! restore_caddy_fragment "$caddy_backup" "$caddy_fingerprint"; then
+      die "ROLLBACK: FAIL; database recovered but previous Caddy configuration could not be restored. Application remains stopped."
     fi
     if ! systemctl start "$SERVICE" || ! wait_health; then
       die "ROLLBACK: FAIL; previous database restored but application is not healthy."

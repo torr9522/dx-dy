@@ -70,9 +70,9 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The current release baseline is `v0.3.0`. Never move an existing public tag.
-The current source version is `0.3.1`; migrations 001–004 are immutable and no
-new migration is required for Clash Meta compatibility.
+The current release baseline is `v0.3.1`. Never move an existing public tag.
+The current source version is `0.3.2`; migrations 001–004 are immutable and no
+new migration is required for the dual-domain Caddy upgrade fix.
 
 Version 0.3.0 removes user-visible Collection management while retaining the
 historical tables and deprecated APIs for compatibility. Migration 004 owns
@@ -81,6 +81,8 @@ Legacy `/s/:token` remains UA-independent. New `/smart/:token` and
 `/client/:profile/:token` share the same token and use bounded family renderers.
 Version 0.3.1 maps the exact source-evidenced `clash.meta` request contract to a
 dedicated profile that reuses the existing Mihomo renderer family.
+Version 0.3.2 transactionally reconciles the dx-dy-owned Caddy fragment during
+native updates while preserving unrelated host Caddy configuration.
 
 ## Git Safety And Privacy
 

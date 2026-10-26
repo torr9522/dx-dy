@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2] - 2026-10-26
+
+- Reconcile the generated dx-dy Caddy fragment during native updates so a
+  dual-domain installation exposes `/smart/*` and `/client/*` on the
+  subscription host after upgrading from an older route allowlist.
+- Render from persisted admin/subscription domains and the target release's
+  canonical template, validate the complete Caddy configuration, atomically
+  replace the managed fragment, reload Caddy and verify both hosts.
+- Retain a root-only fragment backup and restore it together with the existing
+  runtime/database rollback when validation, reload or health verification
+  fails; preserve unrelated content in the main Caddyfile.
+- Keep Clash Meta / Mihomo rendering, Legacy Generic output, schema 004 and all
+  business data unchanged.
+
 ## [0.3.1] - 2026-10-26
 
 - Add a source-evidenced Clash Meta / Mihomo client profile that maps the exact

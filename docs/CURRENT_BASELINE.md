@@ -2,23 +2,24 @@
 
 ## Release Boundary
 
-The immutable public baseline is v0.3.0 at commit
-`feb88bd2b52c6d1dfe5ba99de1a9cfa9c849960e`. Version 0.3.1 adds an explicit
-Clash Meta / Mihomo client profile without changing the database schema.
+The immutable public baseline is v0.3.1 at commit
+`8fd7c7b48205ff8e4ea8c5905bc495089d9b0f8c`. Version 0.3.2 fixes native
+dual-domain upgrades by reconciling the generated Caddy fragment without
+changing the database schema.
 Independent Node Groups remain the sole user-visible Global Node ownership and
 organization model. Canonical Generic subscriptions retain their v0.3.0 bytes.
 
 ## Release Identity
 
-- Current source version: **0.3.1**
-- Previous stable: **v0.3.0**
+- Current source version: **0.3.2**
+- Previous stable: **v0.3.1**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 - Database schema: **004**
 
-Public tags are immutable. Version 0.3.1 does not rewrite migrations 001-004,
+Public tags are immutable. Version 0.3.2 does not rewrite migrations 001-004,
 drop a table, or transform existing business data.
 
 ## Persistence And Invariants
@@ -70,5 +71,5 @@ rollback, and runs private known-identity scanning when configured.
 
 ## Version Boundary
 
-The v0.3.0 source, tag and Release remain immutable. The approved next source
-version is v0.3.1. No v0.3.1 tag or Release exists at this development baseline.
+The v0.3.1 source, tag and Release remain immutable. The approved next source
+version is v0.3.2. No v0.3.2 tag or Release exists at this development baseline.
