@@ -20,6 +20,7 @@ export default defineConfig({
       SUBSCRIPTION_BASE_URL: "http://127.0.0.1:3100",
       COOKIE_SECURE: "false",
       TRUST_PROXY: "0",
+      LOGIN_LIMIT: "200",
     },
   },
 });

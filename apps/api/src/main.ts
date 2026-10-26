@@ -17,13 +17,14 @@ const { app, store } = await createApp({
     process.env.SUBSCRIPTION_BASE_URL || "http://localhost:3000"
   ).replace(/\/$/, ""),
   trustProxy: Number(process.env.TRUST_PROXY || 0),
+  loginLimit: Number(process.env.LOGIN_LIMIT || 15),
 });
 const server = app.listen(
   Number(process.env.PORT || 3000),
   process.env.HOST || "127.0.0.1",
   () =>
     console.log(
-      JSON.stringify({ event: "ready", name: "dx-dy", version: "0.3.2" }),
+      JSON.stringify({ event: "ready", name: "dx-dy", version: "0.3.3" }),
     ),
 );
 for (const signal of ["SIGTERM", "SIGINT"])

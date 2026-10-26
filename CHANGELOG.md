@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.3] - 2026-10-26
+
+- Gate the protected application on an explicit authentication and business-data
+  bootstrap state so the first login cannot render default empty collections.
+- Verify the protected session after login, commit nodes, subscriptions, settings
+  and groups atomically, and keep cold bootstrap separate from workspace loading.
+- Distinguish real empty responses from 401, server, network and aborted-request
+  failures; provide bounded network retry and an explicit manual retry state.
+- Keep cookie, CSRF, session, schema 004, renderer, Caddy and backup behavior
+  unchanged.
+
 ## [0.3.2] - 2026-10-26
 
 - Reconcile the generated dx-dy Caddy fragment during native updates so a

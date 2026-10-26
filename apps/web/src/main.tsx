@@ -22,7 +22,7 @@ import type {
   Envelope,
   NodeGroup,
 } from "../../../packages/shared/schema";
-import { api, setCsrf } from "./api";
+import { ApiError, api, setCsrf } from "./api";
 import { getField, setField } from "./fields";
 import { NodeLibrary } from "./NodeLibrary";
 import { SubscriptionDetail, SubscriptionList } from "./Subscriptions";
@@ -42,6 +42,22 @@ type Preview = {
   error: string | null;
   code?: string;
   field?: string;
+};
+type BusinessData = {
+  nodes: NodeRecord[];
+  profiles: Profile[];
+  groups: NodeGroup[];
+  settings: SettingsData;
+};
+type AppPhase =
+  | "bootstrapping"
+  | "unauthenticated"
+  | "loading-data"
+  | "ready"
+  | "error";
+type AppFailure = {
+  scope: "connection" | "data";
+  message: string;
 };
 const protocols = ["vless", "vmess", "trojan", "ss", "hysteria2", "tuic"];
 const date = (s: string) => new Date(s).toLocaleString();
@@ -125,17 +141,10 @@ function Empty({ text }: { text: string }) {
 }
 function App() {
   const [user, setUser] = useState<string | null>(null),
-    [boot, setBoot] = useState(true),
+    [phase, setPhase] = useState<AppPhase>("bootstrapping"),
     [page, setPage] = useState("dashboard");
-  const [nodes, setNodes] = useState<NodeRecord[]>([]),
-    [profiles, setProfiles] = useState<Profile[]>([]),
-    [groups, setGroups] = useState<NodeGroup[]>([]),
-    [settings, setSettings] = useState<SettingsData>({
-      site_name: "dx-dy",
-      admin_base_url: "",
-      subscription_base_url: "",
-      default_format: "v2ray",
-    });
+  const [businessData, setBusinessData] = useState<BusinessData | null>(null);
+  const [failure, setFailure] = useState<AppFailure | null>(null);
   const [toast, setToast] = useState(""),
     [pending, setPending] = useState(false),
     [theme, setTheme] = useState(localStorage.getItem("psm-theme") || "system");
@@ -146,6 +155,7 @@ function App() {
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
   const confirmationFocus = useRef<(() => void) | undefined>(undefined);
+  const authGeneration = useRef(0);
   useEffect(() => {
     if (confirm) confirmationFocus.current = confirm.returnFocus;
   }, [confirm]);
@@ -153,20 +163,73 @@ function App() {
     setToast(message);
     setTimeout(() => setToast(""), 4500);
   };
-  const refresh = async () => {
+  const fetchBusinessData = async (signal?: AbortSignal) => {
     const [n, p, s, g] = await Promise.all([
-      api<NodeRecord[]>("/nodes"),
-      api<Profile[]>("/subscriptions"),
-      api<SettingsData>("/settings"),
-      api<NodeGroup[]>("/node-groups"),
+      api<NodeRecord[]>("/nodes", "GET", undefined, { signal }),
+      api<Profile[]>("/subscriptions", "GET", undefined, { signal }),
+      api<SettingsData>("/settings", "GET", undefined, { signal }),
+      api<NodeGroup[]>("/node-groups", "GET", undefined, { signal }),
     ]);
-    setNodes(n);
-    setProfiles(p);
-    setSettings(s);
-    setGroups(g);
+    return { nodes: n, profiles: p, settings: s, groups: g };
+  };
+  const fetchBusinessDataWithRetry = async (signal?: AbortSignal) => {
+    try {
+      return await fetchBusinessData(signal);
+    } catch (error) {
+      if (
+        !(error instanceof ApiError) ||
+        !["NETWORK", "ABORTED"].includes(error.code) ||
+        signal?.aborted
+      )
+        throw error;
+      return fetchBusinessData(signal);
+    }
+  };
+  const commitBusinessData = (data: BusinessData) => {
+    setBusinessData(data);
     setActiveGroupId((current) =>
-      g.some((group) => group.id === current) ? current : (g[0]?.id ?? null),
+      data.groups.some((group) => group.id === current)
+        ? current
+        : (data.groups[0]?.id ?? null),
     );
+  };
+  const refresh = async () => commitBusinessData(await fetchBusinessData());
+  const establishSession = async (
+    scope: AppFailure["scope"],
+    signal?: AbortSignal,
+  ) => {
+    const generation = ++authGeneration.current;
+    setFailure(null);
+    if (scope === "data") setPhase("loading-data");
+    try {
+      const me = await api<{ username: string; csrf: string }>(
+        "/auth/me",
+        "GET",
+        undefined,
+        { signal },
+      );
+      setCsrf(me.csrf);
+      const data = await fetchBusinessDataWithRetry(signal);
+      if (signal?.aborted || generation !== authGeneration.current) return;
+      commitBusinessData(data);
+      setUser(me.username);
+      setPhase("ready");
+    } catch (error) {
+      if (signal?.aborted || generation !== authGeneration.current) return;
+      if (error instanceof ApiError && error.status === 401) {
+        setCsrf("");
+        setUser(null);
+        setBusinessData(null);
+        setPhase("unauthenticated");
+        return;
+      }
+      setFailure({
+        scope,
+        message: (error as Error).message || "请求失败",
+      });
+      setPhase("error");
+      throw error;
+    }
   };
   const action = async (fn: () => Promise<void>) => {
     setPending(true);
@@ -183,14 +246,9 @@ function App() {
     notify("已复制到剪贴板");
   };
   useEffect(() => {
-    api<{ username: string; csrf: string }>("/auth/me")
-      .then(async (me) => {
-        setCsrf(me.csrf);
-        setUser(me.username);
-        await refresh();
-      })
-      .catch(() => setUser(null))
-      .finally(() => setBoot(false));
+    const controller = new AbortController();
+    establishSession("connection", controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, []);
   useEffect(() => {
     localStorage.setItem("psm-theme", theme);
@@ -204,15 +262,35 @@ function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
-  if (boot) return <div className="loading">正在连接 dx-dy…</div>;
-  if (!user)
+  if (phase === "bootstrapping") return <AppStatus title="正在连接 dx-dy…" />;
+  if (phase === "loading-data") return <AppStatus title="正在加载工作空间…" />;
+  if (phase === "error" && failure)
+    return (
+      <AppStatus
+        title={
+          failure.scope === "connection" ? "连接服务器失败" : "数据加载失败"
+        }
+        detail={failure.message}
+        retry={() => {
+          setPhase(
+            failure.scope === "connection" ? "bootstrapping" : "loading-data",
+          );
+          establishSession(failure.scope).catch(() => undefined);
+        }}
+      />
+    );
+  if (phase === "unauthenticated")
     return (
       <>
         <Login
-          onLogin={async (username, csrf) => {
-            setCsrf(csrf);
-            setUser(username);
-            await refresh();
+          onLogin={async () => {
+            setPhase("loading-data");
+            try {
+              await establishSession("data");
+            } catch (error) {
+              if (error instanceof ApiError && error.status === 401)
+                notify("登录会话未能建立，请重新登录");
+            }
           }}
           notify={notify}
         />
@@ -223,6 +301,8 @@ function App() {
         )}
       </>
     );
+  if (phase !== "ready" || !user || !businessData) return null;
+  const { nodes, profiles, groups, settings } = businessData;
   const nav = [
     ["dashboard", "Dashboard", LayoutDashboard],
     ["nodes", "节点库", Network],
@@ -264,7 +344,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.3.2</small>
+          <small>dx-dy v0.3.3</small>
         </div>
       </aside>
       <main>
@@ -291,7 +371,11 @@ function App() {
               onClick={() =>
                 action(async () => {
                   await api("/auth/logout", "POST", {});
+                  authGeneration.current += 1;
+                  setCsrf("");
                   setUser(null);
+                  setBusinessData(null);
+                  setPhase("unauthenticated");
                 })
               }
             >
@@ -385,7 +469,13 @@ function App() {
               initial={settings}
               onSave={refresh}
               notify={notify}
-              onPasswordChanged={() => setUser(null)}
+              onPasswordChanged={() => {
+                authGeneration.current += 1;
+                setCsrf("");
+                setUser(null);
+                setBusinessData(null);
+                setPhase("unauthenticated");
+              }}
             />
           )}
           <footer>只管理节点与订阅 · 数据保存在您的服务器上</footer>
@@ -464,11 +554,35 @@ function App() {
     </div>
   );
 }
+function AppStatus({
+  title,
+  detail,
+  retry,
+}: {
+  title: string;
+  detail?: string;
+  retry?: () => void;
+}) {
+  return (
+    <main className="app-status" aria-live="polite">
+      <div className="brand-mark">
+        <Network size={21} />
+      </div>
+      <h1>{title}</h1>
+      {detail && <p>{detail}</p>}
+      {retry && (
+        <button className="primary" onClick={retry}>
+          重试
+        </button>
+      )}
+    </main>
+  );
+}
 function Login({
   onLogin,
   notify,
 }: {
-  onLogin: (username: string, csrf: string) => Promise<void>;
+  onLogin: () => Promise<void>;
   notify: (s: string) => void;
 }) {
   const [username, setUsername] = useState("admin"),
@@ -503,12 +617,12 @@ function Login({
           e.preventDefault();
           setBusy(true);
           try {
-            const m = await api<{ username: string; csrf: string }>(
+            await api<{ username: string; csrf: string }>(
               "/auth/login",
               "POST",
               { username, password },
             );
-            await onLogin(m.username, m.csrf);
+            await onLogin();
           } catch (err) {
             notify((err as Error).message);
           } finally {
