@@ -68,6 +68,7 @@
   "docs/research/v0.2.9/MULTI_CLIENT_SOURCE_AUDIT.md",
   "docs/research/v0.2.9/PANEL_COMPARISON.md",
   "docs/research/v0.2.9/RENDERER_FAMILIES.md",
+  "docs/research/v0.3.1/CLASH_META_MIHOMO_AUDIT.md",
   "eslint.config.mjs",
   "install.sh",
   "migrations/001_initial.sql",
