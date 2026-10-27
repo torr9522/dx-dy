@@ -1,5 +1,14 @@
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  BrowserRouter,
+  NavLink,
+  Route,
+  Routes,
+  matchPath,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   LayoutDashboard,
@@ -141,8 +150,7 @@ function Empty({ text }: { text: string }) {
 }
 function App() {
   const [user, setUser] = useState<string | null>(null),
-    [phase, setPhase] = useState<AppPhase>("bootstrapping"),
-    [page, setPage] = useState("dashboard");
+    [phase, setPhase] = useState<AppPhase>("bootstrapping");
   const [businessData, setBusinessData] = useState<BusinessData | null>(null);
   const [failure, setFailure] = useState<AppFailure | null>(null);
   const [toast, setToast] = useState(""),
@@ -150,12 +158,12 @@ function App() {
     [theme, setTheme] = useState(localStorage.getItem("psm-theme") || "system");
   const [importOpen, setImportOpen] = useState(false),
     [editing, setEditing] = useState<NodeRecord | null>(null),
-    [profile, setProfile] = useState<Profile | null>(null),
     [newProfile, setNewProfile] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
-  const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
   const confirmationFocus = useRef<(() => void) | undefined>(undefined);
   const authGeneration = useRef(0);
+  const location = useLocation();
+  const navigate = useNavigate();
   useEffect(() => {
     if (confirm) confirmationFocus.current = confirm.returnFocus;
   }, [confirm]);
@@ -185,14 +193,7 @@ function App() {
       return fetchBusinessData(signal);
     }
   };
-  const commitBusinessData = (data: BusinessData) => {
-    setBusinessData(data);
-    setActiveGroupId((current) =>
-      data.groups.some((group) => group.id === current)
-        ? current
-        : (data.groups[0]?.id ?? null),
-    );
-  };
+  const commitBusinessData = (data: BusinessData) => setBusinessData(data);
   const refresh = async () => commitBusinessData(await fetchBusinessData());
   const establishSession = async (
     scope: AppFailure["scope"],
@@ -303,12 +304,57 @@ function App() {
     );
   if (phase !== "ready" || !user || !businessData) return null;
   const { nodes, profiles, groups, settings } = businessData;
+  const groupMatch = matchPath("/nodes/groups/:groupId", location.pathname);
+  const parsedGroupId = groupMatch ? Number(groupMatch.params.groupId) : null;
+  const activeGroupId =
+    location.pathname === "/nodes"
+      ? (groups[0]?.id ?? null)
+      : parsedGroupId !== null &&
+          Number.isSafeInteger(parsedGroupId) &&
+          parsedGroupId > 0
+        ? parsedGroupId
+        : null;
+  const subscriptionMatch = matchPath(
+    "/subscriptions/:subscriptionId",
+    location.pathname,
+  );
+  const subscriptionId = subscriptionMatch
+    ? Number(subscriptionMatch.params.subscriptionId)
+    : null;
+  const selectedProfile =
+    subscriptionId !== null && Number.isSafeInteger(subscriptionId)
+      ? profiles.find((item) => item.id === subscriptionId)
+      : undefined;
+  const page =
+    location.pathname === "/"
+      ? "dashboard"
+      : location.pathname === "/nodes" || groupMatch
+        ? "nodes"
+        : location.pathname === "/subscriptions" || subscriptionMatch
+          ? "subscriptions"
+          : location.pathname === "/settings"
+            ? "settings"
+            : "not-found";
   const nav = [
-    ["dashboard", "Dashboard", LayoutDashboard],
-    ["nodes", "节点库", Network],
-    ["subscriptions", "订阅", Layers],
-    ["settings", "设置", Settings],
+    ["dashboard", "/", "Dashboard", LayoutDashboard],
+    ["nodes", "/nodes", "节点库", Network],
+    ["subscriptions", "/subscriptions", "订阅", Layers],
+    ["settings", "/settings", "设置", Settings],
   ] as const;
+  const pageTitle =
+    page === "dashboard"
+      ? "总览"
+      : page === "nodes"
+        ? "节点库"
+        : page === "subscriptions"
+          ? "订阅"
+          : page === "settings"
+            ? "设置"
+            : "页面不存在";
+  const resourceName =
+    selectedProfile?.name ??
+    groups.find((group) => group.id === activeGroupId)?.name;
+  document.title = `dx-dy - ${resourceName || pageTitle}`;
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -323,19 +369,17 @@ function App() {
         </div>
         <div className="nav-label">工作空间</div>
         <nav>
-          {nav.map(([key, label, Icon]) => (
-            <button
+          {nav.map(([key, to, label, Icon]) => (
+            <NavLink
               key={key}
+              to={to}
+              end={to === "/"}
               data-page={key}
-              className={page === key ? "nav active" : "nav"}
-              onClick={() => {
-                setPage(key);
-                setProfile(null);
-              }}
+              className={({ isActive }) => (isActive ? "nav active" : "nav")}
             >
               <Icon size={18} />
               {label}
-            </button>
+            </NavLink>
           ))}
         </nav>
         <div className="sidebar-bottom">
@@ -344,13 +388,13 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.3.3</small>
+          <small>dx-dy v0.3.5</small>
         </div>
       </aside>
       <main>
         <header className="topbar">
           <span className="breadcrumb">
-            工作空间 <span>/</span> {nav.find((n) => n[0] === page)?.[1]}
+            工作空间 <span>/</span> {pageTitle}
           </span>
           <div className="top-actions">
             <select
@@ -387,15 +431,7 @@ function App() {
           <div className="page-heading">
             <div>
               <div className="eyebrow">YOUR PRIVATE NETWORK</div>
-              <h1>
-                {page === "dashboard"
-                  ? "总览"
-                  : page === "nodes"
-                    ? "节点库"
-                    : page === "subscriptions"
-                      ? "订阅"
-                      : "设置"}
-              </h1>
+              <h1>{pageTitle}</h1>
               <p>
                 {page === "dashboard"
                   ? "节点集中管理，订阅随时保持同步。"
@@ -403,7 +439,9 @@ function App() {
                     ? "分组独立管理节点，更新按节点引用应用到订阅。"
                     : page === "subscriptions"
                       ? "为设备或使用场景组合节点，独立、安全地分发。"
-                      : "管理工作空间与账户安全。"}
+                      : page === "settings"
+                        ? "管理工作空间与账户安全。"
+                        : "请求的管理页面不存在。"}
               </p>
             </div>
             {page === "nodes" && (
@@ -423,61 +461,110 @@ function App() {
               </button>
             )}
           </div>
-          {page === "dashboard" && (
-            <Dashboard nodes={nodes} profiles={profiles} go={setPage} />
-          )}
-          {page === "nodes" && (
-            <NodeLibrary
-              nodes={nodes}
-              groups={groups}
-              activeGroupId={activeGroupId}
-              setActiveGroupId={setActiveGroupId}
-              refresh={refresh}
-              notify={notify}
-              copy={copy}
-              edit={setEditing}
-              confirm={setConfirm}
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <Dashboard
+                  nodes={nodes}
+                  profiles={profiles}
+                  go={(path) => navigate(path)}
+                />
+              }
             />
-          )}
-          {page === "subscriptions" &&
-            (profile ? (
-              <SubscriptionDetail
-                key={profile.id}
-                initial={profile}
-                nodes={nodes}
-                groups={groups}
-                notify={notify}
-                copy={copy}
-                onSaved={async () => {
-                  await refresh();
-                }}
-                onBack={() => setProfile(null)}
-                confirm={setConfirm}
-              />
-            ) : (
-              <SubscriptionList
-                profiles={profiles}
-                open={setProfile}
-                refresh={refresh}
-                notify={notify}
-                copy={copy}
-                confirm={setConfirm}
-              />
-            ))}
-          {page === "settings" && (
-            <SettingsPage
-              initial={settings}
-              onSave={refresh}
-              notify={notify}
-              onPasswordChanged={() => {
-                authGeneration.current += 1;
-                setCsrf("");
-                setUser(null);
-                setBusinessData(null);
-                setPhase("unauthenticated");
-              }}
+            <Route
+              path="/nodes"
+              element={
+                <NodeLibrary
+                  nodes={nodes}
+                  groups={groups}
+                  activeGroupId={activeGroupId}
+                  setActiveGroupId={(id) =>
+                    navigate(id === null ? "/nodes" : `/nodes/groups/${id}`)
+                  }
+                  refresh={refresh}
+                  notify={notify}
+                  copy={copy}
+                  edit={setEditing}
+                  confirm={setConfirm}
+                />
+              }
             />
-          )}
+            <Route
+              path="/nodes/groups/:groupId"
+              element={
+                activeGroupId !== null &&
+                groups.some((group) => group.id === activeGroupId) ? (
+                  <NodeLibrary
+                    nodes={nodes}
+                    groups={groups}
+                    activeGroupId={activeGroupId}
+                    setActiveGroupId={(id) =>
+                      navigate(id === null ? "/nodes" : `/nodes/groups/${id}`)
+                    }
+                    refresh={refresh}
+                    notify={notify}
+                    copy={copy}
+                    edit={setEditing}
+                    confirm={setConfirm}
+                  />
+                ) : (
+                  <ResourceNotFound resource="节点分组" back="/nodes" />
+                )
+              }
+            />
+            <Route
+              path="/subscriptions"
+              element={
+                <SubscriptionList
+                  profiles={profiles}
+                  open={(profile) => navigate(`/subscriptions/${profile.id}`)}
+                  refresh={refresh}
+                  notify={notify}
+                  copy={copy}
+                  confirm={setConfirm}
+                />
+              }
+            />
+            <Route
+              path="/subscriptions/:subscriptionId"
+              element={
+                selectedProfile ? (
+                  <SubscriptionDetail
+                    key={selectedProfile.id}
+                    initial={selectedProfile}
+                    nodes={nodes}
+                    groups={groups}
+                    notify={notify}
+                    copy={copy}
+                    onSaved={refresh}
+                    onBack={() => navigate("/subscriptions")}
+                    confirm={setConfirm}
+                  />
+                ) : (
+                  <ResourceNotFound resource="订阅" back="/subscriptions" />
+                )
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <SettingsPage
+                  initial={settings}
+                  onSave={refresh}
+                  notify={notify}
+                  onPasswordChanged={() => {
+                    authGeneration.current += 1;
+                    setCsrf("");
+                    setUser(null);
+                    setBusinessData(null);
+                    setPhase("unauthenticated");
+                  }}
+                />
+              }
+            />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
           <footer>只管理节点与订阅 · 数据保存在您的服务器上</footer>
         </div>
       </main>
@@ -513,10 +600,7 @@ function App() {
         title={confirm?.title || "确认"}
         returnFocus={() => {
           if (confirmationFocus.current) confirmationFocus.current();
-          else
-            document
-              .querySelector<HTMLButtonElement>("button.nav.active")
-              ?.focus();
+          else document.querySelector<HTMLElement>(".nav.active")?.focus();
         }}
       >
         <p
@@ -552,6 +636,32 @@ function App() {
         </div>
       )}
     </div>
+  );
+}
+function ResourceNotFound({
+  resource,
+  back,
+}: {
+  resource: string;
+  back: string;
+}) {
+  const navigate = useNavigate();
+  return (
+    <section className="card section-pad route-not-found" role="alert">
+      <h2>{resource}不存在</h2>
+      <p className="muted">该资源可能已被删除，或链接中的内部 ID 无效。</p>
+      <button onClick={() => navigate(back)}>返回{resource}列表</button>
+    </section>
+  );
+}
+function NotFound() {
+  const navigate = useNavigate();
+  return (
+    <section className="card section-pad route-not-found" role="alert">
+      <h2>404 · 页面不存在</h2>
+      <p className="muted">请检查管理后台链接，或返回总览。</p>
+      <button onClick={() => navigate("/")}>返回总览</button>
+    </section>
   );
 }
 function AppStatus({
@@ -745,7 +855,7 @@ function Dashboard({
           <h3>集中维护，自动同步</h3>
           <p>修改节点库配置，所有引用它的订阅将在下次更新时获取新配置。</p>
         </div>
-        <button onClick={() => go("nodes")}>
+        <button onClick={() => go("/nodes")}>
           管理节点
           <ArrowRight size={16} />
         </button>
@@ -1601,6 +1711,8 @@ function SettingsPage({
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </React.StrictMode>,
 );

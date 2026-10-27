@@ -120,6 +120,7 @@
   "tests/e2e/group-delete.spec.ts",
   "tests/e2e/group-setup.ts",
   "tests/e2e/node-delete-flow.ts",
+  "tests/e2e/routing.spec.ts",
   "tests/e2e/subscription-batch.spec.ts",
   "tests/e2e/workflow.spec.ts",
   "tests/e2e/z-groups-multiclient.spec.ts",

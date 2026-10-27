@@ -3,14 +3,16 @@
 ## Release Boundary
 
 The immutable public baseline is v0.3.2 at commit
-`4ca4af241f00bd463e51ad1371b54f45b5bb3dd7`. Version 0.3.3 fixes the
-login/bootstrap false-empty race without changing the database schema.
+`4ca4af241f00bd463e51ad1371b54f45b5bb3dd7`. Version 0.3.5 adds real SPA
+navigation and stable-ID deep links on top of the 0.3.3 login/bootstrap
+false-empty fix without changing the database schema. Version 0.3.4 was skipped
+by explicit user decision.
 Independent Node Groups remain the sole user-visible Global Node ownership and
 organization model. Canonical Generic subscriptions retain their v0.3.0 bytes.
 
 ## Release Identity
 
-- Current source version: **0.3.3**
+- Current source version: **0.3.5**
 - Previous stable: **v0.3.2**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
@@ -18,7 +20,7 @@ organization model. Canonical Generic subscriptions retain their v0.3.0 bytes.
 - Bundled Node runtime: **26.10.0**
 - Database schema: **004**
 
-Public tags are immutable. Version 0.3.3 does not rewrite migrations 001-004,
+Public tags are immutable. Version 0.3.5 does not rewrite migrations 001-004,
 drop a table, or transform existing business data.
 
 ## Persistence And Invariants
@@ -71,4 +73,4 @@ rollback, and runs private known-identity scanning when configured.
 ## Version Boundary
 
 The v0.3.2 source, tag and Release remain immutable. The approved next source
-version is v0.3.3. No v0.3.3 tag or Release exists at this development baseline.
+version is v0.3.5. No v0.3.5 tag or Release exists at this development baseline.

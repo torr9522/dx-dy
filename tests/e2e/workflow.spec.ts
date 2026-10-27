@@ -46,7 +46,7 @@ for (const width of [1440, 768, 390]) {
       data: { node_ids: imported.map((node: { id: number }) => node.id) },
     });
     await page.reload();
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     const row = page.locator(".subscription-row").filter({ hasText: name });
     await expect(row).toBeVisible();
     await expect(row).toContainText("2 个节点");
@@ -80,7 +80,7 @@ for (const width of [1440, 768, 390]) {
       "false",
     );
     await page.reload();
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     const refreshed = page
       .locator(".subscription-row")
       .filter({ hasText: name });
@@ -137,7 +137,7 @@ test("subscription switch rolls back failures and coalesces rapid changes", asyn
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   const row = page
     .locator(".subscription-row")
     .filter({ hasText: profile.name });
@@ -181,7 +181,7 @@ test("subscription switch rolls back failures and coalesces rapid changes", asyn
   expect(writes).toBeLessThanOrEqual(3);
   expect(maxInFlight).toBe(1);
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await expect(
     page
       .locator(".subscription-row")
@@ -239,7 +239,7 @@ test("subscription lists remain usable at 20 subscriptions and 100 nodes", async
     data: { node_ids: imported.map((node: { id: number }) => node.id) },
   });
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await expect(
     page
       .locator(".subscription-row")
@@ -344,7 +344,7 @@ test("complete browser workflow with synthetic nodes", async ({
   }
   await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   await page
     .getByLabel("节点链接", { exact: true })
@@ -366,7 +366,7 @@ test("complete browser workflow with synthetic nodes", async ({
   await expect(
     page.getByText("example.com:8443", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page.getByRole("button", { name: "创建订阅", exact: true }).click();
   await page.getByLabel("订阅名称").fill("E2E iPhone");
   await page
@@ -455,7 +455,7 @@ test("complete browser workflow with synthetic nodes", async ({
     }, modules.size);
   expect(pixels).toEqual(Array.from(modules.data));
   await page.getByRole("button", { name: "关闭", exact: true }).click();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "E2E VLESS", exact: true }).click();
   await page.getByRole("button", { name: "原始链接", exact: true }).click();
   await expect(page.getByRole("textbox").first()).toHaveValue(vless);
@@ -516,7 +516,7 @@ test("global selector save returns to persisted main view and survives reload", 
   expect(profileResponse.ok()).toBeTruthy();
   const profile = await profileResponse.json();
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -539,7 +539,7 @@ test("global selector save returns to persisted main view and survives reload", 
     ).map((entry: { node: { id: number } }) => entry.node.id),
   ).toEqual(imported.slice(0, 2).map((node: { id: number }) => node.id));
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -584,7 +584,7 @@ test("single local link returns to main, persists and stays out of Global Librar
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -602,7 +602,7 @@ test("single local link returns to main, persists and stays out of Global Librar
     "独立节点",
   );
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -621,11 +621,15 @@ test("single local link returns to main, persists and stays out of Global Librar
       .toString("utf8")
       .split("\n"),
   ).toHaveLength(1);
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page
     .getByLabel("搜索全部节点", { exact: true })
     .fill("Single Local VMess");
-  await expect(page.getByText("没有匹配的节点")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: /没有匹配的节点|当前分组还没有节点/,
+    }),
+  ).toBeVisible();
   await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
 });
 
@@ -678,7 +682,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
     data: { node_ids: [imported[1].id] },
   });
   await page.reload();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByLabel("搜索全部节点", { exact: true }).fill("Node Ops");
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -701,7 +705,7 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
   await firstSwitch.click();
   await expect(page.locator(".toast")).toContainText("节点已禁用");
   await page.reload();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByLabel("搜索全部节点", { exact: true }).fill("Node Ops");
   const refreshedSwitch = page
     .locator("tr")
@@ -794,7 +798,11 @@ test("Node Library delete and enabled Switch are transactional and responsive", 
   await expect(page.getByText("已选择 3 个节点", { exact: true })).toHaveCount(
     0,
   );
-  await expect(page.getByText("没有匹配的节点")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: /没有匹配的节点|当前分组还没有节点/,
+    }),
+  ).toBeVisible();
 
   await context.request.delete(`/api/subscriptions/${profile.id}`, { headers });
   await context.request.delete(`/api/collections/${collection.id}`, {
@@ -829,7 +837,7 @@ test("filtered selection accumulates, supports rows and visible shift ranges", a
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   const search = page.getByLabel("搜索全部节点", { exact: true });
   await search.fill("Selection JP");
   await page.getByRole("checkbox", { name: "全选当前节点" }).check();
@@ -957,7 +965,7 @@ test("legacy collections are absent while historical memberships stay intact", a
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await expect(page.getByText("Legacy Collections")).toHaveCount(0);
   await expect(page.getByText("节点集合", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "新建集合" })).toHaveCount(0);
@@ -1006,8 +1014,8 @@ test("legacy collections are absent while historical memberships stay intact", a
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByLabel("Admin Base URL")).toHaveValue(
     "http://127.0.0.1:3100",
   );
@@ -1020,7 +1028,7 @@ test("legacy collections are absent while historical memberships stay intact", a
   await expect(page.getByLabel("订阅域名")).toHaveValue(
     "http://localhost:3999",
   );
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   const card = page
     .locator(".subscription-row")
     .filter({ hasText: profile.name });
@@ -1035,7 +1043,7 @@ test("legacy collections are absent while historical memberships stay intact", a
     /^http:\/\/localhost:3999\/s\//,
   );
   await page.getByRole("button", { name: "关闭" }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await page.getByLabel("订阅域名").fill("http://127.0.0.1:3100");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.locator(".toast")).toContainText("订阅域名已更新");
@@ -1083,7 +1091,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
     })
   ).json();
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -1184,7 +1192,7 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
       .filter({ hasText: "Local matches Global" }),
   ).toContainText("独立节点");
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: profile.name })
@@ -1215,12 +1223,12 @@ test("subscription local nodes stay isolated and share persisted ordering", asyn
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
   await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
 
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page
     .getByLabel("搜索全部节点", { exact: true })
     .fill("Local VMess Edited");
   await expect(page.getByText("没有匹配的节点")).toBeVisible();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: other.name })
@@ -1247,7 +1255,7 @@ test("Global Library still blocks semantic duplicates", async ({ page }) => {
   await page.getByRole("button", { name: "安全登录" }).click();
   await ensureRegressionGroup(page);
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   await page.getByLabel("节点链接", { exact: true }).fill(vmess);
   await page.getByRole("button", { name: "解析预览", exact: true }).click();

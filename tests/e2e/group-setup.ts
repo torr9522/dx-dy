@@ -4,7 +4,8 @@ import { chmodSync } from "node:fs";
 // Existing regression flows share one explicit ownership namespace. Group
 // creation uses the same DOM path as an administrator, never an implicit DB seed.
 export async function ensureRegressionGroup(page: Page) {
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
+  await expect(page.locator(".node-library")).toBeVisible();
   const group = page.getByRole("button", {
     name: /^Regression Library\s*\d*$/,
   });
@@ -16,7 +17,7 @@ export async function ensureRegressionGroup(page: Page) {
     await expect(dialog).not.toBeVisible();
   }
   await group.click();
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
   await page
     .context()
     .storageState({ path: "test-results/regression-auth.json" });

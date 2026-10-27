@@ -206,7 +206,7 @@ export async function createApp(options: Options) {
   };
   app.get("/health", (_req, res) => {
     store.get("SELECT 1");
-    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.3.3" });
+    res.json({ name: "dx-dy", status: "ok", database: "ok", version: "0.3.5" });
   });
   app.post(
     "/api/auth/login",
@@ -1349,7 +1349,7 @@ export async function createApp(options: Options) {
     app.get("/source.tar.gz", (_req, res) =>
       res.download(
         path.resolve("dist/source.tar.gz"),
-        "dx-dy-0.3.3-source.tar.gz",
+        "dx-dy-0.3.5-source.tar.gz",
       ),
     );
   const web = options.webDir || path.resolve("dist/web");

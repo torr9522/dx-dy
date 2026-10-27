@@ -26,7 +26,8 @@ Caddy templates live in [`deploy/native`](../deploy/native). The application has
 
 ## Application Layers
 
-- [`apps/web`](../apps/web): React/Vite single-admin UI, bulk and Set-based selection.
+- [`apps/web`](../apps/web): React/Vite single-admin UI with React Router
+  browser-history deep links, protected bootstrap, bulk and Set-based selection.
 - [`apps/api`](../apps/api): Express, authentication, routes, SQLite and output composition.
 - [`packages/proxy-adapter`](../packages/proxy-adapter): pinned Sub-Store adapter, lossless envelope, rendering and semantic dedupe.
 - [`scripts`](../scripts): application CLIs, WAL-safe backup/restore, native artifact/source/release gates.

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.5] - 2026-10-27
+
+- Add React Router browser-history navigation for Dashboard, Node Library,
+  stable-ID Node Groups, Subscription list/details and Settings.
+- Preserve deep links through refresh, Back/Forward, copied/new-tab URLs and
+  unauthenticated login while keeping Subscription Tokens out of admin paths.
+- Render explicit resource-specific missing states and a general 404 instead of
+  redirecting invalid paths to the Dashboard.
+- Preserve the 0.3.3 atomic authentication/business-data bootstrap and the
+  dual-domain boundary where only the Admin Host serves SPA routes.
+- Skip version 0.3.4 by explicit user versioning decision. Schema 004 and all
+  persisted business models remain unchanged.
+
 ## [0.3.3] - 2026-10-26
 
 - Gate the protected application on an explicit authentication and business-data

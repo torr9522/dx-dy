@@ -13,13 +13,13 @@ test("DOM import preserves equal Global and Local VMess in separate namespaces",
     .fill("Synthetic-e2e-password-123!");
   await page.getByRole("button", { name: "安全登录" }).click();
   await ensureRegressionGroup(page);
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   const dialog = page.getByRole("dialog", { name: "粘贴节点链接" });
   await dialog.getByLabel("节点链接", { exact: true }).fill(uri);
   await dialog.getByRole("button", { name: "解析预览", exact: true }).click();
   await dialog.getByRole("button", { name: "确认导入", exact: true }).click();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page.getByRole("button", { name: "创建订阅", exact: true }).click();
   const create = page.getByRole("dialog", { name: "创建订阅" });
   await create.getByLabel("订阅名称").fill(name);
@@ -44,7 +44,7 @@ test("DOM import preserves equal Global and Local VMess in separate namespaces",
   await page.getByRole("button", { name: "确认添加" }).click();
   await expect(page.locator(".subscription-node-row")).toHaveCount(2);
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await row.getByRole("button", { name: "管理订阅" }).click();
   await expect(page.locator(".subscription-node-row")).toHaveCount(2);
   const profiles = await (

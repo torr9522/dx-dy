@@ -79,13 +79,13 @@ function singleFileFixture(
 ) {
   const root = temp();
   const assets = path.join(root, "assets");
-  const packageRoot = path.join(root, "package", "dx-dy-0.3.3-linux-amd64");
+  const packageRoot = path.join(root, "package", "dx-dy-0.3.5-linux-amd64");
   const script = path.join(root, "install.sh");
   const password = path.join(root, "password");
   const bin = path.join(root, "bin");
   const installedManager = path.join(root, "usr/local/bin/dx-dy");
   const manager =
-    "#!/usr/bin/env bash\nif [[ \"${1:-}\" == version ]]; then printf 'dx-dy 0.3.3\\n'; else printf 'release-manager\\n'; fi\n";
+    "#!/usr/bin/env bash\nif [[ \"${1:-}\" == version ]]; then printf 'dx-dy 0.3.5\\n'; else printf 'release-manager\\n'; fi\n";
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
   mkdirSync(assets);
@@ -109,9 +109,9 @@ function singleFileFixture(
   );
   writeFileSync(
     path.join(packageRoot, "RELEASE.json"),
-    `{ "version":"0.3.3", "release_model":"native-systemd", "architecture":"amd64", "git_commit":"${"a".repeat(40)}" }\n`,
+    `{ "version":"0.3.5", "release_model":"native-systemd", "architecture":"amd64", "git_commit":"${"a".repeat(40)}" }\n`,
   );
-  const artifact = "dx-dy-0.3.3-linux-amd64.tar.gz";
+  const artifact = "dx-dy-0.3.5-linux-amd64.tar.gz";
   expect(
     spawnSync("tar", [
       "-czf",
@@ -126,7 +126,7 @@ function singleFileFixture(
   writeFileSync(
     path.join(assets, "release-manifest.json"),
     JSON.stringify({
-      version: "0.3.3",
+      version: "0.3.5",
       repository: "torr9522/dx-dy",
       git_commit: "a".repeat(40),
       release_model: "native-systemd",
@@ -274,7 +274,7 @@ describe("native installer", () => {
       path.join(root, "etc/caddy/dx-dy.caddy"),
       "utf8",
     );
-    expect(config).toContain("DXDY_VERSION=0.3.3");
+    expect(config).toContain("DXDY_VERSION=0.3.5");
     expect(config).toContain("DXDY_RELEASE_MODEL=native-systemd");
     expect(config).toContain(`DXDY_ARCH=${arch}`);
     expect(env).toContain("HOST=127.0.0.1");
@@ -287,10 +287,10 @@ describe("native installer", () => {
     expect(caddy).toContain("reverse_proxy 127.0.0.1:3000");
     expect(caddy).not.toContain("app:3000");
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.3.3",
+      "releases/0.3.5",
     );
     expect(
-      existsSync(path.join(root, "opt/dx-dy/releases/0.3.3/runtime/bin/node")),
+      existsSync(path.join(root, "opt/dx-dy/releases/0.3.5/runtime/bin/node")),
     ).toBe(true);
   });
 
@@ -383,7 +383,7 @@ describe("native installer", () => {
     const result = runManagerBootstrap(fixture);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(
-      "Manager bootstrap complete: dx-dy 0.2.9 -> 0.3.3",
+      "Manager bootstrap complete: dx-dy 0.2.9 -> 0.3.5",
     );
     expect(readFileSync(fixture.installedManager, "utf8")).toBe(
       fixture.manager,
@@ -520,7 +520,7 @@ describe("native installer", () => {
       `APP_MASTER_KEY=${masterKey}`,
     );
     expect(readlinkSync(path.join(root, "opt/dx-dy/current"))).toBe(
-      "releases/0.3.3",
+      "releases/0.3.5",
     );
   });
 
@@ -685,7 +685,7 @@ sub.example.com {
   executable(path.join(bin, "chown"), `printf 'chown %s\\n' "$*" >>"${calls}"`);
   executable(
     path.join(bin, "curl"),
-    `if [[ "\${DXDY_MOCK_NEW_HEALTH_FAIL:-0}" == 1 && "$(readlink -f '${install}/current')" == '${install}/releases/0.3.3' ]]; then exit 22; fi
+    `if [[ "\${DXDY_MOCK_NEW_HEALTH_FAIL:-0}" == 1 && "$(readlink -f '${install}/current')" == '${install}/releases/0.3.5' ]]; then exit 22; fi
 if [[ "\${DXDY_MOCK_CADDY_HEALTH_FAIL_ONCE:-0}" == 1 && "$*" == *"https://sub.example.com/health"* && ! -e '${root}/caddy-health-failed-once' ]]; then touch '${root}/caddy-health-failed-once'; exit 22; fi
 printf '{"name":"dx-dy","status":"ok","version":"0.1.9"}\\n'`,
   );
@@ -745,7 +745,7 @@ function manager(
 }
 
 function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
-  const version = "0.3.3";
+  const version = "0.3.5";
   const packageRoot = path.join(f.root, `dx-dy-${version}-linux-amd64`);
   mkdirSync(path.join(packageRoot, "runtime/bin"), { recursive: true });
   mkdirSync(path.join(packageRoot, "app/dist"), { recursive: true });
@@ -818,7 +818,7 @@ function prepareUpdate(f: ReturnType<typeof nativeFixture>) {
 }
 
 function repackUpdate(f: ReturnType<typeof nativeFixture>) {
-  const version = "0.3.3";
+  const version = "0.3.5";
   const artifact = `dx-dy-${version}-linux-amd64.tar.gz`;
   expect(
     spawnSync("tar", [
@@ -967,12 +967,12 @@ describe("native manager", () => {
     prepareUpdate(f);
     const result = manager(f, ["update"], "", { DXDY_UPDATE_YES: "1" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Updated to dx-dy 0.3.3");
+    expect(result.stdout).toContain("Updated to dx-dy 0.3.5");
     expect(readlinkSync(path.join(f.install, "current"))).toBe(
-      "releases/0.3.3",
+      "releases/0.3.5",
     );
     expect(readFileSync(path.join(f.config, "install.conf"), "utf8")).toContain(
-      "DXDY_VERSION=0.3.3",
+      "DXDY_VERSION=0.3.5",
     );
     expect(existsSync(path.join(f.install, "releases/0.1.9"))).toBe(true);
   });
@@ -987,6 +987,18 @@ describe("native manager", () => {
     expect(readFileSync("deploy/native/Caddyfile.dual", "utf8")).toContain(
       "/client/*",
     );
+  });
+
+  it("keeps SPA routes on the admin host and outside the dual subscription allowlist", () => {
+    const single = readFileSync("deploy/native/Caddyfile.single", "utf8");
+    const dual = readFileSync("deploy/native/Caddyfile.dual", "utf8");
+    expect(single).toContain("reverse_proxy 127.0.0.1:__INTERNAL_PORT__");
+    expect(dual).toContain(
+      "@subscription path /s/* /smart/* /client/* /health",
+    );
+    expect(dual).toContain("respond 404");
+    for (const adminRoute of ["/nodes/*", "/subscriptions/*", "/settings"])
+      expect(dual).not.toContain(adminRoute);
   });
 
   it("CADDY-DUAL-003 reconciles a v0.3.0 stale dual-domain fragment", () => {
@@ -1072,7 +1084,7 @@ describe("native manager", () => {
     const before = readFileSync(fragment);
     prepareUpdate(f);
     writeFileSync(
-      path.join(f.root, "dx-dy-0.3.3-linux-amd64/Caddyfile.dual"),
+      path.join(f.root, "dx-dy-0.3.5-linux-amd64/Caddyfile.dual"),
       "INVALID_CADDY_FIXTURE\n",
     );
     repackUpdate(f);
@@ -1179,7 +1191,7 @@ describe("native manager", () => {
   it("discards a persisted update interrupted before release activation", () => {
     const f = nativeFixture();
     const oldRelease = path.join(f.install, "releases/0.1.9");
-    const newRelease = path.join(f.install, "releases/0.3.3");
+    const newRelease = path.join(f.install, "releases/0.3.5");
     mkdirSync(newRelease, { recursive: true });
     const backup = path.join(f.backups, "interrupted.db");
     writeFileSync(backup, "database");
@@ -1196,7 +1208,7 @@ describe("native manager", () => {
           .update(readFileSync(backup))
           .digest("hex"),
         old_version: "0.1.9",
-        new_version: "0.3.3",
+        new_version: "0.3.5",
         old_previous: "",
       }),
     );
@@ -1213,18 +1225,18 @@ describe("native manager", () => {
     const f = nativeFixture();
     prepareUpdate(f);
     const oldRelease = path.join(f.install, "releases/0.1.9");
-    const newRelease = path.join(f.install, "releases/0.3.3");
-    cpSync(path.join(f.root, "dx-dy-0.3.3-linux-amd64"), newRelease, {
+    const newRelease = path.join(f.install, "releases/0.3.5");
+    cpSync(path.join(f.root, "dx-dy-0.3.5-linux-amd64"), newRelease, {
       recursive: true,
     });
     rmSync(path.join(f.install, "current"));
-    symlinkSync("releases/0.3.3", path.join(f.install, "current"));
+    symlinkSync("releases/0.3.5", path.join(f.install, "current"));
     const config = path.join(f.config, "install.conf");
     writeFileSync(
       config,
       readFileSync(config, "utf8").replace(
         "DXDY_VERSION=0.1.9",
-        "DXDY_VERSION=0.3.3",
+        "DXDY_VERSION=0.3.5",
       ),
     );
     const backup = path.join(f.backups, "interrupted.db");
@@ -1242,7 +1254,7 @@ describe("native manager", () => {
           .update(readFileSync(backup))
           .digest("hex"),
         old_version: "0.1.9",
-        new_version: "0.3.3",
+        new_version: "0.3.5",
         old_previous: "",
       }),
     );
@@ -1251,7 +1263,7 @@ describe("native manager", () => {
     expect(result.stderr).toContain("Finalized an interrupted update");
     expect(existsSync(state)).toBe(false);
     expect(readlinkSync(path.join(f.install, "current"))).toBe(
-      "releases/0.3.3",
+      "releases/0.3.5",
     );
     expect(readFileSync(path.join(f.caddy, "dx-dy.caddy"), "utf8")).toContain(
       "/s/* /smart/* /client/* /health",
@@ -1262,18 +1274,18 @@ describe("native manager", () => {
     const f = nativeFixture();
     prepareUpdate(f);
     const oldRelease = path.join(f.install, "releases/0.1.9");
-    const newRelease = path.join(f.install, "releases/0.3.3");
-    cpSync(path.join(f.root, "dx-dy-0.3.3-linux-amd64"), newRelease, {
+    const newRelease = path.join(f.install, "releases/0.3.5");
+    cpSync(path.join(f.root, "dx-dy-0.3.5-linux-amd64"), newRelease, {
       recursive: true,
     });
     rmSync(path.join(f.install, "current"));
-    symlinkSync("releases/0.3.3", path.join(f.install, "current"));
+    symlinkSync("releases/0.3.5", path.join(f.install, "current"));
     const config = path.join(f.config, "install.conf");
     writeFileSync(
       config,
       readFileSync(config, "utf8").replace(
         "DXDY_VERSION=0.1.9",
-        "DXDY_VERSION=0.3.3",
+        "DXDY_VERSION=0.3.5",
       ),
     );
     const backup = path.join(f.backups, "interrupted.db");
@@ -1291,7 +1303,7 @@ describe("native manager", () => {
           .update(readFileSync(backup))
           .digest("hex"),
         old_version: "0.1.9",
-        new_version: "0.3.3",
+        new_version: "0.3.5",
         old_previous: "",
       }),
     );

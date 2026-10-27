@@ -30,10 +30,10 @@ export async function cascadingDeleteFlow(page: Page, context: BrowserContext) {
     }[];
   const baseline = (await readProfiles()).map((p) => p.id);
   const list = async () => {
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
   };
   const library = async () => {
-    await page.getByRole("button", { name: "节点库", exact: true }).click();
+    await page.getByRole("link", { name: "节点库", exact: true }).click();
   };
   await library();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();

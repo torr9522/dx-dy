@@ -46,15 +46,17 @@ export async function groupDeleteAcceptance(
   const uri = (letter: string) =>
     `trojan://synthetic-group-delete-${letter}@group-delete-${letter.toLowerCase()}.example.test:443?sni=group-delete-${letter.toLowerCase()}.example.test#${prefix}${letter}`;
   const library = async (name?: string) => {
-    await page.getByRole("button", { name: "节点库", exact: true }).click();
+    await page.getByRole("link", { name: "节点库", exact: true }).click();
     if (name)
       await page
         .getByRole("button", { name: new RegExp(`^${name}\\s`) })
         .click();
   };
   const refresh = async () => {
+    const path = new URL(page.url()).pathname;
     await page.reload();
-    await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${path.replaceAll("/", "\\/")}$`));
+    await expect(page.locator(".shell")).toBeVisible();
   };
   const createGroup = async (name: string) => {
     await library();
@@ -80,7 +82,7 @@ export async function groupDeleteAcceptance(
       .locator(".subscription-row")
       .filter({ has: page.getByText(name, { exact: true }) });
   const createSub = async (name: string, selections: [string, string[]][]) => {
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await page.getByRole("button", { name: "创建订阅", exact: true }).click();
     const d = page.getByRole("dialog", { name: "创建订阅" });
     await d.getByLabel("订阅名称").fill(name);
@@ -271,7 +273,7 @@ export async function groupDeleteAcceptance(
         expected.length,
       );
     }
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await subRow(sub.name)
       .getByRole("button", { name: "管理订阅", exact: true })
       .click();
@@ -286,7 +288,7 @@ export async function groupDeleteAcceptance(
     ).node_count,
   ).toBe(1);
   for (const sub of [mixed, empty, another]) {
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await subRow(sub.name)
       .getByRole("button", { name: "删除", exact: true })
       .click();

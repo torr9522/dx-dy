@@ -51,12 +51,12 @@ test("existing subscription selection cannot open before persisted entries load"
 }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   const group = "D029-DESTRUCT-Load-Race";
   const names = ["D029-DESTRUCT-Load-A", "D029-DESTRUCT-Load-B"];
   await createGroup(page, group);
   await importNodes(page, names);
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page.getByRole("button", { name: "创建订阅", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "创建订阅" });
   await dialog.getByLabel("订阅名称").fill(group);
@@ -130,7 +130,7 @@ test("existing subscription selection cannot open before persisted entries load"
   expect(
     entries.map((entry: { node: { name: string } }) => entry.node.name),
   ).toEqual(names);
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page.unroute(`**/api/subscriptions/${subscription.id}/entries`);
   let failOnce = true;
   await page.route(
@@ -176,7 +176,7 @@ for (const width of [1440, 768, 390]) {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-    await page.getByRole("button", { name: "节点库", exact: true }).click();
+    await page.getByRole("link", { name: "节点库", exact: true }).click();
     const prefix = `G029-${width}`;
     const groups = [1, 2, 3].map((n) => `${prefix}-${n}`);
     const names = ["A", "B", "C"].map((n) => `${prefix}-${n}`);
@@ -215,7 +215,7 @@ for (const width of [1440, 768, 390]) {
     );
     expect(selected).toHaveLength(3);
     expect(new Set(selected.map((n: { id: number }) => n.id)).size).toBe(3);
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await page.getByRole("button", { name: "创建订阅", exact: true }).click();
     const create = page.getByRole("dialog", { name: "创建订阅" });
     await create.getByLabel("订阅名称").fill(prefix);
@@ -259,7 +259,7 @@ for (const width of [1440, 768, 390]) {
       .click();
     await page.getByRole("button", { name: "返回订阅", exact: true }).click();
     await expect(page.locator(".subscription-node-row")).toHaveCount(3);
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await row.getByRole("button", { name: "多客户端", exact: true }).click();
     const clients = page.getByRole("dialog", { name: "多客户端订阅" });
     await expect(
@@ -297,7 +297,7 @@ for (const width of [1440, 768, 390]) {
     });
     await clients.getByRole("button", { name: "关闭", exact: true }).click();
     if (width === 1440) {
-      await page.getByRole("button", { name: "节点库", exact: true }).click();
+      await page.getByRole("link", { name: "节点库", exact: true }).click();
       await page
         .getByRole("button", { name: new RegExp(`^${groups[0]}\\s`) })
         .click();

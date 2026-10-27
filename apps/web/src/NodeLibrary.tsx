@@ -227,6 +227,10 @@ export function NodeLibrary({
           "DELETE",
           { confirm: confirmed },
         );
+        if (activeGroupId === group.id)
+          setActiveGroupId(
+            groups.find((candidate) => candidate.id !== group.id)?.id ?? null,
+          );
         await refresh();
         return `已删除分组及 ${result.deleted} 个节点，并从 ${result.subscriptionCount} 个订阅中移除 ${result.relationshipCount} 条引用`;
       };
@@ -571,10 +575,10 @@ export function NodeLibrary({
                 groupEditor === "new" ? "POST" : "PATCH",
                 { name: groupName },
               );
+              setGroupEditor(null);
               await refresh();
               setActiveGroupId(saved.id);
               resetFilters();
-              setGroupEditor(null);
             } catch (error) {
               notify((error as Error).message);
             } finally {

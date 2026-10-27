@@ -1,5 +1,8 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import request from "supertest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createApp as createFreshApp, type Options } from "../apps/api/src/app";
 import {
   digest,
@@ -59,8 +62,47 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.3.3",
+      version: "0.3.5",
     });
+  });
+  it("serves admin SPA deep links after API/public routes without swallowing them", async () => {
+    const webDir = mkdtempSync(path.join(tmpdir(), "dx-dy-router-"));
+    writeFileSync(
+      path.join(webDir, "index.html"),
+      "<!doctype html><title>D035 SPA</title>",
+    );
+    const routed = await createFreshApp({
+      ...options,
+      database: ":memory:",
+      webDir,
+    });
+    try {
+      for (const route of [
+        "/",
+        "/nodes",
+        "/nodes/groups/42",
+        "/subscriptions",
+        "/subscriptions/42",
+        "/settings",
+        "/abc/def/not-real",
+      ]) {
+        const response = await request(routed.app).get(route);
+        expect(response.status).toBe(200);
+        expect(response.text).toContain("D035 SPA");
+      }
+      const api = await request(routed.app).get("/api/not-real");
+      expect(api.status).toBe(401);
+      expect(api.type).toContain("json");
+      for (const route of [
+        "/s/not-real",
+        "/smart/not-real",
+        "/client/clash-meta/not-real",
+      ])
+        expect((await request(routed.app).get(route)).status).toBe(404);
+    } finally {
+      routed.store.close();
+      rmSync(webDir, { recursive: true, force: true });
+    }
   });
   it("collections are many-to-many management filters and never subscription authority", async () => {
     const imported = (

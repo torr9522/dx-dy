@@ -71,8 +71,9 @@ Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
 The current release baseline is `v0.3.2`. Never move an existing public tag.
-The current source version is `0.3.3`; migrations 001–004 are immutable and no
-new migration is required for the login/bootstrap state fix.
+The current source version is `0.3.5`; version 0.3.4 was intentionally skipped
+by explicit versioning decision. Migrations 001–004 are immutable and no new
+migration is required for client-side navigation.
 
 Version 0.3.0 removes user-visible Collection management while retaining the
 historical tables and deprecated APIs for compatibility. Migration 004 owns
@@ -86,6 +87,8 @@ native updates while preserving unrelated host Caddy configuration.
 Version 0.3.3 gates the protected application on authenticated, atomically
 loaded business data and distinguishes loading, empty, authentication and
 request failure states.
+Version 0.3.5 adds stable-ID browser routes and deep links while preserving the
+0.3.3 authentication/data gate and the Admin/Subscription host boundary.
 
 ## Git Safety And Privacy
 

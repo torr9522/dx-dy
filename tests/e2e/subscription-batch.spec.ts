@@ -35,7 +35,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await login(page);
 
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByRole("button", { name: "添加 / 批量添加节点" }).click();
   const globalUris = Array.from({ length: 6 }, (_, index) => {
     const sequence = index + 1;
@@ -49,7 +49,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
   await page.getByRole("button", { name: "确认导入", exact: true }).click();
   await expect(page.getByText(`${prefix} G1`, { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page.getByRole("button", { name: "创建订阅", exact: true }).click();
   await page.getByLabel("订阅名称").fill(prefix);
   await page
@@ -131,7 +131,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
   await page.getByRole("button", { name: "保存节点与顺序" }).click();
   await expect(page.locator(".toast")).toContainText("节点与顺序已保存");
   await page.reload();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   await page
     .locator(".subscription-row")
     .filter({ hasText: prefix })
@@ -147,11 +147,11 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
     await subscriptionLines(context.request, subscriptionUrl),
   ).toHaveLength(5);
 
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByLabel("搜索全部节点", { exact: true }).fill(`${prefix} G`);
   await expect(page.locator("tbody tr")).toHaveCount(6);
 
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   const subscriptionRow = page
     .locator(".subscription-row")
     .filter({ hasText: prefix });
@@ -162,7 +162,7 @@ test("saved-node batch removal is a cross-search mixed draft until save", async 
     .getByRole("dialog", { name: "删除订阅" })
     .getByRole("button", { name: "确认" })
     .click();
-  await page.getByRole("button", { name: "节点库", exact: true }).click();
+  await page.getByRole("link", { name: "节点库", exact: true }).click();
   await page.getByLabel("搜索全部节点", { exact: true }).fill(`${prefix} G`);
   await page.getByRole("checkbox", { name: "全选当前节点" }).check();
   await page.getByRole("button", { name: /删除已选（6）/ }).click();

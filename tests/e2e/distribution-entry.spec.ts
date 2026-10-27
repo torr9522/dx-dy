@@ -15,7 +15,7 @@ test("subscription distribution reuses the list multi-client dialog at all width
     await page.getByRole("button", { name: "安全登录" }).click();
   }
   await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-  await page.getByRole("button", { name: "订阅", exact: true }).click();
+  await page.getByRole("link", { name: "订阅", exact: true }).click();
   if (!existing) {
     await page.getByRole("button", { name: "创建订阅", exact: true }).click();
     const create = page.getByRole("dialog", { name: "创建订阅" });

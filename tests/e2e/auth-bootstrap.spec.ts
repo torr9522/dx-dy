@@ -372,12 +372,13 @@ test("AUTH-BOOT navigation and refresh remains ready for 20 cycles", async ({
   await expectReady(page);
 
   for (let cycle = 0; cycle < 20; cycle += 1) {
-    await page.getByRole("button", { name: "节点库", exact: true }).click();
+    await page.getByRole("link", { name: "节点库", exact: true }).click();
     await expect(page.locator(".group-nav-row")).toHaveCount(2);
-    await page.getByRole("button", { name: "订阅", exact: true }).click();
+    await page.getByRole("link", { name: "订阅", exact: true }).click();
     await expect(page.locator(".subscription-row")).toHaveCount(3);
     await page.reload();
-    await expectReady(page);
+    await expect(page).toHaveURL(/\/subscriptions$/);
+    await expect(page.locator(".subscription-row")).toHaveCount(3);
   }
   await removeBootstrapFixture(context);
 });
