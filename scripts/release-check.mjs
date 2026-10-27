@@ -34,6 +34,7 @@ const releaseHead = git("rev-parse", "HEAD");
 const metadata = JSON.parse(readFileSync("package.json", "utf8"));
 const v = version();
 validateRepositoryRef({ version: v, allowLocalDetached: detached });
+run("node", ["scripts/version-identity-check.mjs"]);
 const forbiddenTracked = git("ls-files", "-z")
   .split("\0")
   .filter(Boolean)

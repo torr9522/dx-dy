@@ -108,6 +108,7 @@
   "scripts/update-source-manifest.mjs",
   "scripts/vendor.mjs",
   "scripts/verify-source.mjs",
+  "scripts/version-identity-check.mjs",
   "tests/adapter.test.ts",
   "tests/admin-cli.test.ts",
   "tests/api.test.ts",

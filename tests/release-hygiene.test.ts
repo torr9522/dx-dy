@@ -127,6 +127,19 @@ describe("installer query options", () => {
   });
 });
 
+describe("release version identity", () => {
+  it("VERSION-ID-001/002/003 keeps source, manager, and installer aligned", () => {
+    const output = execFileSync(
+      "node",
+      ["scripts/version-identity-check.mjs"],
+      { encoding: "utf8" },
+    );
+    expect(output).toContain("VERSION-ID-001 source/package: 0.3.5");
+    expect(output).toContain("VERSION-ID-002 manager: 0.3.5");
+    expect(output).toContain("VERSION-ID-003 installer: 0.3.5");
+  });
+});
+
 describe("fresh host bootstrap command", () => {
   function runBootstrap(curlInitiallyPresent: boolean) {
     const root = temp();
