@@ -388,7 +388,7 @@ function App() {
             单管理员 · 私有管理
           </span>
           <a href="/source.tar.gz">源码 · AGPL-3.0</a>
-          <small>dx-dy v0.3.6</small>
+          <small>dx-dy v0.3.7</small>
         </div>
       </aside>
       <main>

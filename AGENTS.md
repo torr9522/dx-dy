@@ -70,8 +70,8 @@ The project uses decimal increments with carry: `0.1.8`, `0.1.9`, `0.2.0`,
 Versions from 0.1.8 onward use one annotated, unsigned `vX.Y.Z` tag after the
 full gate; no new RC tags. Historical RC tags remain part of history.
 
-The current release baseline is `v0.3.5`. Never move an existing public tag.
-The current source version is `0.3.6`; version 0.3.4 was intentionally skipped
+The current release baseline is `v0.3.6`. Never move an existing public tag.
+The current source version is `0.3.7`; version 0.3.4 was intentionally skipped
 by explicit versioning decision. Migrations 001–004 are immutable and no new
 migration is required for the visual theme update.
 
@@ -91,6 +91,9 @@ Version 0.3.5 adds stable-ID browser routes and deep links while preserving the
 0.3.3 authentication/data gate and the Admin/Subscription host boundary.
 Version 0.3.6 changes only shared visual theme colors, borders and shadows while
 preserving layout, typography, routing, state and backend behavior.
+Version 0.3.7 fixes native Manager discovery of the running Caddy main
+configuration when the dx-dy fragment is stored in a separate custom import
+directory. It keeps schema 004 and all v0.3.6 UI and dependency fixes.
 
 ## Git Safety And Privacy
 

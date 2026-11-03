@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.7] - 2026-11-03
+
+- Discover and persist the active Caddy main configuration from the running
+  systemd service's `MainPID` and NUL-delimited process argv instead of deriving
+  it from the dx-dy fragment directory.
+- Keep the Caddy main configuration, adapter, executable and managed dx-dy
+  fragment as distinct values; fail closed before runtime, database or Caddy
+  mutation when discovery is ambiguous or unsupported.
+- Validate the complete configuration with the candidate fragment in an
+  isolated mount namespace, skip reload for byte-identical fragments and use
+  Caddy's graceful reload command with rollback on reload or health failure.
+- Preserve the v0.3.6 light blue theme, qs 6.16.1, minimatch 11.0.1, schema 004,
+  subscription output and all business data formats.
+
 ## [0.3.6] - 2026-11-03
 
 - Replace the green brand palette with a light blue visual theme for the

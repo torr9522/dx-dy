@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_VERSION="0.3.6"
+readonly DXDY_VERSION="0.3.7"
 readonly DXDY_DEFAULT_REPOSITORY="torr9522/dx-dy"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -225,6 +225,9 @@ bootstrap_manager() {
   if [[ "$TEST_MODE" == 1 && -n "${DXDY_TEST_LOCK_HOLD_SECONDS:-}" ]]; then sleep "$DXDY_TEST_LOCK_HOLD_SECONDS"; fi
   STAGING="$(mktemp -d)"
   download_verified_manager
+  DXDY_CONFIG_DIR="$CONFIG_DIR" DXDY_MANAGER_PATH="$MANAGER_PATH" \
+    "$STAGING/dx-dy-manager" caddy-discover >/dev/null || \
+    die "Caddy main configuration discovery failed; the installed manager was not changed."
   actual="$(sha256sum "$MANAGER_PATH" | cut -d' ' -f1)"
   if [[ "$actual" == "$VERIFIED_MANAGER_SHA256" ]]; then
     info "Manager bootstrap already complete for dx-dy $DXDY_VERSION."
@@ -340,6 +343,39 @@ EOF
   render_caddy
 }
 
+discover_caddy_configuration() {
+  local configured_main configured_import configured_adapter configured_binary
+  local -a caddy_values=()
+  if [[ "$TEST_MODE" == 1 ]]; then
+    cat >>"$STAGING/install.conf" <<EOF
+DXDY_CADDYFILE=/etc/caddy/Caddyfile
+DXDY_CADDY_ADAPTER=caddyfile
+DXDY_CADDY_BINARY=/usr/bin/caddy
+EOF
+  else
+    DXDY_CONFIG_DIR="$STAGING" DXDY_MANAGER_PATH="$MANAGER_PATH" \
+      "$STAGING/dx-dy-manager" caddy-discover >/dev/null || \
+      die "Caddy main configuration discovery failed; no runtime, database, or Caddy change was made."
+  fi
+  mapfile -d '' caddy_values < <(bash -c '
+    set -eu
+    source "$1"
+    printf "%s\0%s\0%s\0%s\0" "$DXDY_CADDYFILE" "$DXDY_CADDY_IMPORT" "$DXDY_CADDY_ADAPTER" "$DXDY_CADDY_BINARY"
+  ' dx-dy-installer "$STAGING/install.conf")
+  [[ ${#caddy_values[@]} -eq 4 ]] || die "Discovered Caddy configuration could not be loaded safely."
+  configured_main="${caddy_values[0]}"
+  configured_import="${caddy_values[1]}"
+  configured_adapter="${caddy_values[2]}"
+  configured_binary="${caddy_values[3]}"
+  CADDY_MAIN="$ROOT_PREFIX$configured_main"
+  CADDY_IMPORT_CONFIG="$configured_import"
+  CADDY_ADAPTER="$configured_adapter"
+  if [[ "$TEST_MODE" == 1 ]]; then CADDY_BINARY=caddy; else CADDY_BINARY="$configured_binary"; fi
+  [[ "$configured_main" == /* && "$configured_import" == /* && "$configured_main" != "$configured_import" ]] || \
+    die "Discovered Caddy configuration is invalid."
+  [[ "$CADDY_ADAPTER" == caddyfile ]] || die "The active Caddy adapter is not supported safely."
+}
+
 legacy_backup_and_stop() {
   [[ "$LEGACY_MODE" == 1 ]] || return 0
   local stamp db_backup full_backup password_file
@@ -359,7 +395,7 @@ legacy_backup_and_stop() {
 
 install_caddy_fragment() {
   install -d -m 0755 "$CADDY_DIR"
-  local main="$CADDY_DIR/Caddyfile" import_line="import /etc/caddy/dx-dy.caddy" had_main=0 had_fragment=0
+  local main="$CADDY_MAIN" import_line="import $CADDY_IMPORT_CONFIG" had_main=0 had_fragment=0
   if [[ -e "$main" ]]; then cp -a "$main" "$STAGING/Caddyfile.before"; had_main=1; fi
   if [[ -e "$CADDY_IMPORT" ]]; then cp -a "$CADDY_IMPORT" "$STAGING/dx-dy.caddy.before"; had_fragment=1; fi
   if [[ -s "$main" ]] && ! grep -Fqx "$import_line" "$main"; then
@@ -368,7 +404,7 @@ install_caddy_fragment() {
     printf '%s\n' "$import_line" >>"$main"
   elif [[ ! -s "$main" ]]; then printf '%s\n' "$import_line" >"$main"; fi
   install -m 0644 "$STAGING/dx-dy.caddy" "$CADDY_IMPORT"
-  if [[ "$TEST_MODE" != 1 ]] && ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+  if [[ "$TEST_MODE" != 1 ]] && ! "$CADDY_BINARY" validate --config "$CADDY_MAIN" --adapter "$CADDY_ADAPTER" >/dev/null; then
     if [[ $had_main -eq 1 ]]; then cp -a "$STAGING/Caddyfile.before" "$main"; else rm -f -- "$main"; fi
     if [[ $had_fragment -eq 1 ]]; then cp -a "$STAGING/dx-dy.caddy.before" "$CADDY_IMPORT"; else rm -f -- "$CADDY_IMPORT"; fi
     die "Caddy validation failed; previous configuration restored."
@@ -415,7 +451,7 @@ initialize_and_start() {
     [[ -f "$DATA_DIR/dx-dy.db" ]] || die "Retained database was not found."
   else printf '%s\n%s' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | run_app_cli admin-cli.mjs init; fi
   systemctl daemon-reload
-  if ! systemctl enable --now dx-dy.service || ! systemctl enable --now caddy.service || ! systemctl reload caddy.service; then
+  if ! systemctl enable --now dx-dy.service || ! systemctl enable --now caddy.service || ! "$CADDY_BINARY" reload --config "$CADDY_MAIN" --adapter "$CADDY_ADAPTER"; then
     systemctl stop dx-dy.service caddy.service || true
     if [[ "$LEGACY_MODE" == 1 && "$LEGACY_RUNNING" == 1 ]]; then legacy_compose up -d app caddy || true; fi
     die "Native services failed to start; legacy services were restored when available."
@@ -450,7 +486,7 @@ main() {
     if [[ -n "${DXDY_ADMIN_PASSWORD_FILE:-}" ]]; then [[ -f "$DXDY_ADMIN_PASSWORD_FILE" ]] || die "Password file does not exist."; ADMIN_PASSWORD="$(<"$DXDY_ADMIN_PASSWORD_FILE")"; else prompt_password; fi
     [[ ${#ADMIN_PASSWORD} -ge 12 ]] || die "Password must be at least 12 characters."
   fi
-  STAGING="$(mktemp -d)"; download_release; validate_release_runtime; legacy_backup_and_stop; write_config; commit_installation; initialize_and_start
+  STAGING="$(mktemp -d)"; download_release; validate_release_runtime; write_config; discover_caddy_configuration; legacy_backup_and_stop; commit_installation; initialize_and_start
   printf '\ndx-dy %s native installation completed.\nAdmin: https://%s\nSubscription: https://%s\nManagement: dx-dy\n' "$DXDY_VERSION" "$ADMIN_DOMAIN" "$SUBSCRIPTION_DOMAIN"
   if [[ "$GENERATED_PASSWORD" == 1 ]]; then printf 'Password (shown once): %s\n' "$ADMIN_PASSWORD"; fi
   unset ADMIN_PASSWORD LEGACY_MASTER_KEY APP_MASTER_KEY || true

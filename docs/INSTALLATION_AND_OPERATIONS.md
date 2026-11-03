@@ -10,6 +10,14 @@ Before committing installation state, the installer starts the staged bundled No
 
 The root manager is a separate `dx-dy` Release asset. The single-file installer downloads it into private staging, verifies `manager_asset` and `manager_sha256` from `release-manifest.json`, checks shell syntax, and only then atomically renames it into `/usr/local/bin/dx-dy`. It never assumes that `install.sh` is beside a Git checkout or an `ops/` directory.
 
+Before a fresh install or Manager bootstrap changes an installed executable,
+the verified Manager discovers the running Caddy process through systemd's
+`MainPID` and parses `/proc/<pid>/cmdline` as NUL-delimited argv. It persists
+`DXDY_CADDYFILE` as the main configuration, separately from
+`DXDY_CADDY_IMPORT`, plus the active adapter and executable. Discovery rejects
+ambiguous flags, `--resume`, missing/unreadable files, unsupported adapters and
+any result where the main configuration resolves to the managed fragment.
+
 Before a schema-changing update, an existing native installation must bootstrap
 the manager from the target Release while the old application and database are
 still active:

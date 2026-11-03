@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.3.6"
+readonly DXDY_MANAGER_VERSION="0.3.7"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.6 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.7 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
@@ -32,10 +32,119 @@ load_instance() {
   SERVICE="${DXDY_SERVICE:-dx-dy.service}"
   SYSTEMD_UNIT_PATH="${DXDY_SYSTEMD_UNIT_PATH:-/etc/systemd/system/dx-dy.service}"
   CADDY_IMPORT="${DXDY_CADDY_IMPORT:-/etc/caddy/dx-dy.caddy}"
-  CADDY_MAIN="${DXDY_CADDYFILE:-${CADDY_IMPORT%/*}/Caddyfile}"
+  CADDY_MAIN="${DXDY_CADDYFILE:-}"
+  CADDY_ADAPTER="${DXDY_CADDY_ADAPTER:-}"
+  CADDY_BINARY="${DXDY_CADDY_BINARY:-}"
   DATABASE="$DXDY_DATA_DIR/dx-dy.db"
   UPDATE_STATE_FILE="$CONFIG_DIR/update-state.json"
   [[ -L "$CURRENT_LINK" && -x "$NODE" && -f "$ENV_FILE" ]] || die "Native installation layout is incomplete."
+}
+
+valid_caddy_configuration() {
+  local main="$1" adapter="$2" binary="$3" resolved_main resolved_fragment
+  [[ "$main" == /* && -f "$main" && -r "$main" ]] || return 1
+  [[ "$CADDY_IMPORT" == /* ]] || return 1
+  resolved_main="$(readlink -f -- "$main")" || return 1
+  resolved_fragment="$(readlink -m -- "$CADDY_IMPORT")" || return 1
+  [[ -n "$resolved_main" && -n "$resolved_fragment" && "$resolved_main" != "$resolved_fragment" ]] || return 1
+  [[ "$adapter" == caddyfile ]] || return 1
+  [[ "$binary" == /* && -x "$binary" ]] || return 1
+}
+
+discover_caddy_configuration() {
+  local pid proc_root cmdline cwd binary config="" adapter="" arg next
+  local config_count=0 adapter_count=0 resume=0
+  local -a argv=()
+
+  # Record the effective unit and drop-ins for diagnostics. Process argv is the
+  # structured source of truth; systemctl's rendered ExecStart is not reparsed.
+  systemctl show caddy.service --property=ExecStart --property=ExecStartPre \
+    --property=Environment --property=EnvironmentFiles --property=DropInPaths \
+    --no-pager >/dev/null || true
+  systemctl cat caddy.service >/dev/null || true
+  pid="${DXDY_CADDY_MAINPID:-$(systemctl show caddy.service --property=MainPID --value 2>/dev/null || true)}"
+  [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" -gt 1 ]] || return 1
+  proc_root="${DXDY_PROC_ROOT:-/proc}"
+  cmdline="$proc_root/$pid/cmdline"
+  [[ -r "$cmdline" ]] || return 1
+  while IFS= read -r -d '' arg; do argv+=("$arg"); done <"$cmdline"
+  [[ ${#argv[@]} -ge 2 ]] || return 1
+  binary="$(readlink -f -- "$proc_root/$pid/exe" 2>/dev/null || true)"
+  [[ "$binary" == /* && -x "$binary" ]] || {
+    binary="${argv[0]}"
+    [[ "$binary" == /* && -x "$binary" ]] || return 1
+  }
+  [[ "${argv[1]}" == run ]] || return 1
+
+  for ((next=2; next<${#argv[@]}; next++)); do
+    arg="${argv[next]}"
+    case "$arg" in
+      --config|-c)
+        ((next + 1 < ${#argv[@]})) || return 1
+        config="${argv[++next]}"; ((config_count += 1))
+        ;;
+      --config=*|-c=*) config="${arg#*=}"; ((config_count += 1)) ;;
+      --adapter|-a)
+        ((next + 1 < ${#argv[@]})) || return 1
+        adapter="${argv[++next]}"; ((adapter_count += 1))
+        ;;
+      --adapter=*|-a=*) adapter="${arg#*=}"; ((adapter_count += 1)) ;;
+      --resume|-r) resume=1 ;;
+    esac
+  done
+  [[ $resume -eq 0 && $config_count -le 1 && $adapter_count -le 1 ]] || return 1
+  cwd="$(readlink -f -- "$proc_root/$pid/cwd" 2>/dev/null || true)"
+  [[ "$cwd" == /* ]] || return 1
+  if [[ $config_count -eq 0 ]]; then
+    config="$cwd/Caddyfile"
+    adapter=caddyfile
+  elif [[ "$config" != /* ]]; then
+    config="$cwd/$config"
+  fi
+  # Caddy 2.6.x only infers the Caddyfile adapter for an explicit config whose
+  # basename starts with Caddyfile and is not JSON. Other omitted-adapter paths
+  # use native JSON semantics, which cannot safely own our imported fragment.
+  if [[ -z "$adapter" && "${config##*/}" == Caddyfile* && "$config" != *.json ]]; then adapter=caddyfile; fi
+  valid_caddy_configuration "$config" "$adapter" "$binary" || return 1
+  DISCOVERED_CADDY_MAIN="$config"
+  DISCOVERED_CADDY_ADAPTER="$adapter"
+  DISCOVERED_CADDY_BINARY="$binary"
+}
+
+ensure_caddy_configuration() {
+  if valid_caddy_configuration "$CADDY_MAIN" "$CADDY_ADAPTER" "$CADDY_BINARY"; then return 0; fi
+  discover_caddy_configuration || die "Cannot uniquely determine the active Caddy main configuration; no runtime, database, or Caddy change was made."
+  CADDY_MAIN="$DISCOVERED_CADDY_MAIN"
+  CADDY_ADAPTER="$DISCOVERED_CADDY_ADAPTER"
+  CADDY_BINARY="$DISCOVERED_CADDY_BINARY"
+  set_config_shell_value "$CONFIG_FILE" DXDY_CADDYFILE "$CADDY_MAIN"
+  set_config_shell_value "$CONFIG_FILE" DXDY_CADDY_ADAPTER "$CADDY_ADAPTER"
+  set_config_shell_value "$CONFIG_FILE" DXDY_CADDY_BINARY "$CADDY_BINARY"
+}
+
+cmd_caddy_discover() {
+  require_root
+  [[ -f "$CONFIG_FILE" ]] || die "dx-dy configuration not found."
+  # This command intentionally does not require an installed runtime. The
+  # installer uses it before either a fresh install or manager bootstrap makes
+  # any runtime, database, or Caddy change.
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  CADDY_IMPORT="${DXDY_CADDY_IMPORT:-/etc/caddy/dx-dy.caddy}"
+  CADDY_MAIN="${DXDY_CADDYFILE:-}"
+  CADDY_ADAPTER="${DXDY_CADDY_ADAPTER:-}"
+  CADDY_BINARY="${DXDY_CADDY_BINARY:-}"
+  ensure_caddy_configuration
+  printf 'Caddy main configuration: %s\nCaddy adapter: %s\nCaddy binary: %s\nCaddy fragment: %s\n' \
+    "$CADDY_MAIN" "$CADDY_ADAPTER" "$CADDY_BINARY" "$CADDY_IMPORT"
+}
+
+caddy_validate() {
+  "$CADDY_BINARY" validate --config "$1" --adapter "$2"
+}
+
+caddy_reload() {
+  "$CADDY_BINARY" reload --config "$CADDY_MAIN" --adapter "$CADDY_ADAPTER"
 }
 
 run_cli() {
@@ -166,18 +275,34 @@ render_caddy_from_release() {
   [[ -f "$template" ]] || return 1
   sed -e "s/__ADMIN_DOMAIN__/$admin/g" -e "s/__SUBSCRIPTION_DOMAIN__/$subscription/g" -e "s/__INTERNAL_PORT__/$DXDY_INTERNAL_PORT/g" "$template" >"$output"
 }
+caddy_with_fragment_overlay() {
+  local fragment="$1" command="$2"
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then
+    DXDY_TEST_CADDY_CANDIDATE="$fragment" "$CADDY_BINARY" "$command" \
+      --config "$CADDY_MAIN" --adapter "$CADDY_ADAPTER"
+    return
+  fi
+  have unshare && have mount || return 1
+  # shellcheck disable=SC2016
+  unshare --mount --propagation private -- bash -c '
+    set -eu
+    mount --bind -- "$1" "$2"
+    shift 2
+    exec "$@"
+  ' dx-dy-caddy-validation "$fragment" "$CADDY_IMPORT" \
+    "$CADDY_BINARY" "$command" --config "$CADDY_MAIN" --adapter "$CADDY_ADAPTER"
+}
 validate_caddy_candidate() {
-  local candidate="$1" staging import_line count combined
-  caddy validate --config "$candidate" --adapter caddyfile >/dev/null || return 1
-  [[ -f "$CADDY_MAIN" ]] || return 1
-  import_line="import $CADDY_IMPORT"
-  count="$(grep -Fxc "$import_line" "$CADDY_MAIN" || true)"
-  [[ "$count" == 1 ]] || return 1
-  staging="$(mktemp -d)" || return 1
-  TEMP_DIRS+=("$staging")
-  combined="$staging/Caddyfile"
-  awk -v line="$import_line" -v candidate="$candidate" '$0 == line { print "import " candidate; next } { print }' "$CADDY_MAIN" >"$combined"
-  caddy validate --config "$combined" --adapter caddyfile >/dev/null
+  local candidate="$1" probe probe_host="dxdy-import-probe.invalid" adapted
+  caddy_validate "$candidate" caddyfile >/dev/null || return 1
+  caddy_validate "$CADDY_MAIN" "$CADDY_ADAPTER" >/dev/null || return 1
+  probe="$(mktemp)" || return 1
+  TEMP_DIRS+=("$probe")
+  cp -- "$candidate" "$probe" || return 1
+  printf '\nhttp://%s {\n\trespond 204\n}\n' "$probe_host" >>"$probe"
+  adapted="$(caddy_with_fragment_overlay "$probe" adapt 2>/dev/null)" || return 1
+  [[ "$adapted" == *"$probe_host"* ]] || return 1
+  caddy_with_fragment_overlay "$candidate" validate >/dev/null
 }
 caddy_health() { curl -fsS --max-time 10 "https://$1/health"; }
 wait_caddy_health() {
@@ -206,8 +331,8 @@ restore_caddy_fragment() {
   staged="${CADDY_IMPORT}.rollback.$$"
   install -m 0644 "$backup" "$staged" || return 1
   mv -Tf "$staged" "$CADDY_IMPORT" || return 1
-  caddy validate --config "$CADDY_MAIN" --adapter caddyfile >/dev/null || return 1
-  systemctl reload caddy.service || return 1
+  caddy_validate "$CADDY_MAIN" "$CADDY_ADAPTER" >/dev/null || return 1
+  caddy_reload || return 1
   wait_caddy_health
 }
 reconcile_caddy() {
@@ -217,7 +342,12 @@ reconcile_caddy() {
   candidate="$staging/dx-dy.caddy"
   render_caddy_from_release "$release" "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN" "$candidate" || return 1
   validate_caddy_candidate "$candidate" || return 1
-  if cmp -s "$candidate" "$CADDY_IMPORT"; then changed=0; else
+  if cmp -s "$candidate" "$CADDY_IMPORT"; then
+    changed=0
+    wait_caddy_health || return 1
+    printf 'Caddy configuration already current and healthy.\n'
+    return 0
+  else
     staged="${CADDY_IMPORT}.next.$$"
     install -m 0644 "$candidate" "$staged" || return 1
     if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "${DXDY_TEST_INTERRUPT_BEFORE_CADDY_RENAME:-0}" == 1 ]]; then
@@ -226,13 +356,13 @@ reconcile_caddy() {
     fi
     mv -Tf "$staged" "$CADDY_IMPORT" || return 1
   fi
-  if ! systemctl reload caddy.service || ! wait_caddy_health; then
+  if ! caddy_reload || ! wait_caddy_health; then
     if [[ $changed -eq 1 ]]; then
       restore_caddy_fragment "$backup" "$backup_fingerprint" || die "ROLLBACK: FAIL; previous Caddy configuration could not be restored."
     fi
     return 1
   fi
-  if [[ $changed -eq 1 ]]; then printf 'Caddy configuration reconciled and healthy.\n'; else printf 'Caddy configuration already current and healthy.\n'; fi
+  printf 'Caddy configuration reconciled and healthy.\n'
 }
 set_config_value() {
   local file="$1" key="$2" value="$3" temp
@@ -240,9 +370,25 @@ set_config_value() {
   awk -v key="$key" -v value="$value" 'BEGIN{found=0}$0~"^"key"="{print key"="value;found=1;next}{print}END{if(!found)print key"="value}' "$file" >"$temp"
   chmod --reference="$file" "$temp"; mv -f "$temp" "$file"
 }
+set_config_shell_value() {
+  local file="$1" key="$2" value="$3" temp encoded line found=0
+  printf -v encoded '%q' "$value"
+  temp="$(mktemp "${file}.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$key="* ]]; then
+      printf '%s=%s\n' "$key" "$encoded" >>"$temp"
+      found=1
+    else
+      printf '%s\n' "$line" >>"$temp"
+    fi
+  done <"$file"
+  [[ $found -eq 1 ]] || printf '%s=%s\n' "$key" "$encoded" >>"$temp"
+  chmod --reference="$file" "$temp"; mv -f "$temp" "$file"
+}
 
 cmd_domain() {
   require_root; load_instance
+  ensure_caddy_configuration
   local action="${1:-menu}" admin="$DXDY_ADMIN_DOMAIN" subscription="$DXDY_SUBSCRIPTION_DOMAIN" temp old
   case "$action" in
     set-admin) admin="${2:-}" ;; set-subscription) subscription="${2:-}" ;; single) subscription="$admin" ;; dual) subscription="${2:-}" ;; check) cmd_doctor; return ;;
@@ -255,14 +401,14 @@ cmd_domain() {
   esac
   if ! valid_hostname "$admin" || ! valid_hostname "$subscription"; then die "Invalid hostname."; fi
   temp="$(mktemp -d)"; TEMP_DIRS+=("$temp"); render_caddy "$admin" "$subscription" "$temp/candidate"; old="$temp/old"; cp "$CADDY_IMPORT" "$old"
-  caddy validate --config "$temp/candidate" --adapter caddyfile >/dev/null
+  validate_caddy_candidate "$temp/candidate" >/dev/null
   install -m 0644 "$temp/candidate" "$CADDY_IMPORT"
   set_config_value "$CONFIG_FILE" DXDY_ADMIN_DOMAIN "$admin"; set_config_value "$CONFIG_FILE" DXDY_SUBSCRIPTION_DOMAIN "$subscription"
   set_config_value "$ENV_FILE" ADMIN_BASE_URL "https://$admin"; set_config_value "$ENV_FILE" SUBSCRIPTION_BASE_URL "https://$subscription"
-  if ! printf '%s' "https://$subscription" | run_cli domain-cli.mjs set-subscription || ! systemctl restart "$SERVICE" || ! systemctl reload caddy.service || ! wait_health; then
+  if ! printf '%s' "https://$subscription" | run_cli domain-cli.mjs set-subscription || ! systemctl restart "$SERVICE" || ! caddy_reload || ! wait_health; then
     cp "$old" "$CADDY_IMPORT"; set_config_value "$CONFIG_FILE" DXDY_ADMIN_DOMAIN "$DXDY_ADMIN_DOMAIN"; set_config_value "$CONFIG_FILE" DXDY_SUBSCRIPTION_DOMAIN "$DXDY_SUBSCRIPTION_DOMAIN"
     set_config_value "$ENV_FILE" ADMIN_BASE_URL "https://$DXDY_ADMIN_DOMAIN"; set_config_value "$ENV_FILE" SUBSCRIPTION_BASE_URL "https://$DXDY_SUBSCRIPTION_DOMAIN"
-    printf '%s' "https://$DXDY_SUBSCRIPTION_DOMAIN" | run_cli domain-cli.mjs set-subscription || true; systemctl restart "$SERVICE" || true; systemctl reload caddy.service || true
+    printf '%s' "https://$DXDY_SUBSCRIPTION_DOMAIN" | run_cli domain-cli.mjs set-subscription || true; systemctl restart "$SERVICE" || true; caddy_reload || true
     die "Domain change failed; previous configuration restored."
   fi
   printf 'Domains updated. Admin: https://%s Subscription: https://%s\n' "$admin" "$subscription"
@@ -274,6 +420,7 @@ cmd_doctor() {
   if [[ -d /run/systemd/system || "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 ]]; then check_line PASS "systemd"; else check_line FAIL "systemd"; fi
   if [[ "$(service_state "$SERVICE")" == active ]]; then check_line PASS "$SERVICE active"; else check_line FAIL "$SERVICE inactive"; fi
   if [[ "$(service_state caddy.service)" == active ]]; then check_line PASS "Caddy active"; else check_line WARN "Caddy inactive"; fi
+  if valid_caddy_configuration "$CADDY_MAIN" "$CADDY_ADAPTER" "$CADDY_BINARY" || discover_caddy_configuration; then check_line PASS "Caddy main configuration discovery"; else check_line FAIL "Caddy main configuration discovery"; fi
   if health >/dev/null 2>&1; then check_line PASS "Application health"; else check_line FAIL "Application health"; fi
   if run_cli database.mjs check >/dev/null 2>&1; then check_line PASS "Database integrity and foreign keys"; else check_line FAIL "Database integrity and foreign keys"; fi
   if [[ -L "$CURRENT_LINK" && -f "$CURRENT_LINK/RELEASE.json" ]]; then check_line PASS "Current release symlink and manifest"; else check_line FAIL "Current release layout"; fi
@@ -433,6 +580,9 @@ cmd_update() {
   require_root; load_instance
   exec 9>"$CONFIG_DIR/update.lock"; flock -n 9 || die "Another update is already running."
   if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && -n "${DXDY_TEST_LOCK_HOLD_SECONDS:-}" ]]; then sleep "$DXDY_TEST_LOCK_HOLD_SECONDS"; fi
+  ensure_caddy_configuration
+  [[ -f "$CADDY_IMPORT" && -r "$CADDY_IMPORT" ]] || die "The managed Caddy fragment is missing or unreadable; no runtime, database, or Caddy change was made."
+  validate_caddy_candidate "$CADDY_IMPORT" || die "The active Caddy main configuration does not safely import the managed fragment; no runtime, database, or Caddy change was made."
   recover_interrupted_update
   load_instance
   [[ "${UPDATE_RECOVERY_ACTION:-none}" != rollback ]] || return 0
@@ -548,5 +698,5 @@ menu() {
 
 case "${1:-}" in
   "") menu ;; status) cmd_status ;; start) require_root; cmd_start ;; stop) require_root; cmd_stop ;; restart) require_root; cmd_restart ;; update) cmd_update ;;
-  admin) require_root; shift; cmd_admin "$@" ;; domain) shift; cmd_domain "$@" ;; backup) require_root; shift; cmd_backup "$@" ;; migrate) require_root; cmd_backup full ;; restore) shift; cmd_restore "$@" ;; logs) shift; cmd_logs "$@" ;; doctor) cmd_doctor ;; cleanup-legacy) cmd_cleanup_legacy ;; version) printf 'dx-dy %s\n' "$DXDY_MANAGER_VERSION" ;; uninstall) cmd_uninstall ;; -h|--help|help) show_help ;; *) die "Unknown command. Run dx-dy --help." ;;
+  admin) require_root; shift; cmd_admin "$@" ;; domain) shift; cmd_domain "$@" ;; backup) require_root; shift; cmd_backup "$@" ;; migrate) require_root; cmd_backup full ;; restore) shift; cmd_restore "$@" ;; logs) shift; cmd_logs "$@" ;; doctor) cmd_doctor ;; caddy-discover) cmd_caddy_discover ;; cleanup-legacy) cmd_cleanup_legacy ;; version) printf 'dx-dy %s\n' "$DXDY_MANAGER_VERSION" ;; uninstall) cmd_uninstall ;; -h|--help|help) show_help ;; *) die "Unknown command. Run dx-dy --help." ;;
 esac
