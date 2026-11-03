@@ -62,7 +62,7 @@ describe("API and domain regression", () => {
       name: "dx-dy",
       status: "ok",
       database: "ok",
-      version: "0.3.5",
+      version: "0.3.6",
     });
   });
   it("serves admin SPA deep links after API/public routes without swallowing them", async () => {

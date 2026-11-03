@@ -7,27 +7,30 @@
     "Segoe UI",
     "Microsoft Yahei",
     sans-serif;
-  color: #263442;
-  background: #f5f7fa;
+  color: #24324a;
+  background: #f5f8fc;
   font-size: 14px;
-  --bg: #f5f7fa;
+  --bg: #f5f8fc;
   --surface: #fff;
-  --text: #263442;
-  --muted: #83909d;
-  --line: #e8edf2;
-  --accent: #078b82;
-  --accent-soft: #e8f6f3;
-  --shadow: 0 20px 70px #132e3f20;
+  --text: #24324a;
+  --muted: #5f6f85;
+  --line: #dfe7f1;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #eaf2ff;
+  --shadow: 0 20px 70px #2446741a;
 }
 :root.dark {
   color-scheme: dark;
-  --bg: #11171e;
-  --surface: #19222d;
-  --text: #dce5ed;
-  --muted: #95a3b2;
-  --line: #2b3746;
-  --accent: #48cabb;
-  --accent-soft: #203e3c;
+  --bg: #101722;
+  --surface: #182334;
+  --text: #e6edf7;
+  --muted: #94a3b8;
+  --line: #2a3a50;
+  --accent: #60a5fa;
+  --accent-hover: #3b82f6;
+  --accent-soft: #1e3352;
+  --shadow: 0 20px 70px #050b142e;
   background: var(--bg);
   color: var(--text);
 }
@@ -133,7 +136,8 @@ strong {
   color: white;
 }
 .primary:hover {
-  background: #07776f;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 .danger {
   background: #c94a52;
@@ -314,7 +318,7 @@ main {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 13px;
-  box-shadow: 0 2px 4px #11223302;
+  box-shadow: 0 2px 4px #24467408;
 }
 .stats {
   display: grid;
@@ -879,7 +883,7 @@ footer {
   font-size: 12px;
 }
 .overlay {
-  background: #0a182a66;
+  background: #0f1f3566;
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -1717,7 +1721,7 @@ pre {
   height: 13px;
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 3px #10203028;
+  box-shadow: 0 1px 3px #0f2a4a26;
   transition: transform 0.15s;
 }
 .switch-control.is-on {
@@ -1745,7 +1749,7 @@ pre {
 .segmented button.active {
   background: var(--surface);
   color: var(--accent);
-  box-shadow: 0 1px 3px #10203012;
+  box-shadow: 0 1px 3px #0f2a4a14;
 }
 .subscription-detail-head {
   margin: 18px 0;

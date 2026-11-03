@@ -116,7 +116,7 @@ describe("installer query options", () => {
     const result = queryInstaller("--version", true);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe("dx-dy installer 0.3.5\n");
+    expect(result.stdout).toBe("dx-dy installer 0.3.6\n");
   });
 
   it("rejects an unknown option before preflight or mutation", () => {
@@ -134,9 +134,9 @@ describe("release version identity", () => {
       ["scripts/version-identity-check.mjs"],
       { encoding: "utf8" },
     );
-    expect(output).toContain("VERSION-ID-001 source/package: 0.3.5");
-    expect(output).toContain("VERSION-ID-002 manager: 0.3.5");
-    expect(output).toContain("VERSION-ID-003 installer: 0.3.5");
+    expect(output).toContain("VERSION-ID-001 source/package: 0.3.6");
+    expect(output).toContain("VERSION-ID-002 manager: 0.3.6");
+    expect(output).toContain("VERSION-ID-003 installer: 0.3.6");
   });
 });
 
@@ -241,7 +241,7 @@ fi
 });
 
 describe("release ref policy", () => {
-  const version = "0.3.5";
+  const version = "0.3.6";
 
   it("accepts a master branch push", () => {
     expect(
@@ -279,13 +279,13 @@ describe("release ref policy", () => {
       {
         GITHUB_ACTIONS: "true",
         GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/tags/v0.3.5",
+        GITHUB_REF: "refs/tags/v0.3.6",
         GITHUB_REF_TYPE: "tag",
-        GITHUB_REF_NAME: "v0.3.5",
+        GITHUB_REF_NAME: "v0.3.6",
       },
       version,
     );
-    expect(policy).toEqual({ kind: "tag", tag: "v0.3.5" });
+    expect(policy).toEqual({ kind: "tag", tag: "v0.3.6" });
     expect(() =>
       validateTagProvenance({
         head: "abc",
@@ -296,7 +296,7 @@ describe("release ref policy", () => {
     ).not.toThrow();
   });
 
-  it.each(["v0.3.5-rc.1", "release-0.3.5", "v0.2"])(
+  it.each(["v0.3.6-rc.1", "release-0.3.6", "v0.2"])(
     "rejects invalid release tag %s",
     (tag) => {
       expect(() =>

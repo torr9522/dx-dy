@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.6] - 2026-11-03
+
+- Replace the green brand palette with a light blue visual theme for the
+  Dashboard, navigation, Node Library, Groups, Subscriptions, dialogs, forms,
+  controls and responsive navigation.
+- Preserve the existing page structure, dimensions, spacing, typography,
+  responsive breakpoints, routing, authentication and business behavior.
+- Keep semantic success, warning and error colors distinct while updating the
+  shared light/dark theme tokens, focus states, borders and shadows.
+- Keep schema 004, migrations, APIs, renderer output, tokens, URLs, backup
+  format and deployment architecture unchanged.
+
 ## [0.3.5] - 2026-10-27
 
 - Add React Router browser-history navigation for Dashboard, Node Library,

@@ -1,11 +1,9 @@
-# dx-dy 0.3.5
+# dx-dy 0.3.6
 
-Version 0.3.5 adds real browser routing for the Dashboard, Node Library, Node
-Groups, Subscription list/details and Settings. Stable internal IDs support
-refreshable deep links, browser history, copied URLs and login return-to without
-exposing Subscription Tokens. The 0.3.3 atomic auth/data bootstrap remains the
-protected-app gate. Version 0.3.4 was skipped by explicit versioning decision.
-Schema 004, renderers, backups and persisted data are unchanged.
+Version 0.3.6 replaces the previous green brand palette with a light blue theme
+while preserving the v0.3.5 page structure, browser routing, component layout,
+typography and interactions. Light, dark and system theme selection remains
+available. Schema 004, APIs, renderers, backups and persisted data are unchanged.
 
 Global Node deletion detaches its subscription references atomically,
 preserving subscriptions, tokens, Local Nodes and the remaining saved order.
@@ -62,8 +60,8 @@ bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/ins
 安装器会安装宿主 Caddy，询问管理域名、可选独立订阅域名和管理员凭据，然后创建：
 
 ```text
-/opt/dx-dy/releases/0.3.5/
-/opt/dx-dy/current -> releases/0.3.5
+/opt/dx-dy/releases/0.3.6/
+/opt/dx-dy/current -> releases/0.3.6
 /etc/dx-dy/
 /var/lib/dx-dy/dx-dy.db
 /var/backups/dx-dy/
