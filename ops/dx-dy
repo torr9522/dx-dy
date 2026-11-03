@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DXDY_MANAGER_VERSION="0.3.7"
+readonly DXDY_MANAGER_VERSION="0.3.8"
 CONFIG_DIR="${DXDY_CONFIG_DIR:-/etc/dx-dy}"
 CONFIG_FILE="$CONFIG_DIR/install.conf"
 MANAGER_PATH="${DXDY_MANAGER_PATH:-/usr/local/bin/dx-dy}"
@@ -23,7 +23,7 @@ load_instance() {
   [[ -f "$CONFIG_FILE" ]] || die "dx-dy native installation not found."
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
-  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.7 installer to migrate."
+  [[ "${DXDY_RELEASE_MODEL:-}" == native-systemd ]] || die "Legacy Docker install detected. Run the 0.3.8 installer to migrate."
   : "${DXDY_INSTALL_ROOT:?}" "${DXDY_DATA_DIR:?}" "${DXDY_BACKUP_DIR:?}" "${DXDY_INTERNAL_PORT:?}"
   ENV_FILE="$CONFIG_DIR/dx-dy.env"
   CURRENT_LINK="$DXDY_INSTALL_ROOT/current"
@@ -332,30 +332,35 @@ restore_caddy_fragment() {
   install -m 0644 "$backup" "$staged" || return 1
   mv -Tf "$staged" "$CADDY_IMPORT" || return 1
   caddy_validate "$CADDY_MAIN" "$CADDY_ADAPTER" >/dev/null || return 1
-  caddy_reload || return 1
-  wait_caddy_health
+  caddy_reload
 }
 reconcile_caddy() {
-  local release="$1" backup="$2" backup_fingerprint="$3" staging candidate staged changed=1
+  local old_release="$1" new_release="$2" backup="$3" backup_fingerprint="$4" staging previous candidate staged changed=1
   staging="$(mktemp -d)" || return 1
   TEMP_DIRS+=("$staging")
+  previous="$staging/previous.caddy"
   candidate="$staging/dx-dy.caddy"
-  render_caddy_from_release "$release" "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN" "$candidate" || return 1
+  render_caddy_from_release "$old_release" "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN" "$previous" || return 1
+  render_caddy_from_release "$new_release" "$DXDY_ADMIN_DOMAIN" "$DXDY_SUBSCRIPTION_DOMAIN" "$candidate" || return 1
   validate_caddy_candidate "$candidate" || return 1
   if cmp -s "$candidate" "$CADDY_IMPORT"; then
     changed=0
     wait_caddy_health || return 1
     printf 'Caddy configuration already current and healthy.\n'
     return 0
-  else
-    staged="${CADDY_IMPORT}.next.$$"
-    install -m 0644 "$candidate" "$staged" || return 1
-    if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "${DXDY_TEST_INTERRUPT_BEFORE_CADDY_RENAME:-0}" == 1 ]]; then
-      rm -f "$staged"
-      return 1
-    fi
-    mv -Tf "$staged" "$CADDY_IMPORT" || return 1
   fi
+  if ! cmp -s "$previous" "$CADDY_IMPORT"; then
+    wait_caddy_health || return 1
+    printf 'Preserved customized Caddy fragment; full configuration and public health are valid.\n'
+    return 0
+  fi
+  staged="${CADDY_IMPORT}.next.$$"
+  install -m 0644 "$candidate" "$staged" || return 1
+  if [[ "${DXDY_ALLOW_TEST_PATHS:-0}" == 1 && "${DXDY_TEST_INTERRUPT_BEFORE_CADDY_RENAME:-0}" == 1 ]]; then
+    rm -f "$staged"
+    return 1
+  fi
+  mv -Tf "$staged" "$CADDY_IMPORT" || return 1
   if ! caddy_reload || ! wait_caddy_health; then
     if [[ $changed -eq 1 ]]; then
       restore_caddy_fragment "$backup" "$backup_fingerprint" || die "ROLLBACK: FAIL; previous Caddy configuration could not be restored."
@@ -516,7 +521,7 @@ recover_interrupted_update() {
       caddy_backup="$(backup_caddy_fragment)" || die "Interrupted update Caddy backup failed."
       caddy_fingerprint="$(sha256sum "$caddy_backup" | cut -d' ' -f1)"
     fi
-    if reconcile_caddy "$new_release" "$caddy_backup" "$caddy_fingerprint"; then
+    if reconcile_caddy "$old_release" "$new_release" "$caddy_backup" "$caddy_fingerprint"; then
       rm -f "$UPDATE_STATE_FILE"; warn "Finalized an interrupted update after verified application and Caddy health."; return 0
     fi
   fi
@@ -527,7 +532,7 @@ recover_interrupted_update() {
   install -m 0644 "$old_release/dx-dy.service" "$SYSTEMD_UNIT_PATH"; systemctl daemon-reload
   if ! restore_update_backup "$backup" "$backup_fingerprint"; then die "ROLLBACK: FAIL; interrupted update database recovery failed. Application remains stopped."; fi
   if [[ -n "$caddy_backup" ]] && ! restore_caddy_fragment "$caddy_backup" "$caddy_fingerprint"; then die "ROLLBACK: FAIL; interrupted update Caddy recovery failed. Application remains stopped."; fi
-  if ! systemctl start "$SERVICE" || ! wait_health; then die "ROLLBACK: FAIL; interrupted update restored data but the previous application is not healthy."; fi
+  if ! systemctl start "$SERVICE" || ! wait_health || ! wait_caddy_health; then die "ROLLBACK: FAIL; interrupted update restored data but the previous application is not healthy through Caddy."; fi
   rm -f "$UPDATE_STATE_FILE"; UPDATE_RECOVERY_ACTION=rollback
   warn "ROLLBACK: PASS; interrupted update restored the previous release and database. Run update again to retry."
 }
@@ -618,7 +623,7 @@ cmd_update() {
   write_update_state switched "$old_release" "$new_release" "$backup" "$backup_fingerprint" "$old_version" "$latest" "$old_previous" "$caddy_backup" "$caddy_fingerprint"
   systemctl start "$SERVICE" || result=$?
   [[ $result -eq 0 ]] && wait_health || result=1
-  [[ $result -eq 0 ]] && reconcile_caddy "$new_release" "$caddy_backup" "$caddy_fingerprint" || result=1
+  [[ $result -eq 0 ]] && reconcile_caddy "$old_release" "$new_release" "$caddy_backup" "$caddy_fingerprint" || result=1
   if [[ $result -ne 0 ]]; then
     systemctl stop "$SERVICE" || true; ln -sfn "$old_release" "$DXDY_INSTALL_ROOT/current.next"; mv -Tf "$DXDY_INSTALL_ROOT/current.next" "$CURRENT_LINK"
     set_config_value "$CONFIG_FILE" DXDY_VERSION "$old_version"; set_config_value "$CONFIG_FILE" DXDY_PREVIOUS_RELEASE "$old_previous"
@@ -629,8 +634,8 @@ cmd_update() {
     if ! restore_caddy_fragment "$caddy_backup" "$caddy_fingerprint"; then
       die "ROLLBACK: FAIL; database recovered but previous Caddy configuration could not be restored. Application remains stopped."
     fi
-    if ! systemctl start "$SERVICE" || ! wait_health; then
-      die "ROLLBACK: FAIL; previous database restored but application is not healthy."
+    if ! systemctl start "$SERVICE" || ! wait_health || ! wait_caddy_health; then
+      die "ROLLBACK: FAIL; previous database restored but application is not healthy through Caddy."
     fi
     rm -f "$UPDATE_STATE_FILE"
     printf 'ROLLBACK: PASS\n'

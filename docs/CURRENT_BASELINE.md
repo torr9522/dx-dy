@@ -2,10 +2,11 @@
 
 ## Release Boundary
 
-The immutable public baseline is v0.3.6 at commit
-`05a8cc83f824c05035a93640d584382b3c21f917`. Version 0.3.7 retains the v0.3.6
-light blue theme and dependency security fixes while correcting native Manager
-discovery of the active Caddy main configuration. It does not change the v0.3.5
+The immutable public baseline is v0.3.7 at commit
+`5ed5558602b0dced96928075f8159bf22424a905`. Version 0.3.8 retains the v0.3.7
+Caddy discovery fix, v0.3.6 light blue theme and dependency security fixes while
+preserving customized Caddy TLS policy and correcting rollback health ordering.
+It does not change the v0.3.5
 SPA navigation, the 0.3.3 login/bootstrap false-empty fix or the database
 schema. Version 0.3.4 was skipped by explicit user decision.
 Independent Node Groups remain the sole user-visible Global Node ownership and
@@ -13,15 +14,15 @@ organization model. Canonical Generic subscriptions retain their v0.3.0 bytes.
 
 ## Release Identity
 
-- Current source version: **0.3.7**
-- Previous stable: **v0.3.6**
+- Current source version: **0.3.8**
+- Previous stable: **v0.3.7**
 - Brand/manager: **dx-dy**
 - Release model: direct annotated unsigned `vX.Y.Z` tags
 - Runtime model: **native-systemd**
 - Bundled Node runtime: **26.10.0**
 - Database schema: **004**
 
-Public tags are immutable. Version 0.3.7 does not rewrite migrations 001-004,
+Public tags are immutable. Version 0.3.8 does not rewrite migrations 001-004,
 drop a table, or transform existing business data.
 
 ## Persistence And Invariants
@@ -73,6 +74,6 @@ rollback, and runs private known-identity scanning when configured.
 
 ## Version Boundary
 
-The v0.3.5 and v0.3.6 source, tags and Releases remain immutable. The approved
-next source version is v0.3.7. No v0.3.7 tag or Release exists at this
+The v0.3.5, v0.3.6 and v0.3.7 source, tags and Releases remain immutable. The
+current development source is v0.3.8. No v0.3.8 tag or Release exists at this
 development baseline.

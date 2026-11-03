@@ -1,8 +1,8 @@
-# dx-dy 0.3.7
+# dx-dy 0.3.8
 
-Version 0.3.7 retains the 0.3.6 light blue theme and fixes native Manager
-Caddy main-configuration discovery for installations whose managed dx-dy
-fragment is in a custom import directory. Version 0.3.6 replaced the previous
+Version 0.3.8 retains the 0.3.7 Caddy main-configuration discovery fix, preserves
+customized site fragments during updates, and verifies rollback health only
+after the restored application is running. Version 0.3.6 replaced the previous
 green brand palette with a light blue theme
 while preserving the v0.3.5 page structure, browser routing, component layout,
 typography and interactions. Light, dark and system theme selection remains
@@ -63,8 +63,8 @@ bash <(curl -fsSL https://github.com/torr9522/dx-dy/releases/latest/download/ins
 安装器会安装宿主 Caddy，询问管理域名、可选独立订阅域名和管理员凭据，然后创建：
 
 ```text
-/opt/dx-dy/releases/0.3.7/
-/opt/dx-dy/current -> releases/0.3.7
+/opt/dx-dy/releases/0.3.8/
+/opt/dx-dy/current -> releases/0.3.8
 /etc/dx-dy/
 /var/lib/dx-dy/dx-dy.db
 /var/backups/dx-dy/

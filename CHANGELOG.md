@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.8] - 2026-11-03
+
+- Preserve a customized, valid and healthy dx-dy Caddy fragment during runtime
+  updates instead of replacing its TLS and shared-host policy with a canonical
+  release template.
+- Continue replacing byte-identical release-managed fragments atomically, while
+  skipping Caddy reload when either the current template or a customized
+  fragment is already compatible with the new runtime.
+- Restore and reload the previous fragment before starting a rolled-back
+  application, then verify internal and public health only after that service is
+  running.
+- Add regression coverage for global `auto_https off`/custom TLS preservation
+  and for rollback public health while the application is stopped.
+- Keep schema 004, the v0.3.6 light blue theme, qs 6.16.1, minimatch 11.0.1 and
+  all subscription and business-data formats unchanged.
+
 ## [0.3.7] - 2026-11-03
 
 - Discover and persist the active Caddy main configuration from the running

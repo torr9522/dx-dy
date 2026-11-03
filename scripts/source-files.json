@@ -70,6 +70,7 @@
   "docs/research/v0.2.9/RENDERER_FAMILIES.md",
   "docs/research/v0.3.1/CLASH_META_MIHOMO_AUDIT.md",
   "docs/research/v0.3.7/CADDY_CONFIG_DISCOVERY.md",
+  "docs/research/v0.3.8/CADDY_RECONCILE_ROLLBACK.md",
   "eslint.config.mjs",
   "install.sh",
   "migrations/001_initial.sql",
