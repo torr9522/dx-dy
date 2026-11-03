@@ -132,6 +132,7 @@
   "tests/node-groups.test.ts",
   "tests/ops.test.ts",
   "tests/persistence.test.ts",
+  "tests/qs-security.test.ts",
   "tests/release-hygiene.test.ts",
   "tests/theme.test.ts",
   "tsconfig.json",

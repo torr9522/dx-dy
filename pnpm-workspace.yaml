@@ -2,6 +2,7 @@ packages:
   - "."
 overrides:
   body-parser: 2.4.0
+  qs: 6.16.1
 allowBuilds:
   argon2: true
   esbuild: true
